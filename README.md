@@ -1,29 +1,104 @@
-# Hermes OS
+﻿# Hermes OS
 
-> An architecture-first operating system for AI-enabled businesses.
 
----
+Hermes OS is an AI-first operating system for building, operating, and scaling digital businesses.
 
-## Overview
-
-Hermes OS defines the shared systems, knowledge and operating practices that enable people and AI agents to build and run durable digital businesses.
-
-It exists to turn fragmented tools, processes and information into clear, connected and reusable operating capabilities.
-
-Hermes OS is part of the AVANZIA ecosystem. AVANZIA provides the venture and brand context; Hermes OS provides the operational foundation.
 
 ---
 
-## Documentation
 
-- [Vision](docs/01-vision.md)
-- [Architecture](docs/02-architecture.md)
-- [Core Principles](docs/03-core-principles.md)
-- [System Map](docs/04-system-map.md)
-- [Roadmap](docs/05-roadmap.md)
+## Repository Structure
+
+
+```text
+docs/         Architecture and design documentation
+specs/        Business object specifications
+contracts/    JSON Schema contracts
+api/          OpenAPI definitions
+examples/     Canonical example payloads
+tests/        Contract validation
+.github/      GitHub Actions workflows
+```
+
 
 ---
 
-## Status
 
-Foundation documentation in progress.
+## Quick Start
+
+
+### Install dependencies
+
+
+```bash
+pip install jsonschema
+```
+
+
+### Validate contracts
+
+
+```bash
+make validate
+```
+
+
+### Run tests
+
+
+```bash
+make test
+```
+
+
+---
+
+
+## Core Principles
+
+
+- Contracts before code
+- Documentation as architecture
+- Automation by default
+- Version everything
+- Validate continuously
+
+
+---
+
+
+## Development Workflow
+
+
+1. Update specifications in `specs/`
+2. Update JSON Schemas in `contracts/`
+3. Update API definitions in `api/`
+4. Add or update examples in `examples/`
+5. Run validation:
+
+
+```bash
+make validate
+```
+
+
+6. Commit changes
+7. Push to GitHub
+
+
+---
+
+
+## Continuous Integration
+
+
+Every push and pull request automatically validates example payloads against the JSON Schemas using GitHub Actions.
+
+
+---
+
+
+## License
+
+
+Private repository.

@@ -1,0 +1,54 @@
+openapi: 3.1.0
+info:
+  title: Hermes OS API
+  version: 0.1.0
+  description: Initial OpenAPI specification for Hermes OS.
+
+servers:
+  - url: https://api.hermes-os.dev/v1
+
+paths:
+  /businesses:
+    get:
+      summary: List businesses
+      operationId: listBusinesses
+      responses:
+        '200':
+          description: Successful response
+
+  /businesses/{businessId}:
+    get:
+      summary: Get a business
+      operationId: getBusiness
+      parameters:
+        - name: businessId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+
+components:
+  schemas:
+    Business:
+      $ref: "../contracts/business.schema.json"
+    Strategy:
+      $ref: "../contracts/strategy.schema.json"
+    Goal:
+      $ref: "../contracts/goal.schema.json"
+    KPI:
+      $ref: "../contracts/kpi.schema.json"
+    Decision:
+      $ref: "../contracts/decision.schema.json"
+    Bottleneck:
+      $ref: "../contracts/bottleneck.schema.json"
+    Opportunity:
+      $ref: "../contracts/opportunity.schema.json"
+    Experiment:
+      $ref: "../contracts/experiment.schema.json"
+    Lesson:
+      $ref: "../contracts/lesson.schema.json"
+    ExecutiveBrief:
+      $ref: "../contracts/executive-brief.schema.json"

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-os.dev/contracts/decision.schema.json",
+  "title": "Decision",
+  "description": "Canonical Hermes OS Decision object.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision_id",
+    "business_id",
+    "title",
+    "context",
+    "rationale",
+    "status",
+    "decision_date"
+  ],
+  "properties": {
+    "decision_id": {
+      "type": "string"
+    },
+    "business_id": {
+      "type": "string"
+    },
+    "strategy_id": {
+      "type": "string"
+    },
+    "goal_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "context": {
+      "type": "string"
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "owner": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "proposed",
+        "approved",
+        "implemented",
+        "reversed"
+      ]
+    },
+    "decision_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

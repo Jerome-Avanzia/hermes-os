@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-os.dev/contracts/lesson.schema.json",
+  "title": "Lesson",
+  "description": "Canonical Hermes OS Lesson object.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "lesson_id",
+    "business_id",
+    "title",
+    "summary",
+    "source",
+    "recommendation",
+    "date"
+  ],
+  "properties": {
+    "lesson_id": {
+      "type": "string"
+    },
+    "business_id": {
+      "type": "string"
+    },
+    "decision_id": {
+      "type": "string"
+    },
+    "experiment_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "decision",
+        "experiment",
+        "project",
+        "incident",
+        "review"
+      ]
+    },
+    "recommendation": {
+      "type": "string"
+    },
+    "owner": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

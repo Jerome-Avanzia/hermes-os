@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-os.dev/contracts/executive-brief.schema.json",
+  "title": "ExecutiveBrief",
+  "description": "Canonical Hermes OS Executive Brief object.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "brief_id",
+    "business_id",
+    "reporting_period",
+    "generated_at",
+    "summary",
+    "priorities",
+    "recommendations",
+    "status"
+  ],
+  "properties": {
+    "brief_id": {
+      "type": "string"
+    },
+    "business_id": {
+      "type": "string"
+    },
+    "reporting_period": {
+      "type": "string",
+      "enum": [
+        "daily",
+        "weekly",
+        "monthly",
+        "quarterly",
+        "annual"
+      ]
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "priorities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "published",
+        "archived"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
