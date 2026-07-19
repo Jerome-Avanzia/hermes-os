@@ -1,33 +1,96 @@
-# Architecture
+---
+document_id: DOC-0003
+title: Hermes OS Architecture
+version: 0.1.0
+status: Draft
+maturity: D1
+owner: AVANZIA
+document_type: Architecture
+authority_level: 2
+classification: Internal
+created: 2026-07-18
+last_updated: 2026-07-18
+related:
+  - 00-operating-model.md
+  - 01-vision.md
+tags:
+  - architecture
+  - hermes
+---
 
-Version: 1.0
+# Hermes OS Architecture
 
-Status: Draft
+> High-level architecture of the AVANZIA operating system.
 
-Owner: AVANZIA
+## 1. Architectural Layers
 
-Maintainer: Jerome Cornet
+### Layer 1 – Governance
+Defines how the ecosystem is managed:
+- Operating Model
+- Standards
+- ADRs
+- Templates
+
+### Layer 2 – Shared Platform
+Reusable capabilities shared by all ventures:
+- Identity
+- Documentation
+- Knowledge Base
+- Automation
+- Security
+- Monitoring
+
+### Layer 3 – AI Services
+Specialized AI agents providing:
+- Research
+- Development
+- Marketing
+- Operations
+- Documentation
+
+### Layer 4 – Business Ventures
+Independent businesses built on Hermes OS, for example:
+- AKosmicAnimals
+- AVANZIA
+- CheerLovedOnes
+- Serelo
+- Future ventures
 
 ---
 
-## High-Level Architecture
+## 2. Design Principles
 
-Hermes OS is organized as connected domains that share identity, knowledge, governance and automation capabilities.
-
-## Main Components
-
-- Identity and access establish trusted actors and permissions.
-- Memory and knowledge preserve context and reusable information.
-- AI agents, skills and SOPs perform governed work.
-- Businesses and projects provide operational context and outcomes.
-- Integrations and automations connect external systems and execute workflows.
-
-## Relationships
-
-Identity governs access to all domains. Memory and knowledge provide context to AI agents. Skills and SOPs define how work is performed. Businesses and projects direct that work, while integrations and automations connect it to external tools.
+- Modular by default
+- Reusable components
+- Documentation before implementation
+- Security by design
+- Clear ownership
+- Low coupling, high cohesion
 
 ---
 
-## Document Status
+## 3. Repository Strategy
 
-Draft
+Each repository has a single responsibility.
+
+Hermes OS provides the shared operating framework while business repositories contain business-specific implementations.
+
+---
+
+## 4. Future Architecture
+
+Future versions of this document will define:
+
+- Repository map
+- Agent registry
+- Shared services
+- Infrastructure
+- Data flows
+- Security zones
+- Integration patterns
+
+---
+
+## 5. Success Criteria
+
+The architecture is successful when new ventures can be launched by reusing Hermes OS components instead of rebuilding common capabilities.
