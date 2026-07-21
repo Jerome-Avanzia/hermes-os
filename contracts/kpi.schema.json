@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-os.dev/contracts/kpi.schema.json",
+  "title": "KPI",
+  "description": "Canonical Hermes OS KPI object.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kpi_id",
+    "business_id",
+    "goal_id",
+    "name",
+    "unit",
+    "current_value",
+    "target_value",
+    "status"
+  ],
+  "properties": {
+    "kpi_id": {
+      "type": "string"
+    },
+    "business_id": {
+      "type": "string"
+    },
+    "goal_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "unit": {
+      "type": "string"
+    },
+    "current_value": {
+      "type": "number"
+    },
+    "target_value": {
+      "type": "number"
+    },
+    "frequency": {
+      "type": "string",
+      "enum": [
+        "daily",
+        "weekly",
+        "monthly",
+        "quarterly",
+        "annually"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "on_track",
+        "at_risk",
+        "off_track"
+      ]
+    },
+    "owner": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

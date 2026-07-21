@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-os.dev/contracts/strategy.schema.json",
+  "title": "Strategy",
+  "description": "Canonical Hermes OS Strategy object.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "strategy_id",
+    "business_id",
+    "title",
+    "objective",
+    "status"
+  ],
+  "properties": {
+    "strategy_id": {
+      "type": "string"
+    },
+    "business_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "objective": {
+      "type": "string"
+    },
+    "owner": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "completed",
+        "retired"
+      ]
+    },
+    "review_frequency": {
+      "type": "string",
+      "enum": [
+        "monthly",
+        "quarterly",
+        "annually"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

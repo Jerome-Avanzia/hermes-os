@@ -1,11 +1,15 @@
-# Runtime
-runtime/
-data/
-logs/
+# macOS
+.DS_Store
 
-# Secrets
+# Editors
+.vscode/settings.json
+
+# Environment
 .env
 .env.*
+
+# Logs
+*.log
 
 # Python
 __pycache__/
@@ -14,6 +18,6 @@ __pycache__/
 # Node
 node_modules/
 
-# macOS
-.DS_Store
-import/
+# Temporary
+*.tmp
+*.bak
