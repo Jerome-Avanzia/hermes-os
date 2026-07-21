@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+VERSION=$(cat /opt/hermes/VERSION)
+
+echo "======================================"
+echo "Hermes AI Operating Harness"
+echo "Version : ${VERSION}"
+echo "Company : AVANZIA"
+echo "Root    : /opt/hermes"
+echo "======================================"

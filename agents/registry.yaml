@@ -1,0 +1,28 @@
+version: 1
+
+agents:
+
+  infrastructure:
+    description: Infrastructure management
+    enabled: true
+    skills:
+      - agent-fleet-manager
+    provider: openrouter
+
+  github:
+    description: GitHub repository management
+    enabled: true
+    skills: []
+    provider: openrouter
+
+  n8n:
+    description: Workflow automation
+    enabled: true
+    skills: []
+    provider: openrouter
+
+  nocodb:
+    description: Database management
+    enabled: true
+    skills: []
+    provider: openrouter

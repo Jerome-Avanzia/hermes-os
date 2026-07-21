@@ -1,0 +1,19 @@
+# Runtime
+runtime/
+data/
+logs/
+
+# Secrets
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# macOS
+.DS_Store
+import/

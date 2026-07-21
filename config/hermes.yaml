@@ -1,0 +1,39 @@
+# ============================================================================
+# Hermes Configuration
+# AI Operating Harness for AVANZIA
+# Version: 0.1.0
+# ============================================================================
+
+system:
+  name: Hermes
+  company: AVANZIA
+  environment: production
+  timezone: Europe/Paris
+
+paths:
+  root: /opt/hermes
+  skills: /opt/hermes/skills
+  agents: /opt/hermes/agents
+  prompts: /opt/hermes/prompts
+  workspace: /opt/hermes/workspace
+  logs: /opt/hermes/logs
+  data: /opt/hermes/data
+
+ai:
+  default_provider: openrouter
+  fallback_provider: ollama
+
+providers:
+  openrouter:
+    enabled: false
+    api_key_env: OPENROUTER_API_KEY
+
+  ollama:
+    enabled: false
+    host: http://localhost:11434
+
+logging:
+  level: info
+
+github:
+  organization: Jerome-Avanzia
