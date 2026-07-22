@@ -77,11 +77,11 @@ def test_unknown_task_loads_zero_skills():
 
 
 def test_missing_skill_raises_skill_not_found_error():
-    task = Task(id="t", business="AVANZIA", request="test")
-    project = Project(id="AVANZIA", name="AVANZIA", path="knowledge/AVANZIA")
+    context = _build_context("test")
     execution_plan = ExecutionPlan(
-        task=task,
-        project=project,
+        task=context.task,
+        project=context.project,
+        context=context,
         steps=[ExecutionStep(capability_id="does-not-exist", description="x")],
     )
 

@@ -14,10 +14,32 @@ from hermes.models import (
     Task,
     Workspace,
     WorkspaceContext,
+    WorkspaceSnapshot,
 )
+from hermes.providers.ai_provider import AIProvider
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_ROOT = REPO_ROOT / "skills"
+
+EMPTY_WORKSPACE_SNAPSHOT = WorkspaceSnapshot(root="/tmp/avanzia", files=[])
+
+
+class FakeProvider(AIProvider):
+    def __init__(self, response: str = "Generated proposal text") -> None:
+        self.response = response
+        self.calls: list[dict] = []
+
+    def generate(self, *, task, context, plan, skills, workspace) -> str:
+        self.calls.append(
+            {
+                "task": task,
+                "context": context,
+                "plan": plan,
+                "skills": skills,
+                "workspace": workspace,
+            }
+        )
+        return self.response
 
 
 def _build_context(request: str) -> Context:
@@ -43,11 +65,16 @@ def _build_context(request: str) -> Context:
     )
 
 
-def _execute(request: str) -> tuple[ExecutionResult, ExecutionPlan]:
+def _execute(
+    request: str, provider: AIProvider | None = None
+) -> tuple[ExecutionResult, ExecutionPlan]:
     context = _build_context(request)
     plan = Planner().create(context)
     skills = SkillLoader(skills_root=SKILLS_ROOT).load(plan)
-    return Executor().execute(plan, skills), plan
+    result = Executor().execute(
+        plan, skills, EMPTY_WORKSPACE_SNAPSHOT, provider=provider
+    )
+    return result, plan
 
 
 def test_homepage_task_returns_awaiting_approval():
@@ -87,3 +114,35 @@ def test_timestamps_are_recorded_in_order():
     assert isinstance(result.started_at, datetime)
     assert isinstance(result.finished_at, datetime)
     assert result.finished_at >= result.started_at
+
+
+def test_provider_none_preserves_deterministic_behavior():
+    result, _ = _execute("Refactor the Python backend", provider=None)
+
+    assert result.generated_output is None
+    assert result.status == "awaiting_approval"
+    assert result.completed_steps == ["Python"]
+
+
+def test_provider_is_invoked_when_supplied():
+    fake_provider = FakeProvider()
+
+    result, plan = _execute("Refactor the Python backend", provider=fake_provider)
+
+    assert len(fake_provider.calls) == 1
+    call = fake_provider.calls[0]
+    assert call["task"] is plan.task
+    assert call["context"] is plan.context
+    assert call["plan"] is plan
+    assert call["workspace"] is EMPTY_WORKSPACE_SNAPSHOT
+
+
+def test_generated_output_is_stored_from_provider():
+    fake_provider = FakeProvider(response="A drafted proposal.")
+
+    result, _ = _execute("Refactor the Python backend", provider=fake_provider)
+
+    assert result.generated_output == "A drafted proposal."
+    # Deterministic fields are unaffected by the provider being supplied.
+    assert result.status == "awaiting_approval"
+    assert result.completed_steps == ["Python"]

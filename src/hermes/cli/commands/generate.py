@@ -7,48 +7,36 @@ from hermes.kernel.skill_loader import SkillLoader, SkillNotFoundError
 from hermes.kernel.workspace_engine import WorkspaceNotFoundError
 from hermes.kernel.workspace_reader import WorkspaceReader
 from hermes.models import Task
+from hermes.providers.claude_provider import ClaudeConfigurationError, ClaudeProvider
 from hermes.runtime.context_engine import ContextEngine
 
 
-def execute(
+def generate(
     task: str = typer.Argument(
         ..., help="Free-text task, e.g. 'Update the AVANZIA homepage copy'"
     ),
 ) -> None:
-    """Execute a deterministic plan for a task up to the approval checkpoint."""
-    hermes_task = Task(id="cli-execute", business="", request=task)
+    """Ask Claude to draft a proposal for a task, grounded in Hermes' deterministic context."""
+    hermes_task = Task(id="cli-generate", business="", request=task)
 
     try:
         context = ContextEngine().build(hermes_task)
         workspace_snapshot = WorkspaceReader().read(context.workspace)
         execution_plan = Planner().create(context)
         loaded_skills = SkillLoader().load(execution_plan)
-        result = Executor().execute(execution_plan, loaded_skills, workspace_snapshot)
+        provider = ClaudeProvider()
+        result = Executor().execute(
+            execution_plan, loaded_skills, workspace_snapshot, provider=provider
+        )
     except (
         ProjectNotFoundError,
         ValueError,
         WorkspaceNotFoundError,
         SkillNotFoundError,
+        ClaudeConfigurationError,
         FileNotFoundError,
     ) as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=1) from error
 
-    typer.echo("Project:")
-    typer.echo(result.project.id)
-    typer.echo("")
-    typer.echo("Execution")
-    typer.echo("")
-
-    for title in result.completed_steps:
-        typer.echo(f"✓ {title}")
-        typer.echo("")
-
-    pending_index = len(result.completed_steps)
-    if pending_index < len(execution_plan.steps):
-        pending_step = execution_plan.steps[pending_index]
-        typer.echo(f"⏸ {pending_step.description}")
-        typer.echo("")
-
-    typer.echo("Status:")
-    typer.echo(result.status)
+    typer.echo(result.generated_output or "")

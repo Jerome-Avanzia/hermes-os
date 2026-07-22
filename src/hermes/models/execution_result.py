@@ -13,3 +13,4 @@ class ExecutionResult:
     status: str
     started_at: datetime
     finished_at: datetime
+    generated_output: str | None

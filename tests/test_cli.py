@@ -122,3 +122,15 @@ def test_read_unknown_project_exits_nonzero():
 
     assert result.exit_code == 1
     assert "Error" in result.output
+
+
+def test_generate_missing_api_key_exits_cleanly(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    result = runner.invoke(
+        app, ["generate", "AVANZIA: refactor the Python backend"]
+    )
+
+    assert result.exit_code == 1
+    assert "Error" in result.output
+    assert "ANTHROPIC_API_KEY" in result.output

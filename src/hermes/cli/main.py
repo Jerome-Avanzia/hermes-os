@@ -3,6 +3,7 @@ import typer
 from hermes.cli.commands import (
     context,
     execute,
+    generate,
     inspect,
     knowledge,
     plan,
@@ -21,6 +22,7 @@ app.command(name="plan")(plan.plan)
 app.command(name="skills")(skills.skills)
 app.command(name="execute")(execute.execute)
 app.command(name="read")(read.read)
+app.command(name="generate")(generate.generate)
 
 
 def main() -> None:
