@@ -1,14 +1,10 @@
 import typer
 
-from hermes.kernel.executor import Executor
-from hermes.kernel.planner import Planner
 from hermes.kernel.project_resolver import ProjectNotFoundError
-from hermes.kernel.skill_loader import SkillLoader, SkillNotFoundError
+from hermes.kernel.skill_loader import SkillNotFoundError
 from hermes.kernel.workspace_engine import WorkspaceNotFoundError
-from hermes.kernel.workspace_reader import WorkspaceReader
-from hermes.models import Task
 from hermes.providers.claude_provider import ClaudeConfigurationError, ClaudeProvider
-from hermes.runtime.context_engine import ContextEngine
+from hermes.service import HermesService
 
 
 def generate(
@@ -17,17 +13,9 @@ def generate(
     ),
 ) -> None:
     """Ask Claude to draft a proposal for a task, grounded in Hermes' deterministic context."""
-    hermes_task = Task(id="cli-generate", business="", request=task)
-
     try:
-        context = ContextEngine().build(hermes_task)
-        workspace_snapshot = WorkspaceReader().read(context.workspace)
-        execution_plan = Planner().create(context)
-        loaded_skills = SkillLoader().load(execution_plan)
         provider = ClaudeProvider()
-        result = Executor().execute(
-            execution_plan, loaded_skills, workspace_snapshot, provider=provider
-        )
+        result = HermesService().generate(task, provider=provider)
     except (
         ProjectNotFoundError,
         ValueError,
