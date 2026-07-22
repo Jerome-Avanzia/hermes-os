@@ -2,3 +2,5 @@ projects:
   AVANZIA:
     name: AVANZIA
     path: AVANZIA
+    aliases:
+      - AVZ

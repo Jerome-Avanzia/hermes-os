@@ -8,7 +8,7 @@ def main() -> None:
 
     task = Task(
         id="task-001",
-        business="AKosmicAnimals",
+        business="AVANZIA",
         request="Research Etsy opportunity for Black Cat Shirt",
     )
     print(task)
