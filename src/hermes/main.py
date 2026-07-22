@@ -1,0 +1,33 @@
+from hermes.models import Plan, Task
+from hermes.runtime.context_engine import ContextEngine
+from hermes.runtime.execution_engine import ExecutionEngine
+
+
+def main() -> None:
+    print("Hermes OS starting...")
+
+    task = Task(
+        id="task-001",
+        business="AKosmicAnimals",
+        request="Research Etsy opportunity for Black Cat Shirt",
+    )
+    print(task)
+
+    context = ContextEngine().build(task)
+    print(context)
+
+    plan = Plan(
+        task=task,
+        steps=[
+            "Research Etsy Opportunity",
+            "Generate Design Concepts",
+        ],
+    )
+    print(plan)
+
+    result = ExecutionEngine().execute(plan)
+    print(result)
+
+
+if __name__ == "__main__":
+    main()
