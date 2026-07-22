@@ -9,7 +9,7 @@ from hermes.models import Workspace, WorkspaceContext
 DEFAULT_WORKSPACES_ROOT = Path("workspaces")
 DEFAULT_BASE_DIR = Path(".")
 
-CAPABILITY_FILES = {
+ENVIRONMENT_FILES = {
     "package.json": "node",
     "pyproject.toml": "python",
     "docker-compose.yml": "docker",
@@ -50,7 +50,7 @@ class WorkspaceEngine:
         is_git_repo = exists and (workspace_path / ".git").is_dir()
         branch = self._current_branch(workspace_path) if is_git_repo else None
         is_clean = self._is_clean(workspace_path) if is_git_repo else None
-        capabilities = self._detect_capabilities(workspace_path) if exists else []
+        environment = self._detect_environment(workspace_path) if exists else []
 
         return WorkspaceContext(
             workspace=workspace,
@@ -58,16 +58,16 @@ class WorkspaceEngine:
             is_git_repo=is_git_repo,
             branch=branch,
             is_clean=is_clean,
-            capabilities=capabilities,
+            environment=environment,
         )
 
     @staticmethod
-    def _detect_capabilities(path: Path) -> list[str]:
-        capabilities = []
-        for filename, capability in CAPABILITY_FILES.items():
-            if (path / filename).is_file() and capability not in capabilities:
-                capabilities.append(capability)
-        return capabilities
+    def _detect_environment(path: Path) -> list[str]:
+        environment = []
+        for filename, technology in ENVIRONMENT_FILES.items():
+            if (path / filename).is_file() and technology not in environment:
+                environment.append(technology)
+        return environment
 
     @staticmethod
     def _current_branch(path: Path) -> str | None:

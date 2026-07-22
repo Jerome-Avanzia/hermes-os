@@ -25,4 +25,4 @@ def workspace(
     typer.echo(f"Git repository: {context.is_git_repo}")
     typer.echo(f"Branch: {context.branch or '-'}")
     typer.echo(f"Status: {_format_status(context.is_clean)}")
-    typer.echo(f"Capabilities: {', '.join(context.capabilities) or '-'}")
+    typer.echo(f"Environment: {', '.join(context.environment) or '-'}")

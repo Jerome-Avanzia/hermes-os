@@ -6,12 +6,6 @@ from hermes.models import Task
 from hermes.runtime.context_engine import ContextEngine
 
 
-def _format_status(is_clean: bool | None) -> str:
-    if is_clean is None:
-        return "-"
-    return "clean" if is_clean else "dirty"
-
-
 def context(
     task: str = typer.Argument(
         ..., help="Free-text task, e.g. 'Update the AVANZIA homepage copy'"
@@ -31,13 +25,13 @@ def context(
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=1) from error
 
+    required_capabilities = (
+        ", ".join(capability.id for capability in result.capabilities) or "-"
+    )
+
     typer.echo(f"Task: {task}")
-    typer.echo(f"Project: {result.project.name} ({result.project.id})")
-    typer.echo(f"Knowledge documents: {len(result.knowledge.documents)}")
-    typer.echo(f"Workspace: {result.workspace.workspace.path}")
-    typer.echo(f"Git repository: {result.workspace.is_git_repo}")
-    typer.echo(f"Branch: {result.workspace.branch or '-'}")
-    typer.echo(f"Status: {_format_status(result.workspace.is_clean)}")
-    typer.echo(f"Capabilities: {', '.join(result.workspace.capabilities) or '-'}")
-    skill_ids = [capability.id for capability in result.capabilities]
-    typer.echo(f"Skills: {', '.join(skill_ids) or '-'}")
+    typer.echo(f"Project: {result.project}")
+    typer.echo(f"Knowledge: {result.knowledge}")
+    typer.echo(f"Workspace: {result.workspace}")
+    typer.echo(f"Environment: {', '.join(result.workspace.environment) or '-'}")
+    typer.echo(f"Required Capabilities: {required_capabilities}")

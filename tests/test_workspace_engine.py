@@ -30,13 +30,13 @@ def test_git_detection():
     assert isinstance(context.is_clean, bool)
 
 
-def test_capability_detection():
+def test_environment_detection():
     context = _engine().resolve("AVANZIA")
 
-    assert "node" in context.capabilities
-    assert "npm" in context.capabilities
-    assert "docker" not in context.capabilities
-    assert "pnpm" not in context.capabilities
+    assert "node" in context.environment
+    assert "npm" in context.environment
+    assert "docker" not in context.environment
+    assert "pnpm" not in context.environment
 
 
 def test_unknown_project_raises():

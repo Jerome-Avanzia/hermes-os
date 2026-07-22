@@ -14,3 +14,11 @@ class Context:
     knowledge: KnowledgeContext
     workspace: WorkspaceContext
     capabilities: list[Capability]
+
+    def __str__(self) -> str:
+        capability_ids = ", ".join(capability.id for capability in self.capabilities)
+        return (
+            f"Context(task={self.task.id}, project={self.project}, "
+            f"knowledge={self.knowledge}, workspace={self.workspace}, "
+            f"capabilities=[{capability_ids or '-'}])"
+        )

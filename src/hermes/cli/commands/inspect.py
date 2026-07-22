@@ -13,7 +13,7 @@ def _format_status(is_clean: bool | None) -> str:
 def inspect(
     project: str = typer.Argument(..., help="Project id, e.g. AVANZIA"),
 ) -> None:
-    """Display a combined overview: project, workspace, git status, capabilities, and knowledge."""
+    """Display a combined overview: project, workspace, git status, environment, and knowledge."""
     try:
         knowledge_context = KnowledgeEngine().load(project)
         workspace_context = WorkspaceEngine().resolve(project)
@@ -29,5 +29,5 @@ def inspect(
     typer.echo(f"Git repository: {workspace_context.is_git_repo}")
     typer.echo(f"Branch: {workspace_context.branch or '-'}")
     typer.echo(f"Status: {_format_status(workspace_context.is_clean)}")
-    typer.echo(f"Capabilities: {', '.join(workspace_context.capabilities) or '-'}")
+    typer.echo(f"Environment: {', '.join(workspace_context.environment) or '-'}")
     typer.echo(f"Knowledge documents: {len(knowledge_context.documents)}")

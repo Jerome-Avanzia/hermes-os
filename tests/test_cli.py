@@ -40,8 +40,16 @@ def test_context_resolves_project_from_task_text():
     result = runner.invoke(app, ["context", "Update the AVANZIA homepage copy"])
 
     assert result.exit_code == 0
-    assert "Project: AVANZIA" in result.stdout
-    assert "Knowledge documents: 12" in result.stdout
+    assert "Project: Project(id=AVANZIA" in result.stdout
+    assert "Knowledge: Knowledge(project=AVANZIA, documents=12)" in result.stdout
+    assert "Required Capabilities: copywriting" in result.stdout
+
+
+def test_context_output_does_not_print_document_content():
+    result = runner.invoke(app, ["context", "Update the AVANZIA homepage copy"])
+
+    assert result.exit_code == 0
+    assert "AVANZIA exists to help entrepreneurs" not in result.stdout
 
 
 def test_context_unknown_project_exits_nonzero():

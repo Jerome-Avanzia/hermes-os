@@ -8,3 +8,6 @@ from hermes.models.project import Project
 class KnowledgeContext:
     project: Project
     documents: list[KnowledgeDocument]
+
+    def __str__(self) -> str:
+        return f"Knowledge(project={self.project.id}, documents={len(self.documents)})"
