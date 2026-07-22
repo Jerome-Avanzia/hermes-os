@@ -1,7 +1,10 @@
+import logging
 from datetime import datetime
 
 from hermes.models import ExecutionPlan, ExecutionResult, LoadedSkill, WorkspaceSnapshot
 from hermes.providers.ai_provider import AIProvider
+
+logger = logging.getLogger(__name__)
 
 
 class Executor:
@@ -28,6 +31,7 @@ class Executor:
 
         generated_output = None
         if provider is not None:
+            logger.info("Invoking provider %s for task %s", type(provider).__name__, plan.task.id)
             generated_output = provider.generate(
                 task=plan.task,
                 context=plan.context,
@@ -37,6 +41,13 @@ class Executor:
             )
 
         finished_at = datetime.now()
+
+        logger.info(
+            "Executed plan for task %s: status=%s completed_steps=%d",
+            plan.task.id,
+            status,
+            len(completed_steps),
+        )
 
         return ExecutionResult(
             task=plan.task,

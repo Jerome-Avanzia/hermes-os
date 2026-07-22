@@ -1,8 +1,12 @@
+import logging
+
 from hermes.kernel.capability_engine import CapabilityEngine
 from hermes.kernel.knowledge_engine import KnowledgeEngine
 from hermes.kernel.project_resolver import ProjectResolver
 from hermes.kernel.workspace_engine import WorkspaceEngine
 from hermes.models import Context, Task
+
+logger = logging.getLogger(__name__)
 
 
 class ContextEngine:
@@ -23,6 +27,13 @@ class ContextEngine:
         knowledge = self.knowledge_engine.load(project.id)
         workspace = self.workspace_engine.resolve(project.id)
         capabilities = self.capability_engine.match(task)
+
+        logger.info(
+            "Built context for task %s: project=%s capabilities=%d",
+            task.id,
+            project.id,
+            len(capabilities),
+        )
 
         return Context(
             task=task,

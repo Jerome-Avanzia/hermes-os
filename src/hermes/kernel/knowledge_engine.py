@@ -1,16 +1,20 @@
+import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from hermes import config
 from hermes.models import KnowledgeContext, KnowledgeDocument, Project
 
-DEFAULT_KNOWLEDGE_ROOT = Path("knowledge")
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeEngine:
-    def __init__(self, knowledge_root: Path = DEFAULT_KNOWLEDGE_ROOT) -> None:
-        self.knowledge_root = Path(knowledge_root)
+    def __init__(self, knowledge_root: Path | None = None) -> None:
+        self.knowledge_root = (
+            Path(knowledge_root) if knowledge_root is not None else config.knowledge_root()
+        )
         self.registry_path = self.knowledge_root / "registry.yaml"
 
     def load(self, project_id: str) -> KnowledgeContext:
@@ -18,6 +22,7 @@ class KnowledgeEngine:
         projects = registry.get("projects", {})
 
         if project_id not in projects:
+            logger.warning("Unknown project requested: %s", project_id)
             raise ValueError(f"Unknown project: {project_id}")
 
         entry = projects[project_id]
@@ -36,6 +41,9 @@ class KnowledgeEngine:
             self._load_document(project_path, filename) for filename in filenames
         ]
 
+        logger.info(
+            "Loaded %d knowledge document(s) for project %s", len(documents), project_id
+        )
         return KnowledgeContext(project=project, documents=documents)
 
     def _load_document(self, project_path: Path, filename: str) -> KnowledgeDocument:

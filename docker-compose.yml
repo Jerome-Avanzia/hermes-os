@@ -1,0 +1,19 @@
+services:
+  hermes:
+    build: .
+    image: hermes-os:latest
+    container_name: hermes
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HERMES_REPOSITORIES: /data/repos
+      HERMES_KNOWLEDGE: /data/knowledge
+      HERMES_SKILLS: /data/skills
+      HERMES_LOGS: /data/logs
+    volumes:
+      - ./data/repos:/data/repos:ro
+      - ./knowledge:/data/knowledge:ro
+      - ./skills:/data/skills:ro
+      - ./data/logs:/data/logs
+    command: ["--help"]

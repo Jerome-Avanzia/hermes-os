@@ -1,8 +1,11 @@
+import logging
 import os
 from collections.abc import Iterator
 from pathlib import Path
 
 from hermes.models import WorkspaceContext, WorkspaceFile, WorkspaceSnapshot
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = {
     ".md",
@@ -38,17 +41,20 @@ class WorkspaceReader:
         root = Path(workspace.workspace.path)
 
         if not workspace.exists or not root.is_dir():
+            logger.info("Workspace does not exist, skipping read: %s", root)
             return WorkspaceSnapshot(root=str(root), files=[])
 
         files = []
         for path in sorted(self._iter_candidates(root)):
             if len(files) >= MAX_FILES:
+                logger.warning("Workspace read hit the %d file cap at %s", MAX_FILES, root)
                 break
 
             workspace_file = self._read_file(root, path)
             if workspace_file is not None:
                 files.append(workspace_file)
 
+        logger.info("Read %d file(s) from workspace %s", len(files), root)
         return WorkspaceSnapshot(root=str(root), files=files)
 
     def _iter_candidates(self, root: Path) -> Iterator[Path]:

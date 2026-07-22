@@ -3,9 +3,8 @@ from typing import Any
 
 import yaml
 
+from hermes import config
 from hermes.models import ExecutionPlan, LoadedSkill
-
-DEFAULT_SKILLS_ROOT = Path("skills")
 
 
 class SkillNotFoundError(Exception):
@@ -13,8 +12,10 @@ class SkillNotFoundError(Exception):
 
 
 class SkillLoader:
-    def __init__(self, skills_root: Path = DEFAULT_SKILLS_ROOT) -> None:
-        self.skills_root = Path(skills_root)
+    def __init__(self, skills_root: Path | None = None) -> None:
+        self.skills_root = (
+            Path(skills_root) if skills_root is not None else config.skills_root()
+        )
         self.registry_path = self.skills_root / "registry.yaml"
 
     def load(self, plan: ExecutionPlan) -> list[LoadedSkill]:

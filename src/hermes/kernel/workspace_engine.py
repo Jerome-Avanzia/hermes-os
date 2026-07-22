@@ -1,13 +1,14 @@
+import logging
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from hermes import config
 from hermes.models import Workspace, WorkspaceContext
 
 DEFAULT_WORKSPACES_ROOT = Path("workspaces")
-DEFAULT_BASE_DIR = Path(".")
 
 ENVIRONMENT_FILES = {
     "package.json": "node",
@@ -19,6 +20,8 @@ ENVIRONMENT_FILES = {
     "pnpm-lock.yaml": "pnpm",
 }
 
+logger = logging.getLogger(__name__)
+
 
 class WorkspaceNotFoundError(Exception):
     pass
@@ -28,17 +31,18 @@ class WorkspaceEngine:
     def __init__(
         self,
         workspaces_root: Path = DEFAULT_WORKSPACES_ROOT,
-        base_dir: Path = DEFAULT_BASE_DIR,
+        base_dir: Path | None = None,
     ) -> None:
         self.workspaces_root = Path(workspaces_root)
         self.registry_path = self.workspaces_root / "registry.yaml"
-        self.base_dir = Path(base_dir)
+        self.base_dir = Path(base_dir) if base_dir is not None else config.repositories_root()
 
     def resolve(self, project_id: str) -> WorkspaceContext:
         registry = self._read_yaml(self.registry_path)
         entries = registry.get("workspaces", {})
 
         if project_id not in entries:
+            logger.warning("No registered workspace for project: %s", project_id)
             raise WorkspaceNotFoundError(
                 f"No registered workspace for project: {project_id}"
             )
@@ -51,6 +55,14 @@ class WorkspaceEngine:
         branch = self._current_branch(workspace_path) if is_git_repo else None
         is_clean = self._is_clean(workspace_path) if is_git_repo else None
         environment = self._detect_environment(workspace_path) if exists else []
+
+        logger.info(
+            "Resolved workspace for %s: path=%s exists=%s git=%s",
+            project_id,
+            workspace_path,
+            exists,
+            is_git_repo,
+        )
 
         return WorkspaceContext(
             workspace=workspace,

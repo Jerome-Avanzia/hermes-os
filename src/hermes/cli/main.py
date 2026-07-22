@@ -11,6 +11,7 @@ from hermes.cli.commands import (
     skills,
     workspace,
 )
+from hermes.logging_config import configure_logging
 
 app = typer.Typer(help="Hermes OS command-line interface.")
 
@@ -26,6 +27,7 @@ app.command(name="generate")(generate.generate)
 
 
 def main() -> None:
+    configure_logging()
     app()
 
 

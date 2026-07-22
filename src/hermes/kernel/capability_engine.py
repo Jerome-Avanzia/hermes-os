@@ -3,14 +3,15 @@ from typing import Any
 
 import yaml
 
+from hermes import config
 from hermes.models import Capability, Task
-
-DEFAULT_SKILLS_ROOT = Path("skills")
 
 
 class CapabilityEngine:
-    def __init__(self, skills_root: Path = DEFAULT_SKILLS_ROOT) -> None:
-        self.skills_root = Path(skills_root)
+    def __init__(self, skills_root: Path | None = None) -> None:
+        self.skills_root = (
+            Path(skills_root) if skills_root is not None else config.skills_root()
+        )
         self.registry_path = self.skills_root / "registry.yaml"
 
     def match(self, task: Task) -> list[Capability]:
