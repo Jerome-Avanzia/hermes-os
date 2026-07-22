@@ -1,6 +1,12 @@
 id: nextjs
 name: Next.js
 version: 1.0.0
+
+capabilities:
+  - nextjs
+
+description: Implements Next.js and React frontend work.
+
 provides:
   - next.js development
   - react development

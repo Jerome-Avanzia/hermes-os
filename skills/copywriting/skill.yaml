@@ -1,6 +1,12 @@
 id: copywriting
 name: Copywriting
 version: 1.0.0
+
+capabilities:
+  - copywriting
+
+description: Drafts and improves marketing copy.
+
 provides:
   - marketing copy
   - website copy

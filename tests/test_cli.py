@@ -72,3 +72,20 @@ def test_plan_unknown_project_exits_nonzero():
 
     assert result.exit_code == 1
     assert "Error" in result.output
+
+
+def test_skills_for_python_task():
+    result = runner.invoke(app, ["skills", "AVANZIA: refactor the Python backend"])
+
+    assert result.exit_code == 0
+    assert "Required Capabilities" in result.stdout
+    assert "- python" in result.stdout
+    assert "Loaded Skills" in result.stdout
+    assert "- Python" in result.stdout
+
+
+def test_skills_unknown_project_exits_nonzero():
+    result = runner.invoke(app, ["skills", "Do something unrelated"])
+
+    assert result.exit_code == 1
+    assert "Error" in result.output

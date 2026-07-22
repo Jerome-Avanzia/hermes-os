@@ -1,6 +1,12 @@
 id: brand-strategy
 name: Brand Strategy
 version: 1.0.0
+
+capabilities:
+  - brand-strategy
+
+description: Provides brand positioning and brand personality guidance.
+
 provides:
   - brand positioning guidance
   - brand personality guidance

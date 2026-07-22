@@ -1,6 +1,12 @@
 id: python
 name: Python
 version: 1.0.0
+
+capabilities:
+  - python
+
+description: Implements and refactors Python code.
+
 provides:
   - python development
 keywords:
