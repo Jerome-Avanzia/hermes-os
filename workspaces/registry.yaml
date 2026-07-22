@@ -1,0 +1,3 @@
+workspaces:
+  AVANZIA:
+    path: ../avanzia-website

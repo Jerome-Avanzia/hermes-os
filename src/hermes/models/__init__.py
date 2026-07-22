@@ -5,6 +5,8 @@ from hermes.models.plan import Plan
 from hermes.models.project import Project
 from hermes.models.result import Result
 from hermes.models.task import Task
+from hermes.models.workspace import Workspace
+from hermes.models.workspace_context import WorkspaceContext
 
 __all__ = [
     "Task",
@@ -14,4 +16,6 @@ __all__ = [
     "Project",
     "KnowledgeDocument",
     "KnowledgeContext",
+    "Workspace",
+    "WorkspaceContext",
 ]
