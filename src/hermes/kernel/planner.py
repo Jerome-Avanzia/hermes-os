@@ -15,4 +15,4 @@ class Planner:
             ExecutionStep(capability_id=None, description="Await user approval")
         )
 
-        return ExecutionPlan(task=context.task, steps=steps)
+        return ExecutionPlan(task=context.task, project=context.project, steps=steps)

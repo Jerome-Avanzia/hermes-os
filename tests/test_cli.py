@@ -89,3 +89,20 @@ def test_skills_unknown_project_exits_nonzero():
 
     assert result.exit_code == 1
     assert "Error" in result.output
+
+
+def test_execute_for_python_task_stops_at_approval():
+    result = runner.invoke(app, ["execute", "AVANZIA: refactor the Python backend"])
+
+    assert result.exit_code == 0
+    assert "✓ Python" in result.stdout
+    assert "⏸ Await user approval" in result.stdout
+    assert "Status:" in result.stdout
+    assert "awaiting_approval" in result.stdout
+
+
+def test_execute_unknown_project_exits_nonzero():
+    result = runner.invoke(app, ["execute", "Do something unrelated"])
+
+    assert result.exit_code == 1
+    assert "Error" in result.output
