@@ -1,6 +1,15 @@
 import typer
 
-from hermes.cli.commands import context, execute, inspect, knowledge, plan, skills, workspace
+from hermes.cli.commands import (
+    context,
+    execute,
+    inspect,
+    knowledge,
+    plan,
+    read,
+    skills,
+    workspace,
+)
 
 app = typer.Typer(help="Hermes OS command-line interface.")
 
@@ -11,6 +20,7 @@ app.command(name="context")(context.context)
 app.command(name="plan")(plan.plan)
 app.command(name="skills")(skills.skills)
 app.command(name="execute")(execute.execute)
+app.command(name="read")(read.read)
 
 
 def main() -> None:

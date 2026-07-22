@@ -12,6 +12,8 @@ from hermes.models.result import Result
 from hermes.models.task import Task
 from hermes.models.workspace import Workspace
 from hermes.models.workspace_context import WorkspaceContext
+from hermes.models.workspace_file import WorkspaceFile
+from hermes.models.workspace_snapshot import WorkspaceSnapshot
 
 __all__ = [
     "Task",
@@ -28,4 +30,6 @@ __all__ = [
     "ExecutionPlan",
     "LoadedSkill",
     "ExecutionResult",
+    "WorkspaceFile",
+    "WorkspaceSnapshot",
 ]

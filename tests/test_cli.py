@@ -106,3 +106,19 @@ def test_execute_unknown_project_exits_nonzero():
 
     assert result.exit_code == 1
     assert "Error" in result.output
+
+
+def test_read_known_project():
+    result = runner.invoke(app, ["read", "AVANZIA"])
+
+    assert result.exit_code == 0
+    assert "Files read:" in result.stdout
+    assert "Extensions" in result.stdout
+    assert ".tsx" in result.stdout or ".ts" in result.stdout
+
+
+def test_read_unknown_project_exits_nonzero():
+    result = runner.invoke(app, ["read", "NONEXISTENT"])
+
+    assert result.exit_code == 1
+    assert "Error" in result.output
