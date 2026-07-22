@@ -57,3 +57,18 @@ def test_context_unknown_project_exits_nonzero():
 
     assert result.exit_code == 1
     assert "Error" in result.output
+
+
+def test_plan_for_homepage_copy_task():
+    result = runner.invoke(app, ["plan", "Write homepage copy for AVANZIA"])
+
+    assert result.exit_code == 0
+    assert "[copywriting] Apply capability: Copywriting" in result.stdout
+    assert "[approval] Await user approval" in result.stdout
+
+
+def test_plan_unknown_project_exits_nonzero():
+    result = runner.invoke(app, ["plan", "Do something unrelated"])
+
+    assert result.exit_code == 1
+    assert "Error" in result.output

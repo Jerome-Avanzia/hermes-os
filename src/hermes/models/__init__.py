@@ -1,5 +1,7 @@
 from hermes.models.capability import Capability
 from hermes.models.context import Context
+from hermes.models.execution_plan import ExecutionPlan
+from hermes.models.execution_step import ExecutionStep
 from hermes.models.knowledge_context import KnowledgeContext
 from hermes.models.knowledge_document import KnowledgeDocument
 from hermes.models.plan import Plan
@@ -20,4 +22,6 @@ __all__ = [
     "Workspace",
     "WorkspaceContext",
     "Capability",
+    "ExecutionStep",
+    "ExecutionPlan",
 ]
