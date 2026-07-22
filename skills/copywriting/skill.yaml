@@ -1,0 +1,11 @@
+id: copywriting
+name: Copywriting
+version: 1.0.0
+provides:
+  - marketing copy
+  - website copy
+keywords:
+  - copywriting
+  - copy
+  - content
+  - homepage copy

@@ -39,3 +39,5 @@ def context(
     typer.echo(f"Branch: {result.workspace.branch or '-'}")
     typer.echo(f"Status: {_format_status(result.workspace.is_clean)}")
     typer.echo(f"Capabilities: {', '.join(result.workspace.capabilities) or '-'}")
+    skill_ids = [capability.id for capability in result.capabilities]
+    typer.echo(f"Skills: {', '.join(skill_ids) or '-'}")

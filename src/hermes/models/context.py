@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from hermes.models.capability import Capability
 from hermes.models.knowledge_context import KnowledgeContext
 from hermes.models.project import Project
 from hermes.models.task import Task
@@ -12,3 +13,4 @@ class Context:
     project: Project
     knowledge: KnowledgeContext
     workspace: WorkspaceContext
+    capabilities: list[Capability]

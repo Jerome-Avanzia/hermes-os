@@ -1,0 +1,11 @@
+skills:
+  brand-strategy:
+    path: brand-strategy
+  copywriting:
+    path: copywriting
+  nextjs:
+    path: nextjs
+  python:
+    path: python
+  git:
+    path: git

@@ -1,0 +1,10 @@
+id: python
+name: Python
+version: 1.0.0
+provides:
+  - python development
+keywords:
+  - python
+  - backend
+  - script
+  - pytest

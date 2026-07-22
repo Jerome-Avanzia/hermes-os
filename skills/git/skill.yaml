@@ -1,0 +1,10 @@
+id: git
+name: Git
+version: 1.0.0
+provides:
+  - version control
+keywords:
+  - git
+  - commit
+  - branch
+  - repository

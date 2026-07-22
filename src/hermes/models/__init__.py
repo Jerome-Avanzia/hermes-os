@@ -1,3 +1,4 @@
+from hermes.models.capability import Capability
 from hermes.models.context import Context
 from hermes.models.knowledge_context import KnowledgeContext
 from hermes.models.knowledge_document import KnowledgeDocument
@@ -18,4 +19,5 @@ __all__ = [
     "KnowledgeContext",
     "Workspace",
     "WorkspaceContext",
+    "Capability",
 ]
