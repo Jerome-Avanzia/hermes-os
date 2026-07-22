@@ -20,7 +20,7 @@ executive brief belongs to exactly one Business.
   mission           Text         ✓      Why the business exists
   north_star_goal   String       ✓      Primary long-term objective
   owner             String       ✓      Accountable owner
-  status            Enum         ✓      Idea, Active, Paused, Archived
+  status            Enum         ✓      Draft, Active, Paused, Archived
   created_at        Date         ✓      Creation date
 
 ------------------------------------------------------------------------

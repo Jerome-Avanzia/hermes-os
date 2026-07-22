@@ -1,22 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hermes-os.dev/contracts/goal.schema.json",
-  "title": "Goal",
-  "description": "Canonical Hermes OS Goal object.",
+  "$id": "https://hermes-os.dev/contracts/opportunity.schema.json",
+  "title": "Opportunity",
+  "description": "Canonical Hermes OS Opportunity object.",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "goal_id",
+    "opportunity_id",
     "business_id",
     "title",
     "description",
-    "target_value",
-    "target_date",
+    "expected_impact",
+    "estimated_effort",
     "owner",
     "status"
   ],
   "properties": {
-    "goal_id": {
+    "opportunity_id": {
       "type": "string"
     },
     "business_id": {
@@ -25,30 +25,49 @@
     "strategy_id": {
       "type": "string"
     },
+    "goal_id": {
+      "type": "string"
+    },
+    "decision_id": {
+      "type": "string"
+    },
+    "experiment_id": {
+      "type": "string"
+    },
     "title": {
       "type": "string"
     },
     "description": {
       "type": "string"
     },
-    "target_value": {
-      "type": "string"
-    },
-    "target_date": {
-      "type": "string",
-      "format": "date"
-    },
-    "status": {
+    "expected_impact": {
       "type": "string",
       "enum": [
-        "planned",
-        "active",
-        "completed",
-        "cancelled"
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    "estimated_effort": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
       ]
     },
     "owner": {
       "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "backlog",
+        "planned",
+        "active",
+        "completed",
+        "rejected"
+      ]
     },
     "created_at": {
       "type": "string",

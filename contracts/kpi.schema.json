@@ -13,6 +13,7 @@
     "unit",
     "current_value",
     "target_value",
+    "frequency",
     "status"
   ],
   "properties": {

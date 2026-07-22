@@ -21,7 +21,7 @@ OS can reference when making future recommendations.
   context       Text         ✓      Situation requiring a decision
   rationale     Text         ✓      Why this option was chosen
   owner         String       ✓      Decision owner
-  date          Date         ✓      Decision date
+  decision_date Date         ✓      Decision date
   status        Enum         ✓      Proposed, Approved, Implemented, Reversed
 
 ------------------------------------------------------------------------
