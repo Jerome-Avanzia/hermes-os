@@ -59,6 +59,26 @@ tools/        Build and generation scripts
 
 ------------------------------------------------------------------------
 
+## Architecture vs. Implementation
+
+This section separates the logical architecture from its current
+implementation. It is implementation guidance for developers, not an
+architectural decision, and does not modify any architecture document
+or ADR.
+
+-   "Hermes Agent (CEO)" is an architectural component defined by the
+    Hermes Operating Model (docs/20-executive-model.md), independent of
+    any specific runtime.
+-   The current Claude Code CLI runtime is the **first implementation**
+    of that component.
+-   The runtime is an implementation choice, not part of the
+    architectural definition.
+-   Future implementations — Hermes WebUI, background services, APIs,
+    or other runtimes — may fulfill the same architectural role without
+    requiring architectural changes.
+
+------------------------------------------------------------------------
+
 ## Future Automation
 
 Hermes OS should automate:
