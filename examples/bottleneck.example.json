@@ -1,0 +1,12 @@
+{
+  "bottleneck_id": "BOT-001",
+  "business_id": "biz_akosmicanimals",
+  "title": "Too few listings published each week",
+  "description": "Product publishing volume is below the level needed to grow the active catalog toward the 100-listing target.",
+  "category": "product",
+  "impact": "high",
+  "owner": "Owner",
+  "status": "open",
+  "created_at": "2026-07-19T09:00:00Z",
+  "updated_at": "2026-07-19T09:00:00Z"
+}

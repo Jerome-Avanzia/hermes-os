@@ -1,0 +1,13 @@
+{
+  "opportunity_id": "OPP-004",
+  "business_id": "biz_akosmicanimals",
+  "strategy_id": "strat_akosmicanimals_001",
+  "title": "Improve Etsy listing thumbnails",
+  "description": "Improve Etsy listing thumbnails to increase click-through and conversion, per the Opportunity Pipeline.",
+  "expected_impact": "high",
+  "estimated_effort": "low",
+  "owner": "Owner",
+  "status": "active",
+  "created_at": "2026-07-19T09:00:00Z",
+  "updated_at": "2026-07-19T09:00:00Z"
+}

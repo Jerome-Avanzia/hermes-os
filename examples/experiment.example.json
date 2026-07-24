@@ -1,0 +1,12 @@
+{
+  "experiment_id": "EXP-001",
+  "business_id": "biz_akosmicanimals",
+  "title": "Lifestyle mockups vs. flat lays",
+  "hypothesis": "Lifestyle mockups increase click-through rate compared to flat lays.",
+  "success_criteria": "Click-through rate (CTR) improves for listings using lifestyle mockups versus flat-lay mockups.",
+  "status": "planned",
+  "owner": "Owner",
+  "start_date": "2026-07-19",
+  "created_at": "2026-07-19T09:00:00Z",
+  "updated_at": "2026-07-19T09:00:00Z"
+}

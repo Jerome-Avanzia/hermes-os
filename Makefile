@@ -11,7 +11,7 @@ help:
 	@echo "  make clean      Remove Python cache files"
 
 validate:
-	python tests/validate_contracts.py
+	python3 tests/validate_contracts.py
 
 test: validate
 

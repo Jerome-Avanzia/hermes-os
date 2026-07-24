@@ -1,0 +1,14 @@
+{
+  "kpi_id": "kpi_akosmicanimals_001",
+  "business_id": "biz_akosmicanimals",
+  "goal_id": "goal_akosmicanimals_001",
+  "name": "Monthly Etsy Revenue",
+  "unit": "USD",
+  "current_value": 0,
+  "target_value": 1000,
+  "frequency": "monthly",
+  "status": "off_track",
+  "owner": "AVANZIA",
+  "created_at": "2026-07-19T09:00:00Z",
+  "updated_at": "2026-07-19T09:00:00Z"
+}

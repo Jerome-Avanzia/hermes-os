@@ -1,0 +1,23 @@
+{
+  "brief_id": "brief_akosmicanimals_2026-07",
+  "business_id": "biz_akosmicanimals",
+  "reporting_period": "monthly",
+  "generated_at": "2026-07-19T09:00:00Z",
+  "summary": "AKosmicAnimals is working toward its North Star Goal of USD 1,000/month Etsy revenue. Listing volume and Pinterest/Etsy traffic remain below target, and the manual listing workflow is consuming too much time.",
+  "priorities": [
+    "Increase qualified traffic",
+    "Improve conversion rate",
+    "Grow Pinterest traffic"
+  ],
+  "risks": [
+    "Too few listings published each week (BOT-001)",
+    "Pinterest and Etsy traffic remain below target (BOT-002)",
+    "Manual listing workflow consumes too much time (BOT-003)"
+  ],
+  "recommendations": [
+    "Improve Etsy listing thumbnails (OPP-004)",
+    "Increase Pinterest publishing cadence (OPP-002)"
+  ],
+  "status": "draft",
+  "created_at": "2026-07-19T09:00:00Z"
+}

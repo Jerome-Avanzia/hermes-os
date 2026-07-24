@@ -11,13 +11,13 @@ system:
   timezone: Europe/Paris
 
 paths:
-  root: /opt/hermes
-  skills: /opt/hermes/skills
-  agents: /opt/hermes/agents
-  prompts: /opt/hermes/prompts
-  workspace: /opt/hermes/workspace
-  logs: /opt/hermes/logs
-  data: /opt/hermes/data
+  root: /opt/avanzia
+  skills: /opt/avanzia/repos/hermes-os/skills
+  agents: /opt/avanzia/repos/hermes-os/agents
+  prompts: /opt/avanzia/hermes
+  workspace: /opt/avanzia/workspace
+  logs: /opt/avanzia/logs
+  data: /opt/avanzia/data
 
 ai:
   default_provider: openrouter

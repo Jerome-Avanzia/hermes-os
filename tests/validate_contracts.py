@@ -22,6 +22,15 @@ EXAMPLES = ROOT / "examples"
 
 pairs = [
     ("business.schema.json", "business.example.json"),
+    ("strategy.schema.json", "strategy.example.json"),
+    ("goal.schema.json", "goal.example.json"),
+    ("kpi.schema.json", "kpi.example.json"),
+    ("bottleneck.schema.json", "bottleneck.example.json"),
+    ("opportunity.schema.json", "opportunity.example.json"),
+    ("decision.schema.json", "decision.example.json"),
+    ("experiment.schema.json", "experiment.example.json"),
+    ("lesson.schema.json", "lesson.example.json"),
+    ("executive-brief.schema.json", "executive-brief.example.json"),
 ]
 
 errors = 0

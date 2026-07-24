@@ -1,0 +1,13 @@
+{
+  "decision_id": "DEC-002",
+  "business_id": "biz_akosmicanimals",
+  "strategy_id": "strat_akosmicanimals_001",
+  "title": "Use Comfort Colors 1717 as the primary apparel product",
+  "context": "AKosmicAnimals needed a single, consistent primary garment to build premium, repeatable branding around instead of a mixed catalog of blank styles.",
+  "rationale": "Comfort Colors 1717 supports consistent premium positioning across the catalog.",
+  "owner": "Owner",
+  "status": "implemented",
+  "decision_date": "2026-07-19",
+  "created_at": "2026-07-19T09:00:00Z",
+  "updated_at": "2026-07-19T09:00:00Z"
+}
