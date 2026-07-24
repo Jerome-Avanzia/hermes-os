@@ -16,12 +16,9 @@ class SkillLoader:
         self.skills_root = (
             Path(skills_root) if skills_root is not None else config.skills_root()
         )
-        self.registry_path = self.skills_root / "registry.yaml"
 
     def load(self, plan: ExecutionPlan) -> list[LoadedSkill]:
-        registry = self._read_yaml(self.registry_path)
-        entries = registry.get("skills", {})
-        capability_index = self._build_capability_index(entries)
+        capability_index = self._build_capability_index(self._discover_manifests())
 
         loaded_skills = []
         for step in plan.steps:
@@ -29,19 +26,17 @@ class SkillLoader:
             if capability_id is None:
                 continue
 
-            skill_id = capability_index.get(capability_id)
-            if skill_id is None:
+            entry = capability_index.get(capability_id)
+            if entry is None:
                 raise SkillNotFoundError(
                     f"No registered skill satisfies capability: {capability_id}"
                 )
 
-            skill_path = self.skills_root / entries[skill_id]["path"]
-            manifest = self._read_yaml(skill_path / "skill.yaml")
-
+            manifest, skill_path = entry
             loaded_skills.append(
                 LoadedSkill(
-                    id=manifest.get("id", skill_id),
-                    name=manifest.get("name", skill_id),
+                    id=manifest.get("id", capability_id),
+                    name=manifest.get("name", capability_id),
                     version=manifest.get("version", ""),
                     path=skill_path,
                 )
@@ -49,14 +44,20 @@ class SkillLoader:
 
         return loaded_skills
 
-    def _build_capability_index(self, entries: dict[str, Any]) -> dict[str, str]:
-        index: dict[str, str] = {}
-        for skill_id, entry in entries.items():
-            manifest = self._read_yaml(
-                self.skills_root / entry["path"] / "skill.yaml"
-            )
+    def _discover_manifests(self) -> list[tuple[dict[str, Any], Path]]:
+        result = []
+        for path in sorted(self.skills_root.rglob("skill.yaml")):
+            manifest = self._read_yaml(path)
+            result.append((manifest, path.parent))
+        return result
+
+    def _build_capability_index(
+        self, manifests: list[tuple[dict[str, Any], Path]]
+    ) -> dict[str, tuple[dict[str, Any], Path]]:
+        index: dict[str, tuple[dict[str, Any], Path]] = {}
+        for manifest, skill_path in manifests:
             for capability_id in manifest.get("capabilities", []):
-                index.setdefault(capability_id, skill_id)
+                index.setdefault(capability_id, (manifest, skill_path))
         return index
 
     @staticmethod
