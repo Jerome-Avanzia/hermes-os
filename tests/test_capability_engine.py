@@ -28,10 +28,20 @@ def test_matches_python_for_python_refactor_task():
     assert [capability.id for capability in capabilities] == ["python"]
 
 
-def test_no_match_for_unknown_task():
+def test_no_specialist_match_returns_kernel():
     task = Task(
         id="t3", business="AVANZIA", request="Plan a company offsite retreat"
     )
     capabilities = _engine().match(task)
 
-    assert capabilities == []
+    assert len(capabilities) == 1
+    assert capabilities[0].id == "kernel"
+
+
+def test_specialist_match_does_not_return_kernel():
+    task = Task(id="t4", business="AVANZIA", request="Refactor the Python backend")
+    capabilities = _engine().match(task)
+
+    ids = [c.id for c in capabilities]
+    assert "kernel" not in ids
+    assert "python" in ids

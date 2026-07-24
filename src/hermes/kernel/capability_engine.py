@@ -31,7 +31,20 @@ class CapabilityEngine:
                     )
                 )
 
+        if not capabilities:
+            capabilities.append(self._kernel_capability())
+
         return capabilities
+
+    def _kernel_capability(self) -> Capability:
+        manifest = self._read_yaml(self.skills_root / "kernel" / "skill.yaml")
+        return Capability(
+            id=manifest.get("id", "kernel"),
+            name=manifest.get("name", "Kernel"),
+            version=manifest.get("version", ""),
+            provides=manifest.get("provides", []),
+            keywords=[],
+        )
 
     def _discover_manifests(self) -> list[tuple[dict[str, Any], Path]]:
         result = []

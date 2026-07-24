@@ -68,12 +68,15 @@ def test_loads_python_for_python_task():
     assert loaded_skills[0].name == "Python"
 
 
-def test_unknown_task_loads_zero_skills():
+def test_unmatched_task_loads_kernel_skill():
+    # When no specialist skill matches, the kernel capability is the fallback.
+    # The plan contains one kernel step; SkillLoader must load the kernel skill.
     context = _build_context("Plan a company offsite retreat")
     execution_plan = Planner().create(context)
     loaded_skills = _loader().load(execution_plan)
 
-    assert loaded_skills == []
+    assert len(loaded_skills) == 1
+    assert loaded_skills[0].id == "kernel"
 
 
 def test_missing_skill_raises_skill_not_found_error():
