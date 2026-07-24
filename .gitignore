@@ -26,3 +26,7 @@ data/
 # Temporary
 *.tmp
 *.bak
+
+# Local development
+.claude/
+*.local
