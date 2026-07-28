@@ -28,6 +28,42 @@ def test_resolves_by_alias():
     assert project.id == "AVANZIA"
 
 
+@pytest.mark.parametrize("term", [
+    "hermes",
+    "hermes-os",
+    "avanzia-website",
+    "aka",
+    "akosmicanimals",
+    "serelo",
+])
+def test_resolves_by_ecosystem_alias(term):
+    task = Task(id="t", business="", request=f"Review the {term} project")
+    project = _resolver().resolve(task)
+
+    assert project.id == "AVANZIA"
+
+
+def test_resolves_hermes_kernel_task():
+    task = Task(id="t", business="", request="Review the Hermes kernel architecture")
+    project = _resolver().resolve(task)
+
+    assert project.id == "AVANZIA"
+
+
+def test_resolves_avanzia_website_task():
+    task = Task(id="t", business="", request="Review the AVANZIA website")
+    project = _resolver().resolve(task)
+
+    assert project.id == "AVANZIA"
+
+
+def test_resolves_serelo_task():
+    task = Task(id="t", business="", request="Review the Serelo project")
+    project = _resolver().resolve(task)
+
+    assert project.id == "AVANZIA"
+
+
 def test_unknown_project_raises():
     task = Task(id="t3", business="Nonexistent Co", request="Do something")
 

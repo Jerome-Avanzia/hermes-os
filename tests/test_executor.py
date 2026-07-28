@@ -29,7 +29,7 @@ class FakeProvider(AIProvider):
         self.response = response
         self.calls: list[dict] = []
 
-    def generate(self, *, task, context, plan, skills, workspace) -> str:
+    def generate(self, *, task, context, plan, skills, workspace, file_contents=None) -> str:
         self.calls.append(
             {
                 "task": task,
@@ -37,6 +37,7 @@ class FakeProvider(AIProvider):
                 "plan": plan,
                 "skills": skills,
                 "workspace": workspace,
+                "file_contents": file_contents,
             }
         )
         return self.response
@@ -105,7 +106,8 @@ def test_unknown_task_still_returns_awaiting_approval():
     result, _ = _execute("Plan a company offsite retreat")
 
     assert result.status == "awaiting_approval"
-    assert result.completed_steps == []
+    # Kernel fallback is always matched, so it appears as a completed step.
+    assert "Kernel" in result.completed_steps
 
 
 def test_timestamps_are_recorded_in_order():

@@ -6,7 +6,7 @@ from typing import Any
 import yaml
 
 from hermes import config
-from hermes.models import Workspace, WorkspaceContext
+from hermes.models import Repository, Workspace, WorkspaceContext
 
 DEFAULT_WORKSPACES_ROOT = Path("workspaces")
 
@@ -47,25 +47,66 @@ class WorkspaceEngine:
                 f"No registered workspace for project: {project_id}"
             )
 
-        workspace_path = (self.base_dir / entries[project_id]["path"]).resolve()
+        entry = entries[project_id]
+        repositories: list[Repository] = []
+
+        if "repositories" in entry:
+            for repo_entry in entry["repositories"]:
+                repo_path = (self.base_dir / repo_entry["path"]).resolve()
+                repositories.append(self._resolve_repository(repo_entry["name"], repo_path))
+
+        # Derive backward-compatible singular fields from the first repository
+        # or from the legacy single-path format.
+        if repositories:
+            primary = repositories[0]
+            workspace_path = Path(primary.path)
+            exists = primary.exists
+            is_git_repo = primary.is_git_repo
+            branch = primary.branch
+            is_clean = primary.is_clean
+            environment = primary.environment
+        elif "path" in entry:
+            workspace_path = (self.base_dir / entry["path"]).resolve()
+            exists = workspace_path.is_dir()
+            is_git_repo = exists and (workspace_path / ".git").is_dir()
+            branch = self._current_branch(workspace_path) if is_git_repo else None
+            is_clean = self._is_clean(workspace_path) if is_git_repo else None
+            environment = self._detect_environment(workspace_path) if exists else []
+        else:
+            raise WorkspaceNotFoundError(
+                f"No path or repositories defined for project: {project_id}"
+            )
+
         workspace = Workspace(project_id=project_id, path=str(workspace_path))
 
-        exists = workspace_path.is_dir()
-        is_git_repo = exists and (workspace_path / ".git").is_dir()
-        branch = self._current_branch(workspace_path) if is_git_repo else None
-        is_clean = self._is_clean(workspace_path) if is_git_repo else None
-        environment = self._detect_environment(workspace_path) if exists else []
-
         logger.info(
-            "Resolved workspace for %s: path=%s exists=%s git=%s",
+            "Resolved workspace for %s: repositories=%d exists=%s git=%s",
             project_id,
-            workspace_path,
+            len(repositories),
             exists,
             is_git_repo,
         )
 
         return WorkspaceContext(
             workspace=workspace,
+            exists=exists,
+            is_git_repo=is_git_repo,
+            branch=branch,
+            is_clean=is_clean,
+            environment=environment,
+            repositories=repositories,
+        )
+
+    def _resolve_repository(self, name: str, path: Path) -> Repository:
+        exists = path.is_dir()
+        is_git_repo = exists and (path / ".git").is_dir()
+        branch = self._current_branch(path) if is_git_repo else None
+        is_clean = self._is_clean(path) if is_git_repo else None
+        environment = self._detect_environment(path) if exists else []
+
+        return Repository(
+            name=name,
+            path=str(path),
             exists=exists,
             is_git_repo=is_git_repo,
             branch=branch,

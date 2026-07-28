@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime
 
-from hermes.models import ExecutionPlan, ExecutionResult, LoadedSkill, WorkspaceSnapshot
+from hermes.models import ExecutionPlan, ExecutionResult, FileContent, LoadedSkill, WorkspaceSnapshot
 from hermes.providers.ai_provider import AIProvider
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,7 @@ class Executor:
         skills: list[LoadedSkill],
         workspace_snapshot: WorkspaceSnapshot,
         provider: AIProvider | None = None,
+        file_contents: list[FileContent] | None = None,
     ) -> ExecutionResult:
         skill_by_capability = {skill.id: skill for skill in skills}
         started_at = datetime.now()
@@ -38,6 +39,7 @@ class Executor:
                 plan=plan,
                 skills=skills,
                 workspace=workspace_snapshot,
+                file_contents=file_contents,
             )
 
         finished_at = datetime.now()

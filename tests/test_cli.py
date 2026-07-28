@@ -134,3 +134,121 @@ def test_generate_missing_api_key_exits_cleanly(monkeypatch):
     assert result.exit_code == 1
     assert "Error" in result.output
     assert "ANTHROPIC_API_KEY" in result.output
+
+
+# --- --diagnostics flag (no API key needed — flag is independent of generation) ---
+
+def test_diagnostics_flag_missing_api_key_exits_with_error(monkeypatch):
+    """--diagnostics does not bypass the API key requirement."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    result = runner.invoke(
+        app, ["generate", "AVANZIA: refactor the Python backend", "--diagnostics"]
+    )
+
+    assert result.exit_code == 1
+    assert "ANTHROPIC_API_KEY" in result.output
+
+
+# --- DiagnosticsReport formatter ---
+
+from hermes.cli.commands.generate import _format_diagnostics
+from hermes.models import DiagnosticsReport
+
+
+def _sample_report(**overrides) -> DiagnosticsReport:
+    defaults = dict(
+        project_id="AVANZIA",
+        repositories=["hermes-os", "avanzia-website"],
+        knowledge_documents=["Vision.md", "Mission.md", "Engineering.md"],
+        files_scanned=120,
+        files_selected=["executor.py", "context_engine.py", "claude_provider.py"],
+        files_read=3,
+        chars_read=30_775,
+        chars_truncated=0,
+        knowledge_chars=7_200,
+        file_content_chars=30_775,
+        prompt_chars=37_975,
+    )
+    defaults.update(overrides)
+    return DiagnosticsReport(**defaults)
+
+
+def test_diagnostics_format_contains_project():
+    output = _format_diagnostics(_sample_report())
+    assert "AVANZIA" in output
+
+
+def test_diagnostics_format_contains_project_section_header():
+    output = _format_diagnostics(_sample_report())
+    assert "Project" in output
+
+
+def test_diagnostics_format_contains_repositories():
+    output = _format_diagnostics(_sample_report())
+    assert "hermes-os" in output
+    assert "avanzia-website" in output
+
+
+def test_diagnostics_format_contains_knowledge_documents():
+    output = _format_diagnostics(_sample_report())
+    assert "Vision.md" in output
+    assert "Mission.md" in output
+    assert "Engineering.md" in output
+
+
+def test_diagnostics_format_contains_selected_files():
+    output = _format_diagnostics(_sample_report())
+    assert "executor.py" in output
+    assert "context_engine.py" in output
+    assert "claude_provider.py" in output
+
+
+def test_diagnostics_format_shows_files_read_count():
+    output = _format_diagnostics(_sample_report(files_read=15))
+    assert "15 files" in output
+
+
+def test_diagnostics_format_shows_chars_read():
+    output = _format_diagnostics(_sample_report(chars_read=30_775))
+    assert "30,775 chars" in output
+
+
+def test_diagnostics_format_shows_truncated_chars_when_nonzero():
+    output = _format_diagnostics(_sample_report(chars_truncated=5_000))
+    assert "5,000 chars truncated" in output
+
+
+def test_diagnostics_format_omits_truncated_line_when_zero():
+    output = _format_diagnostics(_sample_report(chars_truncated=0))
+    assert "truncated" not in output
+
+
+def test_diagnostics_format_shows_knowledge_size():
+    output = _format_diagnostics(_sample_report(knowledge_chars=7_200))
+    assert "7,200 chars" in output
+
+
+def test_diagnostics_format_shows_file_content_size():
+    output = _format_diagnostics(_sample_report(file_content_chars=30_775))
+    assert "30,775 chars" in output
+
+
+def test_diagnostics_format_shows_prompt_total():
+    output = _format_diagnostics(_sample_report(prompt_chars=37_975))
+    assert "37,975 chars" in output
+
+
+def test_diagnostics_format_shows_checkmarks_for_repositories():
+    output = _format_diagnostics(_sample_report())
+    assert "✓ hermes-os" in output
+
+
+def test_diagnostics_format_shows_dash_for_empty_repositories():
+    output = _format_diagnostics(_sample_report(repositories=[]))
+    assert "-" in output
+
+
+def test_diagnostics_format_shows_dash_for_empty_knowledge():
+    output = _format_diagnostics(_sample_report(knowledge_documents=[]))
+    assert "-" in output

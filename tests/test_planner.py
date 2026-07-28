@@ -60,6 +60,6 @@ def test_plan_for_unknown_task_still_appends_approval_step():
     context = _build_context("Plan a company offsite retreat")
     execution_plan = Planner().create(context)
 
-    assert len(execution_plan.steps) == 1
-    assert execution_plan.steps[0].capability_id is None
-    assert execution_plan.steps[0].description == "Await user approval"
+    # Kernel fallback is always matched; approval step follows it.
+    assert execution_plan.steps[-1].capability_id is None
+    assert execution_plan.steps[-1].description == "Await user approval"

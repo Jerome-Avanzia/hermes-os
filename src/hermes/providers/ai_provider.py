@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from hermes.models import Context, ExecutionPlan, LoadedSkill, Task, WorkspaceSnapshot
+from hermes.models import Context, ExecutionPlan, FileContent, LoadedSkill, Task, WorkspaceSnapshot
 
 
 class AIProvider(ABC):
@@ -13,4 +13,5 @@ class AIProvider(ABC):
         plan: ExecutionPlan,
         skills: list[LoadedSkill],
         workspace: WorkspaceSnapshot,
+        file_contents: list[FileContent] | None = None,
     ) -> str: ...

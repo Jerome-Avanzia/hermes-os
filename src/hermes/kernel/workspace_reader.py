@@ -38,6 +38,11 @@ MAX_FILE_SIZE_BYTES = 250 * 1024
 
 class WorkspaceReader:
     def read(self, workspace: WorkspaceContext) -> WorkspaceSnapshot:
+        if workspace.repositories:
+            return self._read_repositories(workspace)
+        return self._read_single(workspace)
+
+    def _read_single(self, workspace: WorkspaceContext) -> WorkspaceSnapshot:
         root = Path(workspace.workspace.path)
 
         if not workspace.exists or not root.is_dir():
@@ -56,6 +61,39 @@ class WorkspaceReader:
 
         logger.info("Read %d file(s) from workspace %s", len(files), root)
         return WorkspaceSnapshot(root=str(root), files=files)
+
+    def _read_repositories(self, workspace: WorkspaceContext) -> WorkspaceSnapshot:
+        all_files: list[WorkspaceFile] = []
+
+        for repo in workspace.repositories:
+            if not repo.exists:
+                logger.info("Repository does not exist, skipping: %s", repo.path)
+                continue
+
+            root = Path(repo.path)
+            for path in sorted(self._iter_candidates(root)):
+                if len(all_files) >= MAX_FILES:
+                    logger.warning("Workspace read hit the %d file cap", MAX_FILES)
+                    break
+
+                wf = self._read_file(root, path)
+                if wf is not None:
+                    all_files.append(
+                        WorkspaceFile(
+                            path=wf.path,
+                            extension=wf.extension,
+                            size=wf.size,
+                            content=wf.content,
+                            repository=repo.name,
+                        )
+                    )
+
+        logger.info(
+            "Read %d file(s) across %d repositor(ies)",
+            len(all_files),
+            len(workspace.repositories),
+        )
+        return WorkspaceSnapshot(root=workspace.workspace.project_id, files=all_files)
 
     def _iter_candidates(self, root: Path) -> Iterator[Path]:
         for dirpath, dirnames, filenames in os.walk(root):
