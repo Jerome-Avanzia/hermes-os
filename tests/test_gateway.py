@@ -146,3 +146,14 @@ def test_chat_rejects_empty_body():
 def test_chat_rejects_missing_messages():
     resp = client.post("/v1/chat", json={"stream": True})
     assert resp.status_code == 422
+
+
+# -- Static UI serving -----------------------------------------------------
+
+
+def test_root_serves_chat_ui():
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "Hermes" in resp.text
+    assert "/v1/chat" in resp.text

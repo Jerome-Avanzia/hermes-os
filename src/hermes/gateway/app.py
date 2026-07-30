@@ -8,10 +8,12 @@ import json
 import logging
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from hermes.providers.ollama_provider import (
@@ -95,3 +97,10 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# -- Static UI (must be mounted last so API routes take precedence) ---------
+
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.is_dir():
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="ui")
