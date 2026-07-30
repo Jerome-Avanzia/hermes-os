@@ -47,6 +47,7 @@ COPY --from=builder --chown=hermes:hermes /app/.venv /app/.venv
 # image.
 COPY --chown=hermes:hermes knowledge/ knowledge/
 COPY --chown=hermes:hermes skills/ skills/
+COPY --chown=hermes:hermes profiles/ profiles/
 COPY --chown=hermes:hermes workspaces/ workspaces/
 
 RUN mkdir -p /data/repos /data/knowledge /data/skills /data/logs \

@@ -8,12 +8,13 @@ from hermes.gateway.app import app
 client = TestClient(app)
 
 
-def _mock_provider(tokens: list[str]):
-    """Return a mock OllamaProvider whose stream_chat yields the given tokens."""
-    provider = MagicMock()
-    provider.stream_chat.return_value = iter(tokens)
-    provider.chat.return_value = "".join(tokens)
-    return provider
+def _mock_conductor(tokens: list[str]):
+    """Return a mock Conductor whose stream_chat yields the given tokens."""
+    conductor = MagicMock()
+    conductor.stream_chat.return_value = iter(tokens)
+    conductor.chat.return_value = "".join(tokens)
+    conductor.profile_loader = MagicMock()
+    return conductor
 
 
 # -- Health endpoint -------------------------------------------------------
@@ -30,9 +31,9 @@ def test_health_returns_ok():
 
 def test_chat_streams_sse_tokens():
     tokens = ["Hello", " world", "!"]
-    provider = _mock_provider(tokens)
+    conductor = _mock_conductor(tokens)
 
-    with patch("hermes.gateway.app._build_provider", return_value=provider):
+    with patch("hermes.gateway.app._conductor", conductor):
         resp = client.post(
             "/v1/chat",
             json={"messages": [{"role": "user", "content": "Hi"}]},
@@ -45,37 +46,61 @@ def test_chat_streams_sse_tokens():
     data_lines = [l for l in lines if l.startswith("data: ")]
     assert len(data_lines) == 4  # 3 tokens + [DONE]
 
-    # Verify token payloads
     assert json.loads(data_lines[0].removeprefix("data: ")) == {"content": "Hello"}
     assert json.loads(data_lines[1].removeprefix("data: ")) == {"content": " world"}
     assert json.loads(data_lines[2].removeprefix("data: ")) == {"content": "!"}
     assert data_lines[3] == "data: [DONE]"
 
 
-def test_chat_passes_messages_to_provider():
-    provider = _mock_provider(["OK"])
+def test_chat_passes_messages_to_conductor():
+    conductor = _mock_conductor(["OK"])
 
     messages = [
-        {"role": "system", "content": "You are helpful."},
         {"role": "user", "content": "Hello"},
     ]
 
-    with patch("hermes.gateway.app._build_provider", return_value=provider):
+    with patch("hermes.gateway.app._conductor", conductor):
         client.post("/v1/chat", json={"messages": messages})
 
-    provider.stream_chat.assert_called_once()
-    call_messages = provider.stream_chat.call_args[0][0]
-    assert len(call_messages) == 2
-    assert call_messages[0].role == "system"
-    assert call_messages[0].content == "You are helpful."
-    assert call_messages[1].role == "user"
-    assert call_messages[1].content == "Hello"
+    conductor.stream_chat.assert_called_once()
+    call_messages = conductor.stream_chat.call_args[0][0]
+    assert len(call_messages) == 1
+    assert call_messages[0].role == "user"
+    assert call_messages[0].content == "Hello"
 
 
-def test_chat_uses_requested_model():
-    provider = _mock_provider(["OK"])
+def test_chat_passes_profile_to_conductor():
+    conductor = _mock_conductor(["OK"])
 
-    with patch("hermes.gateway.app._build_provider", return_value=provider) as mock_build:
+    with patch("hermes.gateway.app._conductor", conductor):
+        client.post(
+            "/v1/chat",
+            json={
+                "messages": [{"role": "user", "content": "Hi"}],
+                "profile": "developer",
+            },
+        )
+
+    conductor.stream_chat.assert_called_once()
+    assert conductor.stream_chat.call_args[1]["profile_id"] == "developer"
+
+
+def test_chat_passes_none_profile_when_omitted():
+    conductor = _mock_conductor(["OK"])
+
+    with patch("hermes.gateway.app._conductor", conductor):
+        client.post(
+            "/v1/chat",
+            json={"messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+    assert conductor.stream_chat.call_args[1]["profile_id"] is None
+
+
+def test_chat_with_model_override_creates_new_conductor():
+    conductor = _mock_conductor(["OK"])
+
+    with patch("hermes.gateway.app._build_conductor", return_value=conductor) as mock_build:
         client.post(
             "/v1/chat",
             json={
@@ -88,25 +113,25 @@ def test_chat_uses_requested_model():
 
 
 def test_chat_defaults_to_streaming():
-    provider = _mock_provider(["OK"])
+    conductor = _mock_conductor(["OK"])
 
-    with patch("hermes.gateway.app._build_provider", return_value=provider):
+    with patch("hermes.gateway.app._conductor", conductor):
         resp = client.post(
             "/v1/chat",
             json={"messages": [{"role": "user", "content": "Hi"}]},
         )
 
     assert resp.headers["content-type"].startswith("text/event-stream")
-    provider.stream_chat.assert_called_once()
+    conductor.stream_chat.assert_called_once()
 
 
 # -- Non-streaming fallback ------------------------------------------------
 
 
 def test_chat_non_streaming_returns_json():
-    provider = _mock_provider(["Full response"])
+    conductor = _mock_conductor(["Full response"])
 
-    with patch("hermes.gateway.app._build_provider", return_value=provider):
+    with patch("hermes.gateway.app._conductor", conductor):
         resp = client.post(
             "/v1/chat",
             json={
@@ -118,7 +143,47 @@ def test_chat_non_streaming_returns_json():
     assert resp.status_code == 200
     body = resp.json()
     assert body["content"] == "Full response"
-    provider.chat.assert_called_once()
+    conductor.chat.assert_called_once()
+
+
+def test_chat_non_streaming_passes_profile():
+    conductor = _mock_conductor(["OK"])
+
+    with patch("hermes.gateway.app._conductor", conductor):
+        client.post(
+            "/v1/chat",
+            json={
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": False,
+                "profile": "business",
+            },
+        )
+
+    assert conductor.chat.call_args[1]["profile_id"] == "business"
+
+
+# -- Profiles endpoint -----------------------------------------------------
+
+
+def test_list_profiles_returns_all():
+    resp = client.get("/v1/profiles")
+    assert resp.status_code == 200
+    profiles = resp.json()
+    ids = [p["id"] for p in profiles]
+    assert "default" in ids
+    assert "developer" in ids
+    assert "business" in ids
+
+
+def test_list_profiles_contains_expected_fields():
+    resp = client.get("/v1/profiles")
+    profiles = resp.json()
+    for p in profiles:
+        assert "id" in p
+        assert "name" in p
+        assert "description" in p
+        # system_prompt should NOT be exposed
+        assert "system_prompt" not in p
 
 
 # -- CORS ------------------------------------------------------------------
@@ -157,3 +222,9 @@ def test_root_serves_chat_ui():
     assert "text/html" in resp.headers["content-type"]
     assert "Hermes" in resp.text
     assert "/v1/chat" in resp.text
+
+
+def test_ui_contains_profile_selector():
+    resp = client.get("/")
+    assert "profile-select" in resp.text
+    assert "/v1/profiles" in resp.text

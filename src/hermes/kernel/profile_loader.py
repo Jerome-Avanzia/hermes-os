@@ -5,11 +5,10 @@ from pathlib import Path
 
 import yaml
 
+from hermes.config import profiles_root
 from hermes.models.profile import Profile
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_PROFILES_DIR = Path(__file__).resolve().parents[3] / "profiles"
 
 
 class ProfileNotFoundError(Exception):
@@ -18,7 +17,7 @@ class ProfileNotFoundError(Exception):
 
 class ProfileLoader:
     def __init__(self, profiles_dir: Path | None = None) -> None:
-        self._dir = profiles_dir or _DEFAULT_PROFILES_DIR
+        self._dir = profiles_dir or profiles_root()
         self._cache: dict[str, Profile] | None = None
 
     def _load_all(self) -> dict[str, Profile]:
