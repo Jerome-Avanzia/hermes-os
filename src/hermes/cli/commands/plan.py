@@ -11,9 +11,12 @@ def plan(
     task: str = typer.Argument(
         ..., help="Free-text task, e.g. 'Update the AVANZIA homepage copy'"
     ),
+    project: str = typer.Option(
+        "", "--project", "-p", help="Explicit project ID or name, e.g. 'AVANZIA'"
+    ),
 ) -> None:
     """Build a deterministic execution plan for a task."""
-    hermes_task = Task(id="cli-plan", business="", request=task)
+    hermes_task = Task(id="cli-plan", business=project, request=task)
 
     try:
         context = ContextEngine().build(hermes_task)

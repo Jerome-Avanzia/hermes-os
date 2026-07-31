@@ -33,9 +33,9 @@ class HermesService:
         self.executor = executor or Executor()
 
     def generate(
-        self, task: str, provider: AIProvider | None = None
+        self, task: str, provider: AIProvider | None = None, project: str = ""
     ) -> ExecutionResult:
-        hermes_task = Task(id="hermes-service", business="", request=task)
+        hermes_task = Task(id="hermes-service", business=project, request=task)
 
         context = self.context_engine.build(hermes_task)
         plan = self.planner.create(context)

@@ -72,6 +72,9 @@ def generate(
     task: str = typer.Argument(
         ..., help="Free-text task, e.g. 'Update the AVANZIA homepage copy'"
     ),
+    project: str = typer.Option(
+        "", "--project", "-p", help="Explicit project ID or name, e.g. 'AVANZIA'"
+    ),
     diagnostics: bool = typer.Option(
         False, "--diagnostics", help="Print context diagnostics after generation."
     ),
@@ -79,7 +82,7 @@ def generate(
     """Ask Claude to draft a proposal for a task, grounded in Hermes' deterministic context."""
     try:
         provider = ClaudeProvider()
-        result = HermesService().generate(task, provider=provider)
+        result = HermesService().generate(task, provider=provider, project=project)
     except (
         ProjectNotFoundError,
         ValueError,

@@ -153,6 +153,16 @@ def test_generate_attaches_diagnostics_to_result():
     assert result.diagnostics.project_id == mocks["context"].project.id
 
 
+def test_generate_passes_project_as_business_field():
+    service, mocks = _mocked_service()
+
+    service.generate("Implement streaming responses", project="AVANZIA")
+
+    built_task = mocks["context_engine"].build.call_args[0][0]
+    assert built_task.business == "AVANZIA"
+    assert built_task.request == "Implement streaming responses"
+
+
 def test_generate_with_real_engines_against_avanzia():
     service = HermesService()
 

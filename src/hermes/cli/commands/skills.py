@@ -12,9 +12,12 @@ def skills(
     task: str = typer.Argument(
         ..., help="Free-text task, e.g. 'Update the AVANZIA homepage copy'"
     ),
+    project: str = typer.Option(
+        "", "--project", "-p", help="Explicit project ID or name, e.g. 'AVANZIA'"
+    ),
 ) -> None:
     """Resolve required capabilities for a task and load the skills that satisfy them."""
-    hermes_task = Task(id="cli-skills", business="", request=task)
+    hermes_task = Task(id="cli-skills", business=project, request=task)
 
     try:
         context = ContextEngine().build(hermes_task)

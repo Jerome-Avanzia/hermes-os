@@ -252,3 +252,54 @@ def test_diagnostics_format_shows_dash_for_empty_repositories():
 def test_diagnostics_format_shows_dash_for_empty_knowledge():
     output = _format_diagnostics(_sample_report(knowledge_documents=[]))
     assert "-" in output
+
+
+# --- --project / -p flag ---
+
+def test_context_resolves_project_from_flag():
+    result = runner.invoke(app, ["context", "--project", "AVANZIA", "Implement streaming responses"])
+
+    assert result.exit_code == 0
+    assert "Project: Project(id=AVANZIA" in result.stdout
+
+
+def test_context_resolves_project_from_short_flag():
+    result = runner.invoke(app, ["context", "-p", "AVANZIA", "Implement streaming responses"])
+
+    assert result.exit_code == 0
+    assert "Project: Project(id=AVANZIA" in result.stdout
+
+
+def test_plan_resolves_project_from_flag():
+    result = runner.invoke(app, ["plan", "--project", "AVANZIA", "Implement streaming responses"])
+
+    assert result.exit_code == 0
+    assert "Project: Project(id=AVANZIA" in result.stdout
+
+
+def test_skills_resolves_project_from_flag():
+    result = runner.invoke(app, ["skills", "--project", "AVANZIA", "Implement streaming responses"])
+
+    assert result.exit_code == 0
+    assert "Project:" in result.stdout
+    assert "AVANZIA" in result.stdout
+
+
+def test_execute_resolves_project_from_flag():
+    result = runner.invoke(app, ["execute", "--project", "AVANZIA", "Implement streaming responses"])
+
+    assert result.exit_code == 0
+    assert "Project:" in result.stdout
+    assert "AVANZIA" in result.stdout
+
+
+def test_generate_resolves_project_from_flag_missing_api_key(monkeypatch):
+    """--project flag is threaded through to project resolution (API key error confirms resolution succeeded)."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    result = runner.invoke(
+        app, ["generate", "--project", "AVANZIA", "Implement streaming responses"]
+    )
+
+    assert result.exit_code == 1
+    assert "ANTHROPIC_API_KEY" in result.output

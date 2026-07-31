@@ -10,9 +10,12 @@ def context(
     task: str = typer.Argument(
         ..., help="Free-text task, e.g. 'Update the AVANZIA homepage copy'"
     ),
+    project: str = typer.Option(
+        "", "--project", "-p", help="Explicit project ID or name, e.g. 'AVANZIA'"
+    ),
 ) -> None:
     """Resolve project, knowledge, and workspace for a task, and print a summary."""
-    hermes_task = Task(id="cli-context", business="", request=task)
+    hermes_task = Task(id="cli-context", business=project, request=task)
 
     try:
         result = ContextEngine().build(hermes_task)
