@@ -16,13 +16,14 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from hermes.conductor import Conductor
 from hermes.kernel.profile_loader import ProfileLoader
-from hermes.providers.ollama_provider import ChatMessage, OllamaProvider
+from hermes.kernel.workspace_engine import WorkspaceEngine, WorkspaceNotFoundError
+from hermes.providers.ollama_provider import ChatMessage, OllamaConnectionError, OllamaProvider
 
 logger = logging.getLogger(__name__)
 
@@ -64,15 +65,22 @@ def _build_conductor(model: str | None = None) -> Conductor:
 
 _conductor = _build_conductor()
 
+_workspace_engine = WorkspaceEngine()
+_active_workspace_id = os.environ.get("HERMES_WORKSPACE", "AVANZIA")
+
 
 # -- SSE helpers ------------------------------------------------------------
 
 
 def _sse_stream(tokens: Iterator[str]) -> Iterator[str]:
     """Wrap token chunks as SSE ``data:`` frames."""
-    for token in tokens:
-        payload = json.dumps({"content": token})
-        yield f"data: {payload}\n\n"
+    try:
+        for token in tokens:
+            payload = json.dumps({"content": token})
+            yield f"data: {payload}\n\n"
+    except OllamaConnectionError as exc:
+        logger.error("Provider connection lost mid-stream: %s", exc)
+        yield f"data: {json.dumps({'error': str(exc)})}\n\n"
     yield "data: [DONE]\n\n"
 
 
@@ -90,22 +98,29 @@ async def chat(request: ChatRequest) -> StreamingResponse:
         for m in request.messages
     ]
 
-    if request.stream:
-        tokens = conductor.stream_chat(messages, profile_id=request.profile)
-        return StreamingResponse(
-            _sse_stream(tokens),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
-        )
+    try:
+        if request.stream:
+            tokens = conductor.stream_chat(messages, profile_id=request.profile)
+            return StreamingResponse(
+                _sse_stream(tokens),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                },
+            )
 
-    result = conductor.chat(messages, profile_id=request.profile)
-    return StreamingResponse(
-        iter([json.dumps({"content": result})]),
-        media_type="application/json",
-    )
+        result = conductor.chat(messages, profile_id=request.profile)
+        return StreamingResponse(
+            iter([json.dumps({"content": result})]),
+            media_type="application/json",
+        )
+    except OllamaConnectionError as exc:
+        logger.error("Provider unreachable: %s", exc)
+        return JSONResponse(
+            status_code=502,
+            content={"error": str(exc)},
+        )
 
 
 @app.get("/v1/profiles")
@@ -119,6 +134,49 @@ async def list_profiles() -> list[dict]:
         }
         for p in profiles
     ]
+
+
+@app.get("/v1/workspace")
+async def get_workspace() -> dict:
+    """Return the active workspace context for the UI bootstrap."""
+    try:
+        ctx = _workspace_engine.resolve(_active_workspace_id)
+    except WorkspaceNotFoundError:
+        return {
+            "workspace": {"id": "default", "name": "Hermes", "description": "", "mission": ""},
+            "profiles": [],
+            "sprint": None,
+        }
+
+    ws = ctx.workspace
+    default_profile = _conductor.profile_loader.get_default()
+
+    provider = _build_provider()
+
+    return {
+        "workspace": {
+            "id": ws.project_id,
+            "name": ws.name or ws.project_id,
+            "description": ws.description,
+            "mission": ws.mission,
+        },
+        "profiles": ws.profiles,
+        "repositories": [
+            {"name": r.name, "branch": r.branch}
+            for r in ctx.repositories
+        ],
+        "profile": {
+            "id": default_profile.id,
+            "name": default_profile.name,
+        },
+        "gateway": {
+            "version": app.version,
+        },
+        "model": {
+            "name": provider._model,
+        },
+        "sprint": None,
+    }
 
 
 @app.get("/health")

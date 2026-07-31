@@ -6,7 +6,7 @@ from typing import Any
 import yaml
 
 from hermes import config
-from hermes.models import Repository, Workspace, WorkspaceContext
+from hermes.models import Organization, Repository, Workspace, WorkspaceContext
 
 DEFAULT_WORKSPACES_ROOT = Path("workspaces")
 
@@ -77,7 +77,18 @@ class WorkspaceEngine:
                 f"No path or repositories defined for project: {project_id}"
             )
 
-        workspace = Workspace(project_id=project_id, path=str(workspace_path))
+        # Load workspace identity from workspace.yaml if present.
+        identity = self._load_workspace_identity(project_id)
+
+        workspace = Workspace(
+            project_id=project_id,
+            path=str(workspace_path),
+            name=identity.get("name", project_id),
+            description=identity.get("description", ""),
+            mission=identity.get("mission", ""),
+            profiles=identity.get("profiles", []),
+            organization=identity.get("organization"),
+        )
 
         logger.info(
             "Resolved workspace for %s: repositories=%d exists=%s git=%s",
@@ -112,6 +123,49 @@ class WorkspaceEngine:
             branch=branch,
             is_clean=is_clean,
             environment=environment,
+        )
+
+    def _load_workspace_identity(self, project_id: str) -> dict[str, Any]:
+        ws_yaml = self.workspaces_root / project_id / "workspace.yaml"
+        if not ws_yaml.is_file():
+            return {}
+        try:
+            data = self._read_yaml(ws_yaml)
+            org = self._load_organization(data)
+            return {
+                "name": data.get("name", project_id),
+                "description": data.get("description", ""),
+                "mission": data.get("mission", ""),
+                "profiles": data.get("profiles", []),
+                "organization": org,
+            }
+        except Exception:
+            logger.warning("Failed to read workspace identity: %s", ws_yaml, exc_info=True)
+            return {}
+
+    def _load_organization(self, ws_data: dict[str, Any]) -> Organization | None:
+        org_refs = ws_data.get("organization")
+        if not org_refs or not isinstance(org_refs, dict):
+            return None
+
+        facets: dict[str, str] = {}
+        for facet, rel_path in org_refs.items():
+            path = self.workspaces_root.parent / rel_path
+            if path.is_file():
+                try:
+                    facets[facet] = path.read_text(encoding="utf-8")
+                except Exception:
+                    logger.warning("Failed to read organization file: %s", path, exc_info=True)
+
+        name = ws_data.get("name", "")
+        return Organization(
+            name=name,
+            purpose=facets.get("purpose", ""),
+            vision=facets.get("vision", ""),
+            mission=facets.get("mission", ""),
+            positioning=facets.get("positioning", ""),
+            services=facets.get("services", ""),
+            brand=facets.get("brand", ""),
         )
 
     @staticmethod

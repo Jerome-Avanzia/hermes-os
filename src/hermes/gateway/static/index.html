@@ -3,66 +3,329 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hermes</title>
+<title>Hermes Workspace</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --border: #2a2d3a;
-    --text: #e4e4e7;
-    --text-muted: #71717a;
-    --accent: #6366f1;
-    --accent-hover: #818cf8;
-    --user-bg: #1e1e2e;
-    --assistant-bg: #16161e;
+    --bg: #0a0e14;
+    --bg-sidebar: #0d1117;
+    --surface: #151b23;
+    --surface-hover: #1a2130;
+    --border: #1e2a3a;
+    --text: #d1d5db;
+    --text-muted: #6b7280;
+    --text-dim: #4b5563;
+    --accent: #2dd4a8;
+    --accent-dim: #1a3a32;
+    --accent-hover: #34e0b4;
+    --red: #f87171;
+    --user-bg: #1a2130;
+    --assistant-bg: #111820;
+    --sidebar-width: 200px;
   }
 
   html, body {
     height: 100%;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
     background: var(--bg);
     color: var(--text);
+    overflow: hidden;
   }
 
-  #app {
+  /* ── Shell layout ─────────────────────────────────── */
+
+  #workspace {
+    display: flex;
+    height: 100%;
+  }
+
+  /* ── Sidebar ──────────────────────────────────────── */
+
+  #sidebar {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    height: 100%;
-    max-width: 768px;
-    margin: 0 auto;
+    overflow-y: auto;
   }
 
-  header {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border);
+  #sidebar-header {
+    padding: 14px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.04em;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
   }
 
-  header .title {
-    font-size: 14px;
-    color: var(--text-muted);
+  .nav-section {
+    padding: 12px 0 4px;
+  }
+
+  .nav-section-title {
+    padding: 0 16px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-dim);
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
 
-  #profile-select {
-    padding: 6px 10px;
-    background: var(--surface);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-family: inherit;
+  .nav-item {
+    display: flex;
+    align-items: center;
+    padding: 7px 16px;
     font-size: 13px;
-    outline: none;
+    color: var(--text-muted);
     cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: background 0.1s, color 0.1s;
   }
 
-  #profile-select:focus {
+  .nav-item:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+
+  .nav-item.active {
+    background: var(--surface);
+    color: var(--accent);
+    border-left-color: var(--accent);
+  }
+
+  .nav-badge {
+    margin-left: auto;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--accent);
+    color: var(--bg);
+    letter-spacing: 0.04em;
+  }
+
+  .sessions-list {
+    padding: 4px 0;
+  }
+
+  .session-item {
+    padding: 8px 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-left: 2px solid transparent;
+  }
+
+  .session-item:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+
+  .session-item.active {
+    color: var(--accent);
+    border-left-color: var(--accent);
+  }
+
+  .session-meta {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  /* ── Main area ────────────────────────────────────── */
+
+  #main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* ── Top header ───────────────────────────────────── */
+
+  #topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    min-height: 48px;
+  }
+
+  #topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  #topbar-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+
+  #topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .topbar-btn {
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .topbar-btn:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+
+  .topbar-btn.primary {
+    background: var(--accent);
+    color: var(--bg);
     border-color: var(--accent);
+    font-weight: 600;
+  }
+
+  .topbar-btn.primary:hover {
+    background: var(--accent-hover);
+  }
+
+  /* ── Status bar ───────────────────────────────────── */
+
+  #statusbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 6px 20px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--bg);
+  }
+
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .status-dot.offline {
+    background: var(--text-dim);
+  }
+
+  .status-label {
+    color: var(--text-muted);
+    font-family: monospace;
+    font-size: 11px;
+  }
+
+  /* ── Content area ─────────────────────────────────── */
+
+  #content {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .view {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .view.active {
+    display: flex;
+  }
+
+  /* ── Dashboard view ───────────────────────────────── */
+
+  #view-dashboard {
+    padding: 24px;
+    gap: 20px;
+    overflow-y: auto;
+  }
+
+  .widget-row {
+    display: flex;
+    gap: 16px;
+  }
+
+  .widget {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    flex: 1;
+  }
+
+  .widget-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .widget-value {
+    font-size: 36px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1;
+  }
+
+  .widget-sub {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .widget-coming-soon {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  .model-name {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .model-meta {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 6px;
+  }
+
+  /* ── Chat view ────────────────────────────────────── */
+
+  #view-chat {
+    flex-direction: column;
   }
 
   #messages {
@@ -80,7 +343,7 @@
     line-height: 1.6;
     white-space: pre-wrap;
     word-break: break-word;
-    font-size: 15px;
+    font-size: 14px;
     max-width: 85%;
   }
 
@@ -97,13 +360,22 @@
 
   .message.error {
     background: #2d1b1b;
-    color: #f87171;
+    color: var(--red);
     align-self: center;
     font-size: 13px;
   }
 
+  #chat-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+
   #input-area {
-    padding: 16px 20px;
+    padding: 14px 20px;
     border-top: 1px solid var(--border);
     display: flex;
     gap: 10px;
@@ -117,10 +389,10 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     font-family: inherit;
-    font-size: 15px;
+    font-size: 14px;
     resize: none;
     outline: none;
-    min-height: 44px;
+    min-height: 40px;
     max-height: 160px;
   }
 
@@ -129,74 +401,338 @@
   }
 
   #input-area button {
-    padding: 10px 20px;
+    padding: 10px 18px;
     background: var(--accent);
-    color: #fff;
+    color: var(--bg);
     border: none;
     border-radius: 8px;
-    font-size: 15px;
+    font-size: 13px;
+    font-weight: 600;
     cursor: pointer;
-    white-space: nowrap;
+    font-family: inherit;
   }
 
   #input-area button:hover { background: var(--accent-hover); }
   #input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Coming Soon view ─────────────────────────────── */
+
+  .view-placeholder {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--text-dim);
+  }
+
+  .view-placeholder-title {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  .view-placeholder-sub {
+    font-size: 13px;
+  }
+
+  /* ── Profile selector ─────────────────────────────── */
+
+  #profile-select {
+    padding: 5px 8px;
+    background: var(--surface);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-family: inherit;
+    font-size: 11px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  #profile-select:focus {
+    border-color: var(--accent);
+  }
 </style>
 </head>
 <body>
 
-<div id="app">
-  <header>
-    <span class="title">Hermes</span>
-    <select id="profile-select"><option value="">Loading...</option></select>
-  </header>
-  <div id="messages"></div>
-  <div id="input-area">
-    <textarea id="input" rows="1" placeholder="Send a message..." autofocus></textarea>
-    <button id="send">Send</button>
+<div id="workspace">
+
+  <!-- ── Sidebar ──────────────────────────────────── -->
+  <div id="sidebar">
+
+    <div id="sidebar-header">Hermes Workspace</div>
+
+    <div class="nav-item" data-view="search">Search</div>
+    <div class="nav-item" data-action="new-chat">New Session</div>
+
+    <div class="nav-section">
+      <div class="nav-section-title">Main</div>
+      <div class="nav-item active" data-view="dashboard">Dashboard</div>
+      <div class="nav-item" data-view="chat">Chat</div>
+      <div class="nav-item" data-view="files">Files</div>
+      <div class="nav-item" data-view="terminal">Terminal</div>
+      <div class="nav-item" data-view="jobs">Jobs</div>
+      <div class="nav-item" data-view="kanban">Kanban</div>
+      <div class="nav-item" data-view="conductor">Conductor</div>
+      <div class="nav-item" data-view="operations">Operations</div>
+      <div class="nav-item" data-view="swarm">Swarm</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-section-title">Knowledge</div>
+      <div class="nav-item" data-view="memory">Memory</div>
+      <div class="nav-item" data-view="skills">Skills</div>
+      <div class="nav-item" data-view="mcp">MCP</div>
+      <div class="nav-item" data-view="profiles">Profiles</div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-section-title">Sessions</div>
+      <div class="sessions-list" id="sessions-list">
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Main area ────────────────────────────────── -->
+  <div id="main">
+
+    <div id="topbar">
+      <div id="topbar-left">
+        <div id="topbar-title">Hermes Workspace</div>
+      </div>
+      <div id="topbar-right">
+        <button class="topbar-btn primary" id="btn-new-chat">New Chat</button>
+        <select id="profile-select"><option value="">Loading...</option></select>
+      </div>
+    </div>
+
+    <div id="statusbar">
+      <span class="status-pill">
+        <span class="status-dot" id="status-gateway-dot"></span>
+        <span class="status-label" id="status-gateway">Gateway</span>
+      </span>
+      <span class="status-pill">
+        <span class="status-dot offline" id="status-api-dot"></span>
+        <span class="status-label" id="status-api">API Server</span>
+      </span>
+    </div>
+
+    <div id="content">
+
+      <!-- Dashboard view -->
+      <div id="view-dashboard" class="view active">
+        <div class="widget-row" id="dashboard-widgets"></div>
+        <div class="widget" id="dashboard-model"></div>
+      </div>
+
+      <!-- Chat view -->
+      <div id="view-chat" class="view">
+        <div id="messages">
+          <div id="chat-empty">What would you like to accomplish today?</div>
+        </div>
+        <div id="input-area">
+          <textarea id="input" rows="1" placeholder="Send a message..." autofocus></textarea>
+          <button id="send">Send</button>
+        </div>
+      </div>
+
+      <!-- Placeholder views -->
+      <div id="view-search" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Search</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-files" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Files</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-terminal" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Terminal</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-jobs" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Jobs</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-kanban" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Kanban</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-conductor" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Conductor</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-operations" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Operations</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-swarm" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Swarm</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-memory" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Memory</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-skills" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Skills</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-mcp" class="view"><div class="view-placeholder"><div class="view-placeholder-title">MCP</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-profiles" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Profiles</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+
+    </div>
   </div>
 </div>
 
 <script>
 (function () {
-  const GATEWAY_URL = window.__HERMES_GATEWAY_URL__
-    || window.location.origin;
+  var GATEWAY = window.__HERMES_GATEWAY_URL__ || window.location.origin;
 
-  const messagesEl  = document.getElementById("messages");
-  const inputEl     = document.getElementById("input");
-  const sendBtn     = document.getElementById("send");
-  const profileSel  = document.getElementById("profile-select");
+  // ── DOM refs ──────────────────────────────────────
+  var messagesEl   = document.getElementById("messages");
+  var chatEmpty    = document.getElementById("chat-empty");
+  var inputEl      = document.getElementById("input");
+  var sendBtn      = document.getElementById("send");
+  var profileSel   = document.getElementById("profile-select");
+  var sessionsList = document.getElementById("sessions-list");
+  var dashWidgets  = document.getElementById("dashboard-widgets");
+  var dashModel    = document.getElementById("dashboard-model");
 
-  let history = [];
-  let streaming = false;
+  var history = [];
+  var streaming = false;
+  var currentView = "dashboard";
 
-  // -- Load profiles --------------------------------------------------------
+  // ── Navigation ────────────────────────────────────
 
-  async function loadProfiles() {
-    try {
-      const resp = await fetch(GATEWAY_URL + "/v1/profiles");
-      if (!resp.ok) return;
-      const profiles = await resp.json();
+  function switchView(name) {
+    document.querySelectorAll(".view").forEach(function (v) { v.classList.remove("active"); });
+    document.querySelectorAll(".nav-item").forEach(function (n) { n.classList.remove("active"); });
 
-      profileSel.innerHTML = "";
-      profiles.forEach(function (p) {
-        const opt = document.createElement("option");
-        opt.value = p.id;
-        opt.textContent = p.name;
-        if (p.id === "default") opt.selected = true;
-        profileSel.appendChild(opt);
-      });
-    } catch (_) {
-      profileSel.innerHTML = "<option value=''>Default</option>";
-    }
+    var view = document.getElementById("view-" + name);
+    if (view) view.classList.add("active");
+
+    var nav = document.querySelector('.nav-item[data-view="' + name + '"]');
+    if (nav) nav.classList.add("active");
+
+    currentView = name;
+    if (name === "chat") inputEl.focus();
   }
 
-  loadProfiles();
+  document.querySelectorAll(".nav-item[data-view]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      switchView(el.dataset.view);
+    });
+  });
 
-  // -- Chat -----------------------------------------------------------------
+  // New Session / New Chat → switch to chat
+  document.querySelectorAll('[data-action="new-chat"]').forEach(function (el) {
+    el.addEventListener("click", function () {
+      history = [];
+      messagesEl.innerHTML = "";
+      chatEmpty = document.createElement("div");
+      chatEmpty.id = "chat-empty";
+      chatEmpty.textContent = "What would you like to accomplish today?";
+      messagesEl.appendChild(chatEmpty);
+      switchView("chat");
+    });
+  });
+
+  document.getElementById("btn-new-chat").addEventListener("click", function () {
+    history = [];
+    messagesEl.innerHTML = "";
+    var empty = document.createElement("div");
+    empty.id = "chat-empty";
+    empty.textContent = "What would you like to accomplish today?";
+    messagesEl.appendChild(empty);
+    switchView("chat");
+  });
+
+  // ── Load profiles ─────────────────────────────────
+
+  function loadProfiles() {
+    fetch(GATEWAY + "/v1/profiles")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (profiles) {
+        profileSel.innerHTML = "";
+        profiles.forEach(function (p) {
+          var opt = document.createElement("option");
+          opt.value = p.id;
+          opt.textContent = p.name;
+          if (p.id === "default") opt.selected = true;
+          profileSel.appendChild(opt);
+        });
+      })
+      .catch(function () {
+        profileSel.innerHTML = "<option value=''>Default</option>";
+      });
+  }
+
+  // ── Load workspace ────────────────────────────────
+
+  function loadWorkspace() {
+    fetch(GATEWAY + "/v1/workspace")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        renderDashboard(data);
+        renderStatusBar(data);
+      })
+      .catch(function () {});
+  }
+
+  function renderDashboard(data) {
+    var ws = data.workspace || {};
+    var repos = data.repositories || [];
+    var model = data.model || {};
+
+    // Metric widgets
+    var html = "";
+    html += '<div class="widget">';
+    html += '  <div class="widget-title">Workspace</div>';
+    html += '  <div class="model-name">' + esc(ws.name || "Hermes") + '</div>';
+    html += '  <div class="model-meta">' + esc(ws.description || "") + '</div>';
+    if (ws.mission) {
+      html += '<div class="model-meta" style="margin-top:8px;color:var(--text-muted)">' + esc(ws.mission) + '</div>';
+    }
+    html += '</div>';
+
+    html += '<div class="widget">';
+    html += '  <div class="widget-title">Repositories</div>';
+    if (repos.length > 0) {
+      repos.forEach(function (r) {
+        html += '<div style="margin-bottom:6px">';
+        html += '  <span style="color:var(--text)">' + esc(r.name) + '</span>';
+        html += '  <span style="color:var(--text-dim);font-size:11px;margin-left:8px">' + esc(r.branch || "") + '</span>';
+        html += '</div>';
+      });
+    } else {
+      html += '<div class="widget-coming-soon">No repositories configured</div>';
+    }
+    html += '</div>';
+
+    dashWidgets.innerHTML = html;
+
+    // Model widget
+    var mhtml = '';
+    mhtml += '<div class="widget-title">Active Model</div>';
+    mhtml += '<div class="model-name">' + esc(model.name || "Unknown") + '</div>';
+    mhtml += '<div class="model-meta">Provider: Ollama</div>';
+    dashModel.innerHTML = mhtml;
+  }
+
+  function renderStatusBar(data) {
+    var gw = data.gateway || {};
+    var gwLabel = document.getElementById("status-gateway");
+    gwLabel.textContent = "Gateway v" + (gw.version || "?");
+  }
+
+  // ── Health check ──────────────────────────────────
+
+  function checkHealth() {
+    fetch(GATEWAY + "/health")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        var dot = document.getElementById("status-gateway-dot");
+        var apiDot = document.getElementById("status-api-dot");
+        if (data && data.status === "ok") {
+          dot.classList.remove("offline");
+          apiDot.classList.remove("offline");
+          document.getElementById("status-api").textContent = "API Server";
+        }
+      })
+      .catch(function () {
+        document.getElementById("status-gateway-dot").classList.add("offline");
+        document.getElementById("status-api-dot").classList.add("offline");
+      });
+  }
+
+  // ── Chat ──────────────────────────────────────────
+
+  function esc(s) {
+    var d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
 
   function addMessage(role, content) {
-    const div = document.createElement("div");
+    var empty = document.getElementById("chat-empty");
+    if (empty) empty.remove();
+
+    var div = document.createElement("div");
     div.className = "message " + role;
     div.textContent = content;
     messagesEl.appendChild(div);
@@ -210,66 +746,89 @@
     inputEl.disabled = active;
   }
 
-  async function send() {
-    const text = inputEl.value.trim();
+  function send() {
+    var text = inputEl.value.trim();
     if (!text || streaming) return;
+
+    // Auto-switch to chat if sending from another view
+    if (currentView !== "chat") switchView("chat");
 
     inputEl.value = "";
     inputEl.style.height = "auto";
     addMessage("user", text);
     history.push({ role: "user", content: text });
 
+    // Update session list
+    updateSessionDisplay(text);
+
     setStreaming(true);
-    const assistantDiv = addMessage("assistant", "");
+    var assistantDiv = addMessage("assistant", "");
+    var profile = profileSel.value || undefined;
 
-    const profile = profileSel.value || undefined;
-
-    try {
-      const resp = await fetch(GATEWAY_URL + "/v1/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history, profile: profile }),
-      });
-
+    fetch(GATEWAY + "/v1/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: history, profile: profile }),
+    })
+    .then(function (resp) {
       if (!resp.ok) {
-        throw new Error("Gateway returned " + resp.status);
+        return resp.json().catch(function () { return {}; }).then(function (body) {
+          throw new Error(body.error || "Gateway returned " + resp.status);
+        });
+      }
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var full = "";
+      var buffer = "";
+
+      function pump() {
+        return reader.read().then(function (result) {
+          if (result.done) {
+            history.push({ role: "assistant", content: full });
+            setStreaming(false);
+            inputEl.focus();
+            return;
+          }
+          buffer += decoder.decode(result.value, { stream: true });
+          var lines = buffer.split("\n");
+          buffer = lines.pop();
+
+          for (var i = 0; i < lines.length; i++) {
+            if (!lines[i].startsWith("data: ")) continue;
+            var payload = lines[i].slice(6);
+            if (payload === "[DONE]") continue;
+            try {
+              var chunk = JSON.parse(payload);
+              if (chunk.error) throw new Error(chunk.error);
+              if (chunk.content) {
+                full += chunk.content;
+                assistantDiv.textContent = full;
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+              }
+            } catch (e) { if (e.message) throw e; }
+          }
+          return pump();
+        });
       }
 
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let full = "";
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const payload = line.slice(6);
-          if (payload === "[DONE]") continue;
-
-          try {
-            const chunk = JSON.parse(payload);
-            if (chunk.content) {
-              full += chunk.content;
-              assistantDiv.textContent = full;
-              messagesEl.scrollTop = messagesEl.scrollHeight;
-            }
-          } catch (_) {}
-        }
-      }
-
-      history.push({ role: "assistant", content: full });
-    } catch (err) {
+      return pump();
+    })
+    .catch(function (err) {
       addMessage("error", "Error: " + err.message);
-    } finally {
       setStreaming(false);
       inputEl.focus();
+    });
+  }
+
+  function updateSessionDisplay(firstMessage) {
+    // Show current session in the sidebar
+    var existing = sessionsList.querySelector(".session-item.active");
+    if (!existing) {
+      var label = firstMessage.length > 24 ? firstMessage.slice(0, 24) + "..." : firstMessage;
+      var item = document.createElement("div");
+      item.className = "session-item active";
+      item.innerHTML = '<div>' + esc(label) + '</div><div class="session-meta">Local Chat</div>';
+      sessionsList.prepend(item);
     }
   }
 
@@ -286,6 +845,11 @@
     this.style.height = "auto";
     this.style.height = Math.min(this.scrollHeight, 160) + "px";
   });
+
+  // ── Init ──────────────────────────────────────────
+  loadProfiles();
+  loadWorkspace();
+  checkHealth();
 })();
 </script>
 

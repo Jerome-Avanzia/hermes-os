@@ -1,0 +1,15 @@
+id: AVANZIA
+name: AVANZIA
+description: AI-powered business design, build, and operations.
+mission: Design, build, and operate AI-powered businesses through strategy, automation, and reusable systems.
+profiles:
+  - default
+  - business
+  - developer
+organization:
+  purpose: knowledge/AVANZIA/01-purpose.md
+  vision: knowledge/AVANZIA/02-vision.md
+  mission: knowledge/AVANZIA/03-mission.md
+  positioning: knowledge/AVANZIA/04-positioning.md
+  services: knowledge/AVANZIA/05-services.md
+  brand: knowledge/AVANZIA/06-brand-personality.md

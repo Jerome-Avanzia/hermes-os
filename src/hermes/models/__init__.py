@@ -8,6 +8,7 @@ from hermes.models.file_content import FileContent
 from hermes.models.knowledge_context import KnowledgeContext
 from hermes.models.knowledge_document import KnowledgeDocument
 from hermes.models.loaded_skill import LoadedSkill
+from hermes.models.organization import Organization
 from hermes.models.plan import Plan
 from hermes.models.profile import Profile
 from hermes.models.project import Project
@@ -36,6 +37,7 @@ __all__ = [
     "ExecutionStep",
     "ExecutionPlan",
     "LoadedSkill",
+    "Organization",
     "ExecutionResult",
     "WorkspaceFile",
     "WorkspaceSnapshot",
