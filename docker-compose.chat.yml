@@ -1,4 +1,4 @@
-# Hermes Chat Stack
+labels# Hermes Chat Stack
 #
 # Conversational pipeline: Browser → Traefik → Gateway → Ollama → Stream → Browser
 #
@@ -41,7 +41,7 @@ services:
       traefik.enable: "true"
       traefik.http.routers.hermes-chat.rule: "Host(`${HERMES_CHAT_DOMAIN}`)"
       traefik.http.routers.hermes-chat.entrypoints: "websecure"
-      traefik.http.routers.hermes-chat.tls.certresolver: "letsencrypt"
+      traefik.http.routers.hermes-chat.tls.certresolver: "mytlschallenge"
       traefik.http.services.hermes-chat.loadbalancer.server.port: "8000"
 
     healthcheck:
