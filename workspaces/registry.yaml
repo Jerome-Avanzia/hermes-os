@@ -1,0 +1,7 @@
+workspaces:
+  AVANZIA:
+    repositories:
+      - name: avanzia-website
+        path: ../avanzia-website
+      - name: hermes-os
+        path: ../hermes-os

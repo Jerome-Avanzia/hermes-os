@@ -1,0 +1,16 @@
+id: git
+name: Git
+version: 1.0.0
+
+capabilities:
+  - git
+
+description: Manages version control operations.
+
+provides:
+  - version control
+keywords:
+  - git
+  - commit
+  - branch
+  - repository

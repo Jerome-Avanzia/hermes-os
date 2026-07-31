@@ -1,0 +1,16 @@
+id: kernel
+name: Kernel
+version: 1.0.0
+
+capabilities:
+  - kernel
+
+keywords: []
+
+description: Default reasoning capability. Used when no specialist skill matches the task.
+
+provides:
+  - general reasoning
+  - business analysis
+  - planning
+  - review
