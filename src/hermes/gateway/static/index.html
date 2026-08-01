@@ -110,6 +110,10 @@
     letter-spacing: 0.04em;
   }
 
+  .nav-badge.alert {
+    background: var(--red);
+  }
+
   .sessions-list {
     padding: 4px 0;
   }
@@ -855,6 +859,7 @@
     if (nav) nav.classList.add("active");
 
     currentView = name;
+    clearBadge(name);
     if (name === "chat") inputEl.focus();
     if (name === "documents") loadDocuments();
     if (name === "operations") loadOperations();
@@ -1345,7 +1350,7 @@
     fetch(GATEWAY + "/v1/operations/" + encodeURIComponent(id) + "/approve", { method: "POST" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (op) {
-        if (op) renderOperationDetail(op);
+        if (op) { renderOperationDetail(op); loadBadges(); }
       })
       .catch(function () {});
   }
@@ -1354,7 +1359,7 @@
     fetch(GATEWAY + "/v1/operations/" + encodeURIComponent(id) + "/reject", { method: "POST" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (op) {
-        if (op) renderOperationDetail(op);
+        if (op) { renderOperationDetail(op); loadBadges(); }
       })
       .catch(function () {});
   }
@@ -1801,6 +1806,8 @@
         switchView("operations");
         openOperation(this.dataset.opId);
       });
+
+      loadBadges();
     })
     .catch(function (err) {
       promoteBtn.disabled = false;
@@ -1811,9 +1818,70 @@
 
   promoteBtn.addEventListener("click", promoteToOperation);
 
+  // ── Notification Badges ───────────────────────────
+
+  function formatBadgeCount(n) {
+    if (n > 99) return "99+";
+    return String(n);
+  }
+
+  function setBadge(viewName, count, alertStyle) {
+    var nav = document.querySelector('.nav-item[data-view="' + viewName + '"]');
+    if (!nav) return;
+    var existing = nav.querySelector(".nav-badge");
+    if (count <= 0) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (!existing) {
+      existing = document.createElement("span");
+      existing.className = "nav-badge" + (alertStyle ? " alert" : "");
+      nav.appendChild(existing);
+    } else {
+      existing.className = "nav-badge" + (alertStyle ? " alert" : "");
+    }
+    existing.textContent = formatBadgeCount(count);
+  }
+
+  function clearBadge(viewName) {
+    var nav = document.querySelector('.nav-item[data-view="' + viewName + '"]');
+    if (!nav) return;
+    var badge = nav.querySelector(".nav-badge");
+    if (badge) badge.remove();
+  }
+
+  function loadBadges() {
+    // Fetch operations and jobs independently (Founder amendment 4)
+    fetch(GATEWAY + "/v1/operations")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (ops) {
+        if (ops === null) return;
+        var escalated = 0;
+        for (var i = 0; i < ops.length; i++) {
+          if (ops[i].status === "awaiting_escalation") escalated++;
+        }
+        if (currentView !== "today") setBadge("today", escalated, false);
+        if (currentView !== "operations") setBadge("operations", escalated, false);
+      })
+      .catch(function () {});
+
+    fetch(GATEWAY + "/v1/jobs")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (jobs) {
+        if (jobs === null) return;
+        var failed = 0;
+        for (var i = 0; i < jobs.length; i++) {
+          if (jobs[i].status === "failed") failed++;
+        }
+        if (currentView !== "jobs") setBadge("jobs", failed, true);
+      })
+      .catch(function () {});
+  }
+
   // ── Init ──────────────────────────────────────────
   loadProfiles();
   loadDashboard();
+  loadBadges();
   checkHealth();
 })();
 </script>

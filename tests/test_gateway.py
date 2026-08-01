@@ -1018,3 +1018,130 @@ def test_ui_chat_promote_disables_during_request():
     resp = client.get("/")
     assert "promoteBtn.disabled = true" in resp.text
     assert "promoteBtn.disabled = false" in resp.text
+
+
+# -- UI: Notification Badges (Sprint 19) ------------------------------------
+
+
+def test_ui_has_nav_badge_css():
+    resp = client.get("/")
+    assert ".nav-badge" in resp.text
+
+
+def test_ui_has_nav_badge_alert_css():
+    resp = client.get("/")
+    assert ".nav-badge.alert" in resp.text
+
+
+def test_ui_has_load_badges_function():
+    resp = client.get("/")
+    assert "function loadBadges()" in resp.text
+
+
+def test_ui_badges_fetch_operations():
+    resp = client.get("/")
+    # loadBadges fetches /v1/operations for escalation count
+    assert "loadBadges" in resp.text
+    assert '"/v1/operations"' in resp.text
+
+
+def test_ui_badges_fetch_jobs():
+    resp = client.get("/")
+    # loadBadges fetches /v1/jobs for failed count
+    assert '"/v1/jobs"' in resp.text
+
+
+def test_ui_badges_compute_escalation_count():
+    resp = client.get("/")
+    assert '"awaiting_escalation"' in resp.text
+    assert "escalated" in resp.text
+
+
+def test_ui_badges_compute_failed_count():
+    resp = client.get("/")
+    assert '"failed"' in resp.text
+
+
+def test_ui_badges_render_on_today_nav():
+    resp = client.get("/")
+    assert 'setBadge("today"' in resp.text
+
+
+def test_ui_badges_render_on_operations_nav():
+    resp = client.get("/")
+    assert 'setBadge("operations"' in resp.text
+
+
+def test_ui_badges_render_on_jobs_nav():
+    resp = client.get("/")
+    assert 'setBadge("jobs"' in resp.text
+
+
+def test_ui_badges_clear_on_navigation():
+    resp = client.get("/")
+    assert "clearBadge(name)" in resp.text
+
+
+def test_ui_badges_loaded_on_init():
+    resp = client.get("/")
+    # loadBadges() must be called during init
+    lines = resp.text.split("\n")
+    init_found = False
+    for line in lines:
+        if "// ── Init" in line:
+            init_found = True
+        if init_found and "loadBadges()" in line:
+            break
+    assert init_found
+
+
+def test_ui_badges_format_count_caps_at_99():
+    """Counts over 99 display as '99+' (Founder amendment 3)."""
+    resp = client.get("/")
+    assert 'return "99+"' in resp.text
+    assert "formatBadgeCount" in resp.text
+
+
+def test_ui_badges_refresh_after_promote():
+    """loadBadges() is called after successful promote (Founder amendment 1)."""
+    resp = client.get("/")
+    # In promoteToOperation success handler, loadBadges() is called
+    assert "loadBadges" in resp.text
+
+
+def test_ui_badges_refresh_after_approve():
+    """loadBadges() is called after successful approve (Founder amendment 1)."""
+    resp = client.get("/")
+    # approveOperation calls loadBadges after success
+    text = resp.text
+    # Find approveOperation function and verify loadBadges is in it
+    idx = text.find("function approveOperation")
+    assert idx > 0
+    next_fn = text.find("function rejectOperation", idx)
+    section = text[idx:next_fn]
+    assert "loadBadges()" in section
+
+
+def test_ui_badges_refresh_after_reject():
+    """loadBadges() is called after successful reject (Founder amendment 1)."""
+    resp = client.get("/")
+    text = resp.text
+    idx = text.find("function rejectOperation")
+    assert idx > 0
+    next_section = text.find("// ──", idx)
+    section = text[idx:next_section]
+    assert "loadBadges()" in section
+
+
+def test_ui_badges_independent_failure():
+    """Operations and Jobs badges are fetched independently (Founder amendment 4)."""
+    resp = client.get("/")
+    # Two separate fetch calls, not Promise.all
+    text = resp.text
+    idx = text.find("function loadBadges()")
+    assert idx > 0
+    end = text.find("// ──", idx + 1)
+    section = text[idx:end]
+    # Should have two separate fetch calls
+    fetches = section.count("fetch(GATEWAY")
+    assert fetches == 2
