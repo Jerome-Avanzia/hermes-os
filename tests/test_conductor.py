@@ -6,7 +6,17 @@ import pytest
 
 from hermes.conductor import Conductor
 from hermes.kernel.profile_loader import ProfileLoader, ProfileNotFoundError
-from hermes.models.profile import Profile
+from hermes.models import (
+    Context,
+    KnowledgeContext,
+    KnowledgeDocument,
+    Organization,
+    Profile,
+    Project,
+    Task,
+    Workspace,
+    WorkspaceContext,
+)
 from hermes.providers.ollama_provider import ChatMessage, OllamaProvider
 
 
@@ -185,3 +195,141 @@ def test_profile_loader_is_accessible():
     loader = ProfileLoader(profiles_dir=PROFILES_DIR)
     conductor = Conductor(_make_provider(), profile_loader=loader)
     assert conductor.profile_loader is loader
+
+
+# -- Context-based rendering -----------------------------------------------
+
+
+def _make_context(
+    profile: Profile | None = None,
+    organization: Organization | None = None,
+    knowledge_docs: list[KnowledgeDocument] | None = None,
+) -> Context:
+    project = Project(id="AVANZIA", name="AVANZIA", path="knowledge/AVANZIA")
+    ws = Workspace(
+        project_id="AVANZIA",
+        path="/tmp/avanzia",
+        name="AVANZIA",
+        organization=organization,
+    )
+    return Context(
+        task=Task(id="conversation", business="AVANZIA", request=""),
+        project=project,
+        knowledge=KnowledgeContext(project=project, documents=knowledge_docs or []),
+        workspace=WorkspaceContext(
+            workspace=ws,
+            exists=True,
+            is_git_repo=False,
+            branch=None,
+            is_clean=None,
+            environment=[],
+        ),
+        capabilities=[],
+        profile=profile,
+    )
+
+
+def test_stream_chat_with_context_uses_profile_from_context():
+    provider = _make_provider()
+    conductor = Conductor(provider, profile_loader=ProfileLoader(profiles_dir=PROFILES_DIR))
+
+    profile = Profile(id="test", name="Test", system_prompt="You are a test bot.")
+    context = _make_context(profile=profile)
+
+    with patch.object(provider, "stream_chat", return_value=iter(["Hi"])) as mock:
+        list(conductor.stream_chat_with_context(_user_message(), context))
+
+    call_messages = mock.call_args[0][0]
+    assert call_messages[0].role == "system"
+    assert "test bot" in call_messages[0].content
+
+
+def test_stream_chat_with_context_includes_organization():
+    provider = _make_provider()
+    conductor = Conductor(provider, profile_loader=ProfileLoader(profiles_dir=PROFILES_DIR))
+
+    org = Organization(
+        name="AVANZIA",
+        purpose="Build AI businesses.",
+        mission="Design, build, operate.",
+    )
+    profile = Profile(id="default", name="Hermes", system_prompt="You are Hermes.")
+    context = _make_context(profile=profile, organization=org)
+
+    with patch.object(provider, "stream_chat", return_value=iter(["OK"])) as mock:
+        list(conductor.stream_chat_with_context(_user_message(), context))
+
+    system_content = mock.call_args[0][0][0].content
+    assert "Build AI businesses" in system_content
+    assert "Design, build, operate" in system_content
+
+
+def test_stream_chat_with_context_includes_knowledge():
+    provider = _make_provider()
+    conductor = Conductor(provider, profile_loader=ProfileLoader(profiles_dir=PROFILES_DIR))
+
+    docs = [
+        KnowledgeDocument(
+            id="purpose", title="Purpose", path="knowledge/AVANZIA/01-purpose.md",
+            content="We exist to build AI-powered businesses.",
+        ),
+    ]
+    profile = Profile(id="default", name="Hermes", system_prompt="You are Hermes.")
+    context = _make_context(profile=profile, knowledge_docs=docs)
+
+    with patch.object(provider, "stream_chat", return_value=iter(["OK"])) as mock:
+        list(conductor.stream_chat_with_context(_user_message(), context))
+
+    system_content = mock.call_args[0][0][0].content
+    assert "AI-powered businesses" in system_content
+
+
+def test_stream_chat_with_context_yields_tokens():
+    provider = _make_provider()
+    conductor = Conductor(provider, profile_loader=ProfileLoader(profiles_dir=PROFILES_DIR))
+
+    profile = Profile(id="default", name="Hermes", system_prompt="You are Hermes.")
+    context = _make_context(profile=profile)
+
+    with patch.object(provider, "stream_chat", return_value=iter(["Hello", " world"])):
+        tokens = list(conductor.stream_chat_with_context(_user_message(), context))
+
+    assert tokens == ["Hello", " world"]
+
+
+def test_stream_chat_with_context_includes_all_selected_docs():
+    """All documents in context.knowledge are included — no silent truncation."""
+    provider = _make_provider()
+    conductor = Conductor(provider, profile_loader=ProfileLoader(profiles_dir=PROFILES_DIR))
+
+    docs = [
+        KnowledgeDocument(
+            id=f"doc-{i}", title=f"Document {i}", path=f"knowledge/AVANZIA/doc-{i}.md",
+            content=f"Content of document {i}.",
+        )
+        for i in range(8)
+    ]
+    profile = Profile(id="default", name="Hermes", system_prompt="You are Hermes.")
+    context = _make_context(profile=profile, knowledge_docs=docs)
+
+    with patch.object(provider, "stream_chat", return_value=iter(["OK"])) as mock:
+        list(conductor.stream_chat_with_context(_user_message(), context))
+
+    system_content = mock.call_args[0][0][0].content
+    for i in range(8):
+        assert f"Document {i}" in system_content
+        assert f"Content of document {i}" in system_content
+
+
+def test_stream_chat_with_context_without_profile_uses_default():
+    provider = _make_provider()
+    conductor = Conductor(provider, profile_loader=ProfileLoader(profiles_dir=PROFILES_DIR))
+
+    context = _make_context(profile=None)
+
+    with patch.object(provider, "stream_chat", return_value=iter(["OK"])) as mock:
+        list(conductor.stream_chat_with_context(_user_message(), context))
+
+    call_messages = mock.call_args[0][0]
+    assert call_messages[0].role == "system"
+    assert "Hermes" in call_messages[0].content

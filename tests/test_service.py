@@ -1,12 +1,15 @@
 from datetime import datetime
 from unittest.mock import MagicMock
 
+import pytest
+
 from hermes.models import (
     Context,
     ExecutionPlan,
     ExecutionResult,
     KnowledgeContext,
     LoadedSkill,
+    Profile,
     Project,
     Task,
     Workspace,
@@ -14,6 +17,7 @@ from hermes.models import (
     WorkspaceSnapshot,
 )
 from hermes.providers.ai_provider import AIProvider
+from hermes.providers.ollama_provider import ChatMessage
 from hermes.service import HermesService
 
 
@@ -174,3 +178,97 @@ def test_generate_with_real_engines_against_avanzia():
     assert result.generated_output is None
     assert result.diagnostics is not None
     assert result.diagnostics.project_id == "AVANZIA"
+
+
+# -- Conversation path (stream_chat / chat) --------------------------------
+
+
+def _conversation_context() -> Context:
+    project = Project(id="AVANZIA", name="AVANZIA", path="knowledge/AVANZIA")
+    return Context(
+        task=Task(id="conversation", business="AVANZIA", request=""),
+        project=project,
+        knowledge=KnowledgeContext(project=project, documents=[]),
+        workspace=WorkspaceContext(
+            workspace=Workspace(project_id="AVANZIA", path="/tmp/avanzia"),
+            exists=True,
+            is_git_repo=False,
+            branch=None,
+            is_clean=None,
+            environment=[],
+        ),
+        capabilities=[],
+        profile=Profile(id="default", name="Hermes", system_prompt="You are Hermes."),
+    )
+
+
+def test_stream_chat_delegates_to_context_engine_and_conductor():
+    mock_context_engine = MagicMock()
+    mock_conductor = MagicMock()
+    context = _conversation_context()
+    mock_context_engine.build_conversation.return_value = context
+    mock_conductor.stream_chat_with_context.return_value = iter(["Hello", " world"])
+
+    service = HermesService(context_engine=mock_context_engine, conductor=mock_conductor)
+    messages = [ChatMessage(role="user", content="Hi")]
+    tokens = list(service.stream_chat(messages, workspace_id="AVANZIA"))
+
+    assert tokens == ["Hello", " world"]
+    mock_context_engine.build_conversation.assert_called_once_with("AVANZIA", None, query="Hi")
+    mock_conductor.stream_chat_with_context.assert_called_once_with(messages, context)
+
+
+def test_stream_chat_passes_profile_id():
+    mock_context_engine = MagicMock()
+    mock_conductor = MagicMock()
+    context = _conversation_context()
+    mock_context_engine.build_conversation.return_value = context
+    mock_conductor.stream_chat_with_context.return_value = iter(["OK"])
+
+    service = HermesService(context_engine=mock_context_engine, conductor=mock_conductor)
+    messages = [ChatMessage(role="user", content="Hi")]
+    list(service.stream_chat(messages, workspace_id="AVANZIA", profile_id="developer"))
+
+    mock_context_engine.build_conversation.assert_called_once_with("AVANZIA", "developer", query="Hi")
+
+
+def test_chat_returns_joined_tokens():
+    mock_context_engine = MagicMock()
+    mock_conductor = MagicMock()
+    context = _conversation_context()
+    mock_context_engine.build_conversation.return_value = context
+    mock_conductor.stream_chat_with_context.return_value = iter(["Hello", " world"])
+
+    service = HermesService(context_engine=mock_context_engine, conductor=mock_conductor)
+    messages = [ChatMessage(role="user", content="Hi")]
+    result = service.chat(messages, workspace_id="AVANZIA")
+
+    assert result == "Hello world"
+
+
+def test_stream_chat_passes_last_user_message_as_query():
+    mock_context_engine = MagicMock()
+    mock_conductor = MagicMock()
+    context = _conversation_context()
+    mock_context_engine.build_conversation.return_value = context
+    mock_conductor.stream_chat_with_context.return_value = iter(["OK"])
+
+    service = HermesService(context_engine=mock_context_engine, conductor=mock_conductor)
+    messages = [
+        ChatMessage(role="user", content="Hello"),
+        ChatMessage(role="assistant", content="Hi there"),
+        ChatMessage(role="user", content="What is the brand personality?"),
+    ]
+    list(service.stream_chat(messages, workspace_id="AVANZIA"))
+
+    mock_context_engine.build_conversation.assert_called_once_with(
+        "AVANZIA", None, query="What is the brand personality?"
+    )
+
+
+def test_stream_chat_raises_without_conductor():
+    service = HermesService()
+    messages = [ChatMessage(role="user", content="Hi")]
+
+    with pytest.raises(RuntimeError, match="Conductor"):
+        list(service.stream_chat(messages, workspace_id="AVANZIA"))

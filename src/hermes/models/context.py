@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from hermes.models.capability import Capability
 from hermes.models.knowledge_context import KnowledgeContext
+from hermes.models.profile import Profile
 from hermes.models.project import Project
 from hermes.models.task import Task
 from hermes.models.workspace_context import WorkspaceContext
@@ -14,6 +15,7 @@ class Context:
     knowledge: KnowledgeContext
     workspace: WorkspaceContext
     capabilities: list[Capability]
+    profile: Profile | None = None
 
     def __str__(self) -> str:
         capability_ids = ", ".join(capability.id for capability in self.capabilities)

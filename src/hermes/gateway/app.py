@@ -1,11 +1,12 @@
-"""Hermes Gateway — lightweight API that bridges the chat UI to the LLM runtime.
+"""Hermes Gateway — protocol boundary between the Workspace UI and HermesService.
 
 Exposes SSE chat (POST /v1/chat), profile listing (GET /v1/profiles),
-health check (GET /health), and the static chat UI (GET /).
+workspace bootstrap (GET /v1/workspace), health check (GET /health),
+and the static Workspace shell (GET /).
 
-All chat requests are routed through the Conductor, which resolves the
-active profile and prepends the system prompt before delegating to the
-LLM provider.
+The Gateway performs protocol translation only (ADR-0002). All chat
+requests are delegated to HermesService, which orchestrates context
+assembly and conversation rendering.
 """
 
 import json
@@ -24,6 +25,8 @@ from hermes.conductor import Conductor
 from hermes.kernel.profile_loader import ProfileLoader
 from hermes.kernel.workspace_engine import WorkspaceEngine, WorkspaceNotFoundError
 from hermes.providers.ollama_provider import ChatMessage, OllamaConnectionError, OllamaProvider
+from hermes.runtime.context_engine import ContextEngine
+from hermes.service import HermesService
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +50,7 @@ class ChatRequest(BaseModel):
     stream: bool = True
 
 
-# -- Singleton Conductor ----------------------------------------------------
+# -- Application singletons ------------------------------------------------
 
 
 def _build_provider(model: str | None = None) -> OllamaProvider:
@@ -56,17 +59,22 @@ def _build_provider(model: str | None = None) -> OllamaProvider:
     return OllamaProvider(model=ollama_model, base_url=ollama_url)
 
 
-def _build_conductor(model: str | None = None) -> Conductor:
-    return Conductor(
-        provider=_build_provider(model),
-        profile_loader=ProfileLoader(),
-    )
-
-
-_conductor = _build_conductor()
-
+_profile_loader = ProfileLoader()
 _workspace_engine = WorkspaceEngine()
 _active_workspace_id = os.environ.get("HERMES_WORKSPACE", "AVANZIA")
+
+
+def _build_hermes_service(model: str | None = None) -> HermesService:
+    provider = _build_provider(model)
+    conductor = Conductor(provider=provider, profile_loader=_profile_loader)
+    context_engine = ContextEngine(
+        workspace_engine=_workspace_engine,
+        profile_loader=_profile_loader,
+    )
+    return HermesService(context_engine=context_engine, conductor=conductor)
+
+
+_hermes_service = _build_hermes_service()
 
 
 # -- SSE helpers ------------------------------------------------------------
@@ -89,9 +97,9 @@ def _sse_stream(tokens: Iterator[str]) -> Iterator[str]:
 
 @app.post("/v1/chat")
 async def chat(request: ChatRequest) -> StreamingResponse:
-    conductor = _conductor
+    service = _hermes_service
     if request.model:
-        conductor = _build_conductor(request.model)
+        service = _build_hermes_service(request.model)
 
     messages = [
         ChatMessage(role=m["role"], content=m["content"])
@@ -100,7 +108,11 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 
     try:
         if request.stream:
-            tokens = conductor.stream_chat(messages, profile_id=request.profile)
+            tokens = service.stream_chat(
+                messages,
+                workspace_id=_active_workspace_id,
+                profile_id=request.profile,
+            )
             return StreamingResponse(
                 _sse_stream(tokens),
                 media_type="text/event-stream",
@@ -110,7 +122,11 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                 },
             )
 
-        result = conductor.chat(messages, profile_id=request.profile)
+        result = service.chat(
+            messages,
+            workspace_id=_active_workspace_id,
+            profile_id=request.profile,
+        )
         return StreamingResponse(
             iter([json.dumps({"content": result})]),
             media_type="application/json",
@@ -125,7 +141,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 
 @app.get("/v1/profiles")
 async def list_profiles() -> list[dict]:
-    profiles = _conductor.profile_loader.list_all()
+    profiles = _profile_loader.list_all()
     return [
         {
             "id": p.id,
@@ -149,7 +165,7 @@ async def get_workspace() -> dict:
         }
 
     ws = ctx.workspace
-    default_profile = _conductor.profile_loader.get_default()
+    default_profile = _profile_loader.get_default()
 
     provider = _build_provider()
 
