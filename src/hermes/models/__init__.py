@@ -27,6 +27,7 @@ from hermes.models.repository import Repository
 from hermes.models.result import Result
 from hermes.models.strategy import Strategy
 from hermes.models.task import Task
+from hermes.models.transition_record import TransitionRecord
 from hermes.models.workspace import Workspace
 from hermes.models.workspace_context import WorkspaceContext
 from hermes.models.workspace_file import WorkspaceFile
@@ -63,6 +64,7 @@ __all__ = [
     "Result",
     "Strategy",
     "Task",
+    "TransitionRecord",
     "Workspace",
     "WorkspaceContext",
     "WorkspaceFile",
