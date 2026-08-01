@@ -265,22 +265,22 @@
     display: flex;
   }
 
-  /* ── Today view ───────────────────────────────────── */
+  /* ── Home view ────────────────────────────────────── */
 
-  #view-today {
+  #view-home {
     padding: 24px;
     gap: 20px;
     overflow-y: auto;
   }
 
-  #today-header {
+  #home-header {
     font-size: 20px;
     font-weight: 600;
     color: var(--text);
     margin-bottom: 4px;
   }
 
-  #today-attention {
+  #home-attention {
     padding: 16px 20px;
     background: var(--surface);
     border: 1px solid var(--border);
@@ -288,6 +288,193 @@
     font-size: 13px;
     color: var(--text-muted);
   }
+
+  #home-focus {
+    padding: 16px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .focus-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+
+  .focus-item {
+    padding: 8px 0;
+    font-size: 13px;
+    color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .focus-item:last-child { border-bottom: none; }
+
+  .focus-action {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 3px;
+    margin-right: 8px;
+    text-transform: uppercase;
+  }
+
+  .focus-action.decide { background: var(--red); color: #fff; }
+  .focus-action.experiment { background: #f59e0b; color: #000; }
+  .focus-action.monitor { background: var(--accent-dim); color: var(--accent); }
+
+  /* ── Brief view ──────────────────────────────────── */
+
+  #view-brief {
+    padding: 24px;
+    overflow-y: auto;
+  }
+
+  #brief-content {
+    max-width: 900px;
+  }
+
+  .brief-section {
+    margin-bottom: 24px;
+  }
+
+  .brief-section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brief-summary {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    background: var(--surface);
+    padding: 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  .kpi-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  .kpi-table th {
+    text-align: left;
+    padding: 8px 12px;
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .kpi-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .kpi-status {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  .kpi-status.on_track { background: #065f46; color: #6ee7b7; }
+  .kpi-status.at_risk { background: #78350f; color: #fcd34d; }
+  .kpi-status.off_track { background: #7f1d1d; color: #fca5a5; }
+
+  .rec-item {
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 8px;
+  }
+
+  .rec-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .rec-meta {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .rec-score {
+    font-weight: 700;
+    color: var(--accent);
+    margin-right: 8px;
+  }
+
+  /* ── Journal view ────────────────────────────────── */
+
+  #view-journal {
+    padding: 24px;
+    overflow-y: auto;
+  }
+
+  #journal-content {
+    max-width: 700px;
+  }
+
+  .journal-header {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 16px;
+  }
+
+  .journal-entry {
+    display: flex;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .journal-date {
+    min-width: 80px;
+    font-size: 12px;
+    color: var(--text-dim);
+    font-family: monospace;
+  }
+
+  .journal-body {
+    flex: 1;
+  }
+
+  .journal-title {
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+
+  .journal-type {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-right: 6px;
+  }
+
+  .journal-type.decision { background: #1e3a5f; color: #93c5fd; }
+  .journal-type.experiment { background: #3b2f00; color: #fcd34d; }
+  .journal-type.operation { background: var(--accent-dim); color: var(--accent); }
 
   .widget-row {
     display: flex;
@@ -754,9 +941,11 @@
 
     <div class="nav-section">
       <div class="nav-section-title">Main</div>
-      <div class="nav-item active" data-view="today">Today</div>
+      <div class="nav-item active" data-view="home">Home</div>
+      <div class="nav-item" data-view="brief">Brief</div>
       <div class="nav-item" data-view="chat">Chat</div>
       <div class="nav-item" data-view="operations">Operations</div>
+      <div class="nav-item" data-view="journal">Journal</div>
       <div class="nav-item" data-view="jobs">Jobs</div>
     </div>
 
@@ -804,11 +993,22 @@
 
     <div id="content">
 
-      <!-- Today view -->
-      <div id="view-today" class="view active">
-        <div id="today-header"></div>
-        <div id="today-attention"></div>
-        <div class="widget-row" id="today-widgets"></div>
+      <!-- Home view (Workspace Home) -->
+      <div id="view-home" class="view active">
+        <div id="home-header"></div>
+        <div id="home-attention"></div>
+        <div id="home-focus"></div>
+        <div class="widget-row" id="home-widgets"></div>
+      </div>
+
+      <!-- Brief view (Executive Brief) -->
+      <div id="view-brief" class="view">
+        <div id="brief-content"></div>
+      </div>
+
+      <!-- Journal view (Business Journal) -->
+      <div id="view-journal" class="view">
+        <div id="journal-content"></div>
       </div>
 
       <!-- Chat view -->
@@ -858,13 +1058,17 @@
   var profileSel   = document.getElementById("profile-select");
   var workspaceSel = document.getElementById("workspace-select");
   var sessionsList = document.getElementById("sessions-list");
-  var todayHeader    = document.getElementById("today-header");
-  var todayAttention = document.getElementById("today-attention");
-  var todayWidgets   = document.getElementById("today-widgets");
+  var homeHeader    = document.getElementById("home-header");
+  var homeAttention = document.getElementById("home-attention");
+  var homeFocus     = document.getElementById("home-focus");
+  var homeWidgets   = document.getElementById("home-widgets");
+  var briefContent  = document.getElementById("brief-content");
+  var journalContent = document.getElementById("journal-content");
 
   var history = [];
   var streaming = false;
-  var currentView = "today";
+  var currentView = "home";
+  var cachedBrief = null;
   var activeWorkspaceId = null;
 
   function wsBase() {
@@ -887,6 +1091,8 @@
     clearBadge(name);
     if (name === "chat") inputEl.focus();
     if (!activeWorkspaceId) return;
+    if (name === "brief") loadBrief();
+    if (name === "journal") loadJournal();
     if (name === "documents") loadDocuments();
     if (name === "operations") loadOperations();
     if (name === "jobs") loadJobs();
@@ -942,11 +1148,11 @@
       });
   }
 
-  // ── Load dashboard ────────────────────────────────
+  // ── Load Workspace Home ────────────────────────────
 
-  function loadDashboard() {
+  function loadHome() {
     if (!activeWorkspaceId) return;
-    // Fetch dashboard and operations in parallel (Founder amendment 1)
+    // Fetch dashboard (includes CEO Review), operations, and brief in parallel
     var dashboardPromise = fetch(wsBase() + "/dashboard")
       .then(function (r) { return r.ok ? r.json() : null; })
       .catch(function () { return null; });
@@ -959,11 +1165,11 @@
       var data = results[0];
       var opsList = results[1];
       if (!data) return;
-      renderToday(data, opsList);
+      renderHome(data, opsList);
     });
   }
 
-  function computeTodayOpsStats(opsList) {
+  function computeOpsStats(opsList) {
     var today = new Date().toISOString().slice(0, 10);
     var active = 0;
     var completedToday = 0;
@@ -979,26 +1185,28 @@
     return { active: active, completedToday: completedToday, total: opsList.length, escalated: escalated };
   }
 
-  function renderToday(data, opsList) {
+  function renderHome(data, opsList) {
     var ws = data.workspace || {};
     var knowledge = data.knowledge || {};
     var repositories = data.repositories || {};
+    var kpis = data.kpis || {};
+    var focus = data.todays_focus || [];
     var opsAvailable = opsList !== null;
-    var opsStats = opsAvailable ? computeTodayOpsStats(opsList) : null;
+    var opsStats = opsAvailable ? computeOpsStats(opsList) : null;
 
     // Header
-    todayHeader.textContent = ws.name || "Hermes";
+    homeHeader.textContent = ws.name || "Hermes";
 
-    // Attention section (attention-first per UX spec)
+    // Attention section
     if (!opsAvailable) {
-      todayAttention.innerHTML = '<div style="color:var(--text-dim)">Unable to load Operations.</div>';
+      homeAttention.innerHTML = '<div style="color:var(--text-dim)">Unable to load Operations.</div>';
     } else if (opsStats.escalated.length > 0) {
       var maxShow = 5;
       var ahtml = "";
       var shown = Math.min(opsStats.escalated.length, maxShow);
       for (var ai = 0; ai < shown; ai++) {
         var esc_op = opsStats.escalated[ai];
-        ahtml += '<div class="today-attention-item" data-op-id="' + esc(esc_op.id) + '" style="margin-bottom:6px;cursor:pointer;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px">';
+        ahtml += '<div class="home-attention-item" data-op-id="' + esc(esc_op.id) + '" style="margin-bottom:6px;cursor:pointer;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px">';
         ahtml += '<span class="status-badge awaiting_escalation" style="margin-right:8px">Escalated</span>';
         ahtml += '<span>' + esc(esc_op.request) + '</span>';
         ahtml += '<span style="margin-left:8px;color:var(--text-dim);font-size:11px">' + esc(esc_op.id) + '</span>';
@@ -1007,22 +1215,40 @@
       if (opsStats.escalated.length > maxShow) {
         ahtml += '<div style="font-size:12px;color:var(--text-dim);margin-top:4px">...and ' + (opsStats.escalated.length - maxShow) + ' more</div>';
       }
-      todayAttention.innerHTML = ahtml;
+      homeAttention.innerHTML = ahtml;
 
-      todayAttention.querySelectorAll(".today-attention-item[data-op-id]").forEach(function (el) {
+      homeAttention.querySelectorAll(".home-attention-item[data-op-id]").forEach(function (el) {
         el.addEventListener("click", function () {
           switchView("operations");
           openOperation(el.dataset.opId);
         });
       });
     } else {
-      todayAttention.textContent = "No items need your attention.";
+      homeAttention.textContent = "No items need your attention.";
+    }
+
+    // Today's Focus — Top 3 priorities (amendment 4)
+    if (focus.length > 0) {
+      var fhtml = '<div class="focus-title">Today\'s Focus</div>';
+      for (var fi = 0; fi < focus.length; fi++) {
+        var raw = focus[fi];
+        var action = "monitor";
+        if (raw.indexOf("(decide)") !== -1) action = "decide";
+        else if (raw.indexOf("(experiment)") !== -1) action = "experiment";
+        fhtml += '<div class="focus-item">';
+        fhtml += '<span class="focus-action ' + action + '">' + esc(action) + '</span>';
+        fhtml += '<span>' + esc(raw.replace(/\s*\((decide|experiment|monitor)\)\s*$/, "")) + '</span>';
+        fhtml += '</div>';
+      }
+      homeFocus.innerHTML = fhtml;
+    } else {
+      homeFocus.innerHTML = '<div class="focus-title">Today\'s Focus</div><div style="font-size:13px;color:var(--text-dim)">No priorities available.</div>';
     }
 
     // Operating state widgets
     var html = "";
 
-    html += '<div class="widget" id="today-ops-widget" style="cursor:pointer">';
+    html += '<div class="widget" id="home-ops-widget" style="cursor:pointer">';
     html += '  <div class="widget-title">Operations</div>';
     if (opsAvailable) {
       html += '  <div class="widget-value">' + opsStats.active + '</div>';
@@ -1031,6 +1257,20 @@
     } else {
       html += '  <div class="widget-coming-soon">Unavailable</div>';
     }
+    html += '</div>';
+
+    html += '<div class="widget">';
+    html += '  <div class="widget-title">KPIs</div>';
+    html += '  <div class="widget-value">' + (kpis.total || 0) + '</div>';
+    html += '  <div class="widget-sub">';
+    html += '    <span style="color:#6ee7b7">' + (kpis.on_track || 0) + ' on track</span>';
+    html += '    <span style="margin:0 4px">&middot;</span>';
+    html += '    <span style="color:#fcd34d">' + (kpis.at_risk || 0) + ' at risk</span>';
+    if (kpis.off_track) {
+      html += '    <span style="margin:0 4px">&middot;</span>';
+      html += '    <span style="color:#fca5a5">' + kpis.off_track + ' off track</span>';
+    }
+    html += '  </div>';
     html += '</div>';
 
     html += '<div class="widget">';
@@ -1052,15 +1292,202 @@
       html += '</div>';
     }
 
-    todayWidgets.innerHTML = html;
+    homeWidgets.innerHTML = html;
 
     // Operations widget click-through
-    var opsWidget = document.getElementById("today-ops-widget");
+    var opsWidget = document.getElementById("home-ops-widget");
     if (opsWidget) {
       opsWidget.addEventListener("click", function () {
         switchView("operations");
       });
     }
+  }
+
+  // ── Executive Brief ───────────────────────────────
+
+  function fetchBrief(callback) {
+    if (cachedBrief) { callback(cachedBrief); return; }
+    fetch(wsBase() + "/brief")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        cachedBrief = data;
+        callback(data);
+      })
+      .catch(function () { callback(null); });
+  }
+
+  function loadBrief() {
+    if (!activeWorkspaceId) return;
+    briefContent.innerHTML = '<div style="color:var(--text-dim);padding:20px">Loading Executive Brief...</div>';
+    fetchBrief(function (data) {
+      if (!data) { briefContent.innerHTML = '<div style="color:var(--text-dim);padding:20px">Unable to load Executive Brief.</div>'; return; }
+      renderBrief(data);
+    });
+  }
+
+  function renderBrief(data) {
+    var brief = data.brief || {};
+    var recs = data.recommendations || [];
+    var kpis = data.kpis || [];
+    var goals = data.goals || [];
+    var bottlenecks = data.bottlenecks || [];
+    var html = "";
+
+    // Summary
+    html += '<div class="brief-section">';
+    html += '  <div class="brief-section-title">Executive Summary</div>';
+    html += '  <div class="brief-summary">' + esc(brief.summary || "") + '</div>';
+    html += '</div>';
+
+    // Priorities
+    if (brief.priorities && brief.priorities.length > 0) {
+      html += '<div class="brief-section">';
+      html += '  <div class="brief-section-title">Priorities</div>';
+      for (var pi = 0; pi < brief.priorities.length; pi++) {
+        var p = brief.priorities[pi];
+        var pAction = "monitor";
+        if (p.indexOf("(decide)") !== -1) pAction = "decide";
+        else if (p.indexOf("(experiment)") !== -1) pAction = "experiment";
+        html += '  <div class="rec-item">';
+        html += '    <span class="focus-action ' + pAction + '">' + esc(pAction) + '</span> ';
+        html += '    <span style="font-size:13px;color:var(--text)">' + esc(p.replace(/\s*\((decide|experiment|monitor)\)\s*$/, "")) + '</span>';
+        html += '  </div>';
+      }
+      html += '</div>';
+    }
+
+    // KPI Table
+    if (kpis.length > 0) {
+      html += '<div class="brief-section">';
+      html += '  <div class="brief-section-title">KPIs</div>';
+      html += '  <table class="kpi-table">';
+      html += '    <tr><th>KPI</th><th>Current</th><th>Target</th><th>Unit</th><th>Status</th></tr>';
+      for (var ki = 0; ki < kpis.length; ki++) {
+        var k = kpis[ki];
+        html += '    <tr>';
+        html += '      <td>' + esc(k.name) + '</td>';
+        html += '      <td>' + k.current + '</td>';
+        html += '      <td>' + k.target + '</td>';
+        html += '      <td>' + esc(k.unit) + '</td>';
+        html += '      <td><span class="kpi-status ' + esc(k.status) + '">' + esc(k.status.replace("_", " ")) + '</span></td>';
+        html += '    </tr>';
+      }
+      html += '  </table>';
+      html += '</div>';
+    }
+
+    // Recommendations
+    if (recs.length > 0) {
+      html += '<div class="brief-section">';
+      html += '  <div class="brief-section-title">Recommendations</div>';
+      for (var ri = 0; ri < recs.length; ri++) {
+        var r = recs[ri];
+        html += '  <div class="rec-item">';
+        html += '    <div class="rec-title">';
+        html += '      <span class="rec-score">[' + r.priority_score + ']</span>';
+        html += '      <span class="focus-action ' + esc(r.suggested_action) + '">' + esc(r.suggested_action) + '</span> ';
+        html += '      ' + esc(r.title);
+        html += '    </div>';
+        html += '    <div class="rec-meta">' + esc(r.rationale) + '</div>';
+        html += '  </div>';
+      }
+      html += '</div>';
+    }
+
+    // Risks
+    if (brief.risks && brief.risks.length > 0) {
+      html += '<div class="brief-section">';
+      html += '  <div class="brief-section-title">Risks</div>';
+      for (var rii = 0; rii < brief.risks.length; rii++) {
+        html += '  <div class="rec-item"><div style="font-size:13px;color:var(--text)">' + esc(brief.risks[rii]) + '</div></div>';
+      }
+      html += '</div>';
+    }
+
+    // Goals
+    if (goals.length > 0) {
+      html += '<div class="brief-section">';
+      html += '  <div class="brief-section-title">Strategic Goals</div>';
+      for (var gi = 0; gi < goals.length; gi++) {
+        var g = goals[gi];
+        html += '  <div class="rec-item">';
+        html += '    <div class="rec-title">' + esc(g.id) + ': ' + esc(g.title) + '</div>';
+        html += '    <div class="rec-meta">' + esc(g.description) + ' — Target: ' + esc(g.target_date) + ' — Status: ' + esc(g.status) + '</div>';
+        html += '  </div>';
+      }
+      html += '</div>';
+    }
+
+    briefContent.innerHTML = html;
+  }
+
+  // ── Business Journal ──────────────────────────────
+
+  function loadJournal() {
+    if (!activeWorkspaceId) return;
+    journalContent.innerHTML = '<div style="color:var(--text-dim);padding:20px">Loading Business Journal...</div>';
+
+    // Fetch brief (has decisions, experiments) and operations
+    var briefPromise = new Promise(function (resolve) { fetchBrief(resolve); });
+    var opsPromise = fetch(wsBase() + "/operations")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .catch(function () { return []; });
+
+    Promise.all([briefPromise, opsPromise]).then(function (results) {
+      var briefData = results[0];
+      var opsList = results[1];
+      renderJournal(briefData, opsList);
+    });
+  }
+
+  function renderJournal(briefData, opsList) {
+    var entries = [];
+
+    // Decisions from brief
+    if (briefData && briefData.decisions) {
+      for (var di = 0; di < briefData.decisions.length; di++) {
+        var d = briefData.decisions[di];
+        entries.push({ date: d.date || "", type: "decision", title: d.title, id: d.id, status: d.status });
+      }
+    }
+
+    // Experiments from brief
+    if (briefData && briefData.experiments) {
+      for (var ei = 0; ei < briefData.experiments.length; ei++) {
+        var e = briefData.experiments[ei];
+        entries.push({ date: e.start_date || "", type: "experiment", title: e.title, id: e.id, status: e.status });
+      }
+    }
+
+    // Operations
+    for (var oi = 0; oi < opsList.length; oi++) {
+      var op = opsList[oi];
+      entries.push({ date: (op.created_at || "").slice(0, 10), type: "operation", title: op.request, id: op.id, status: op.status });
+    }
+
+    // Sort by date descending
+    entries.sort(function (a, b) { return b.date.localeCompare(a.date); });
+
+    var html = '<div class="journal-header">Business Journal</div>';
+    if (entries.length === 0) {
+      html += '<div style="color:var(--text-dim);font-size:13px">No journal entries yet.</div>';
+    } else {
+      for (var ji = 0; ji < entries.length; ji++) {
+        var entry = entries[ji];
+        html += '<div class="journal-entry">';
+        html += '  <div class="journal-date">' + esc(entry.date) + '</div>';
+        html += '  <div class="journal-body">';
+        html += '    <div class="journal-title">';
+        html += '      <span class="journal-type ' + esc(entry.type) + '">' + esc(entry.type) + '</span>';
+        html += '      ' + esc(entry.title);
+        html += '    </div>';
+        html += '    <div style="font-size:11px;color:var(--text-dim)">' + esc(entry.id) + ' &middot; ' + esc(entry.status) + '</div>';
+        html += '  </div>';
+        html += '</div>';
+      }
+    }
+
+    journalContent.innerHTML = html;
   }
 
   // ── Health check ──────────────────────────────────
@@ -1889,7 +2316,7 @@
         for (var i = 0; i < ops.length; i++) {
           if (ops[i].status === "awaiting_escalation") escalated++;
         }
-        if (currentView !== "today") setBadge("today", escalated, false);
+        if (currentView !== "home") setBadge("home", escalated, false);
         if (currentView !== "operations") setBadge("operations", escalated, false);
       })
       .catch(function () {});
@@ -1915,8 +2342,9 @@
     // Update selector
     workspaceSel.value = wsId || "";
     // Reload all data for new workspace
+    cachedBrief = null;
     loadProfiles();
-    loadDashboard();
+    loadHome();
     loadBadges();
   }
 

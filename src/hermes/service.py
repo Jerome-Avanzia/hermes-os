@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 from hermes.conductor import Conductor
+from hermes.kernel.ceo_loop import CEOLoop
 from hermes.kernel.executor import Executor
 from hermes.kernel.file_content_reader import FileContentReader
 from hermes.kernel.file_selector import FileSelector
@@ -314,10 +315,24 @@ class HermesService:
             data["generated_output"] = j.generated_output
         return data
 
-    # -- Dashboard & Knowledge ------------------------------------------------
+    # -- CEO Review & Dashboard ------------------------------------------------
+
+    def _run_ceo_review(self, workspace_id: str) -> "CEOLoop.CEOReviewResult":  # noqa: F821
+        """Run the CEO Loop for a workspace.  Returns a CEOReviewResult."""
+        business_dir = self.context_engine.workspace_engine.resolve_business_dir(
+            workspace_id
+        )
+        loop = CEOLoop()
+        return loop.run(business_dir)
+
+    def get_brief(self, workspace_id: str) -> dict:
+        """Return the full Executive Brief from a CEO Review."""
+        self.validate_workspace(workspace_id)
+        review = self._run_ceo_review(workspace_id)
+        return self._serialize_review(review)
 
     def get_dashboard(self, workspace_id: str) -> dict:
-        """Return a CEO-oriented workspace operating summary."""
+        """Return the Workspace Home operating summary (amendment 1)."""
         self.validate_workspace(workspace_id)
 
         ws_context = self.context_engine.workspace_engine.resolve(workspace_id)
@@ -327,18 +342,44 @@ class HermesService:
             "mission": ws.mission or "",
         }
         repositories = len(ws_context.repositories)
-
         knowledge_docs = self.list_knowledge(workspace_id)
 
+        # Live operation stats
+        ops_active = 0
+        ops_completed_today = 0
+        ops_total = 0
+        if self.operation_store:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            ops = self.operation_store.list(workspace_id)
+            ops_total = len(ops)
+            for op in ops:
+                if op.status in ("created", "executing"):
+                    ops_active += 1
+                if op.status == "completed" and op.updated_at.strftime("%Y-%m-%d") == today:
+                    ops_completed_today += 1
+
+        # CEO Review — generated once, reused for dashboard (amendment 2)
+        review = self._run_ceo_review(workspace_id)
+        brief = review.brief
+
+        # KPI summary from business data
+        kpis = review.data.kpis
+        kpi_summary = {
+            "total": len(kpis),
+            "on_track": sum(1 for k in kpis if k.status == "on_track"),
+            "at_risk": sum(1 for k in kpis if k.status == "at_risk"),
+            "off_track": sum(1 for k in kpis if k.status == "off_track"),
+        }
+
+        # Top 3 priorities — "Today's Focus" (amendment 4)
+        todays_focus = brief.priorities[:3]
+
         return {
-            "attention": {
-                "count": 0,
-                "items": [],
-            },
+            "workspace": workspace_info,
             "operations": {
-                "active": 0,
-                "completed_today": 0,
-                "total": 0,
+                "active": ops_active,
+                "completed_today": ops_completed_today,
+                "total": ops_total,
             },
             "knowledge": {
                 "count": len(knowledge_docs),
@@ -346,7 +387,118 @@ class HermesService:
             "repositories": {
                 "count": repositories,
             },
-            "workspace": workspace_info,
+            "kpis": kpi_summary,
+            "todays_focus": todays_focus,
+            "risks": brief.risks,
+            "execution_status": review.execution_status,
+            "warnings": review.all_warnings,
+        }
+
+    @staticmethod
+    def _serialize_review(review) -> dict:
+        """Serialize a CEOReviewResult for the API."""
+        brief = review.brief
+        data = review.data
+
+        # KPI detail
+        kpis = [
+            {
+                "id": k.kpi_id,
+                "name": k.name,
+                "goal_id": k.goal_id,
+                "unit": k.unit,
+                "current": k.current_value,
+                "target": k.target_value,
+                "frequency": k.frequency,
+                "status": k.status,
+            }
+            for k in data.kpis
+        ]
+
+        # Goals
+        goals = [
+            {
+                "id": g.goal_id,
+                "title": g.title,
+                "description": g.description,
+                "target": g.target_value,
+                "target_date": g.target_date,
+                "owner": g.owner,
+                "status": g.status,
+            }
+            for g in data.goals
+        ]
+
+        # Bottlenecks
+        bottlenecks = [
+            {
+                "id": b.bottleneck_id,
+                "title": b.title,
+                "category": b.category,
+                "impact": b.impact,
+                "status": b.status,
+            }
+            for b in data.bottlenecks
+        ]
+
+        # Decisions (for Business Journal)
+        decisions = [
+            {
+                "id": d.decision_id,
+                "title": d.title,
+                "date": d.decision_date,
+                "status": d.status,
+            }
+            for d in data.decisions
+        ]
+
+        # Experiments (for Business Journal)
+        experiments = [
+            {
+                "id": e.experiment_id,
+                "title": e.title,
+                "status": e.status,
+                "start_date": e.start_date,
+                "outcome": e.outcome,
+            }
+            for e in data.experiments
+        ]
+
+        # Recommendations with scores
+        recommendations = []
+        for rec in review.engine_result.recommendations:
+            recommendations.append({
+                "id": rec.recommendation_id,
+                "title": rec.title,
+                "context": rec.context,
+                "rationale": rec.rationale,
+                "source_type": rec.source_type,
+                "source_id": rec.source_id,
+                "priority_score": round(rec.priority_score, 2),
+                "confidence": rec.confidence,
+                "suggested_action": rec.suggested_action,
+            })
+
+        return {
+            "brief": {
+                "id": brief.brief_id,
+                "business_id": brief.business_id,
+                "reporting_period": brief.reporting_period,
+                "generated_at": brief.generated_at,
+                "summary": brief.summary,
+                "priorities": brief.priorities,
+                "recommendations_text": brief.recommendations,
+                "risks": brief.risks,
+                "status": brief.status,
+            },
+            "recommendations": recommendations,
+            "kpis": kpis,
+            "goals": goals,
+            "bottlenecks": bottlenecks,
+            "decisions": decisions,
+            "experiments": experiments,
+            "execution_status": review.execution_status,
+            "warnings": review.all_warnings,
         }
 
     def list_knowledge(self, workspace_id: str) -> list[dict]:

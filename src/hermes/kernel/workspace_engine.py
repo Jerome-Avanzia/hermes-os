@@ -60,6 +60,21 @@ class WorkspaceEngine:
             })
         return result
 
+    def resolve_business_dir(self, project_id: str) -> Path:
+        """Return the businesses/ directory for a workspace's business_id."""
+        ws_yaml = self.workspaces_root / project_id / "workspace.yaml"
+        if not ws_yaml.is_file():
+            raise WorkspaceNotFoundError(
+                f"No workspace.yaml for project: {project_id}"
+            )
+        data = self._read_yaml(ws_yaml)
+        business_id = data.get("business_id")
+        if not business_id:
+            raise WorkspaceNotFoundError(
+                f"No business_id in workspace.yaml for project: {project_id}"
+            )
+        return config.businesses_root() / business_id
+
     def resolve(self, project_id: str) -> WorkspaceContext:
         registry = self._read_yaml(self.registry_path)
         entries = registry.get("workspaces", {})

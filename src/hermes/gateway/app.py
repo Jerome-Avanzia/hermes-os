@@ -232,8 +232,15 @@ async def get_workspace(workspace_id: str) -> dict:
 
 @app.get("/v1/workspaces/{workspace_id}/dashboard")
 async def get_dashboard(workspace_id: str) -> dict:
-    """Return a CEO-oriented workspace operating summary for the Today screen."""
+    """Return the Workspace Home operating summary."""
     return _hermes_service.get_dashboard(workspace_id)
+
+
+@app.get("/v1/workspaces/{workspace_id}/brief")
+async def get_brief(workspace_id: str) -> JSONResponse:
+    """Return the full Executive Brief from a CEO Review."""
+    result = _hermes_service.get_brief(workspace_id)
+    return JSONResponse(content=result)
 
 
 @app.get("/v1/workspaces/{workspace_id}/knowledge")

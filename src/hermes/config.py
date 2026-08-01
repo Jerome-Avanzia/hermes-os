@@ -18,6 +18,10 @@ def profiles_root() -> Path:
     return Path(os.environ.get("HERMES_PROFILES", "profiles"))
 
 
+def businesses_root() -> Path:
+    return Path(os.environ.get("HERMES_BUSINESSES", "businesses"))
+
+
 def logs_dir() -> Path | None:
     value = os.environ.get("HERMES_LOGS")
     return Path(value) if value else None

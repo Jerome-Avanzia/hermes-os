@@ -418,15 +418,6 @@ def test_dashboard_returns_workspace_identity():
     assert "mission" in data["workspace"]
 
 
-def test_dashboard_contains_attention_section():
-    resp = client.get(f"{WS_PREFIX}/dashboard")
-    data = resp.json()
-    assert "attention" in data
-    assert "count" in data["attention"]
-    assert "items" in data["attention"]
-    assert isinstance(data["attention"]["items"], list)
-
-
 def test_dashboard_contains_operations_section():
     resp = client.get(f"{WS_PREFIX}/dashboard")
     data = resp.json()
@@ -452,6 +443,33 @@ def test_dashboard_contains_repository_count():
     assert "count" in data["repositories"]
 
 
+def test_dashboard_contains_kpi_summary():
+    resp = client.get(f"{WS_PREFIX}/dashboard")
+    data = resp.json()
+    assert "kpis" in data
+    kpis = data["kpis"]
+    assert "total" in kpis
+    assert "on_track" in kpis
+    assert "at_risk" in kpis
+    assert "off_track" in kpis
+    assert kpis["total"] == 8
+
+
+def test_dashboard_contains_todays_focus():
+    resp = client.get(f"{WS_PREFIX}/dashboard")
+    data = resp.json()
+    assert "todays_focus" in data
+    assert isinstance(data["todays_focus"], list)
+    assert len(data["todays_focus"]) <= 3
+
+
+def test_dashboard_contains_risks():
+    resp = client.get(f"{WS_PREFIX}/dashboard")
+    data = resp.json()
+    assert "risks" in data
+    assert isinstance(data["risks"], list)
+
+
 def test_dashboard_knowledge_matches_knowledge_api():
     """Dashboard knowledge count must match the Knowledge API dynamically."""
     dashboard_resp = client.get(f"{WS_PREFIX}/dashboard")
@@ -462,11 +480,15 @@ def test_dashboard_knowledge_matches_knowledge_api():
 def test_dashboard_delegates_to_service():
     service = MagicMock()
     service.get_dashboard.return_value = {
-        "attention": {"count": 0, "items": []},
         "operations": {"active": 0, "completed_today": 0, "total": 0},
         "knowledge": {"count": 5},
         "repositories": {"count": 2},
         "workspace": {"name": "Test", "mission": ""},
+        "kpis": {"total": 0, "on_track": 0, "at_risk": 0, "off_track": 0},
+        "todays_focus": [],
+        "risks": [],
+        "execution_status": "completed",
+        "warnings": [],
     }
 
     with patch("hermes.gateway.app._hermes_service", service):
@@ -477,13 +499,87 @@ def test_dashboard_delegates_to_service():
     assert resp.json()["knowledge"]["count"] == 5
 
 
-# -- UI: Today screen ------------------------------------------------------
+# -- Brief endpoint -------------------------------------------------------
 
 
-def test_ui_contains_today_nav_item():
+def test_brief_returns_200():
+    resp = client.get(f"{WS_PREFIX}/brief")
+    assert resp.status_code == 200
+
+
+def test_brief_contains_expected_structure():
+    resp = client.get(f"{WS_PREFIX}/brief")
+    data = resp.json()
+    assert "brief" in data
+    assert "recommendations" in data
+    assert "kpis" in data
+    assert "goals" in data
+    assert "bottlenecks" in data
+    assert "decisions" in data
+    assert "experiments" in data
+    assert "execution_status" in data
+
+
+def test_brief_reflects_avanzia_business_data():
+    resp = client.get(f"{WS_PREFIX}/brief")
+    data = resp.json()
+    assert len(data["kpis"]) == 8
+    assert len(data["goals"]) == 5
+    assert len(data["bottlenecks"]) == 5
+    assert len(data["decisions"]) == 6
+    assert len(data["experiments"]) == 5
+
+
+def test_brief_contains_priorities_and_risks():
+    resp = client.get(f"{WS_PREFIX}/brief")
+    data = resp.json()
+    assert len(data["brief"]["priorities"]) > 0
+    assert len(data["brief"]["risks"]) > 0
+
+
+def test_brief_recommendations_have_scores():
+    resp = client.get(f"{WS_PREFIX}/brief")
+    data = resp.json()
+    assert len(data["recommendations"]) > 0
+    rec = data["recommendations"][0]
+    assert "priority_score" in rec
+    assert "confidence" in rec
+    assert "suggested_action" in rec
+
+
+def test_brief_delegates_to_service():
+    service = MagicMock()
+    service.get_brief.return_value = {
+        "brief": {"id": "test", "priorities": [], "risks": []},
+        "recommendations": [],
+        "kpis": [],
+        "goals": [],
+        "bottlenecks": [],
+        "decisions": [],
+        "experiments": [],
+        "execution_status": "completed",
+        "warnings": [],
+    }
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/brief")
+
+    assert resp.status_code == 200
+    service.get_brief.assert_called_once_with(WS)
+
+
+def test_brief_unknown_workspace_returns_404():
+    resp = client.get("/v1/workspaces/NONEXISTENT/brief")
+    assert resp.status_code == 404
+
+
+# -- UI: Home screen -------------------------------------------------------
+
+
+def test_ui_contains_home_nav_item():
     resp = client.get("/")
-    assert 'data-view="today"' in resp.text
-    assert "Today" in resp.text
+    assert 'data-view="home"' in resp.text
+    assert "Home" in resp.text
 
 
 def test_ui_references_dashboard_endpoint():
@@ -491,57 +587,109 @@ def test_ui_references_dashboard_endpoint():
     assert "/dashboard" in resp.text
 
 
-def test_ui_today_fetches_operations_for_counts():
+def test_ui_home_fetches_operations_for_counts():
     resp = client.get("/")
-    # Today screen fetches operations in parallel with dashboard
+    # Home screen fetches operations in parallel with dashboard
     assert "operationsPromise" in resp.text
     assert "wsBase()" in resp.text
 
 
-def test_ui_today_attention_items_are_clickable():
+def test_ui_home_attention_items_are_clickable():
     resp = client.get("/")
-    assert "today-attention-item" in resp.text
+    assert "home-attention-item" in resp.text
     assert "openOperation" in resp.text
 
 
-def test_ui_today_operations_widget_is_clickable():
+def test_ui_home_operations_widget_is_clickable():
     resp = client.get("/")
-    assert "today-ops-widget" in resp.text
+    assert "home-ops-widget" in resp.text
     assert 'switchView("operations")' in resp.text
 
 
-def test_ui_today_computes_active_operations():
+def test_ui_home_computes_active_operations():
     resp = client.get("/")
-    assert "computeTodayOpsStats" in resp.text
+    assert "computeOpsStats" in resp.text
     assert '"created"' in resp.text
     assert '"executing"' in resp.text
 
 
-def test_ui_today_computes_escalated_operations():
+def test_ui_home_computes_escalated_operations():
     resp = client.get("/")
     assert '"awaiting_escalation"' in resp.text
     assert "escalated.push" in resp.text
 
 
-def test_ui_today_computes_completed_today():
+def test_ui_home_computes_completed_today():
     resp = client.get("/")
     assert "completedToday" in resp.text
-    assert "today" in resp.text
 
 
-def test_ui_today_handles_operations_failure():
-    """If Operations API fails, Today still renders with 'Unavailable'."""
+def test_ui_home_handles_operations_failure():
+    """If Operations API fails, Home still renders with 'Unavailable'."""
     resp = client.get("/")
     assert "Unavailable" in resp.text
     assert "Unable to load Operations." in resp.text
 
 
-def test_ui_today_limits_escalation_items():
+def test_ui_home_limits_escalation_items():
     """At most 5 escalation items shown, with '...and N more' for overflow."""
     resp = client.get("/")
     assert "maxShow" in resp.text
     assert "...and " in resp.text
     assert " more" in resp.text
+
+
+# -- UI: Brief screen ------------------------------------------------------
+
+
+def test_ui_contains_brief_nav_item():
+    resp = client.get("/")
+    assert 'data-view="brief"' in resp.text
+    assert "Brief" in resp.text
+
+
+def test_ui_brief_references_brief_endpoint():
+    resp = client.get("/")
+    assert "/brief" in resp.text
+
+
+def test_ui_brief_has_summary_section():
+    resp = client.get("/")
+    assert "brief-summary" in resp.text
+
+
+def test_ui_brief_renders_kpi_table():
+    resp = client.get("/")
+    assert "kpi-table" in resp.text or "brief-kpis" in resp.text
+
+
+def test_ui_brief_renders_recommendations():
+    resp = client.get("/")
+    assert "recommendation" in resp.text.lower()
+
+
+def test_ui_brief_caches_result():
+    resp = client.get("/")
+    assert "cachedBrief" in resp.text
+
+
+# -- UI: Journal screen ----------------------------------------------------
+
+
+def test_ui_contains_journal_nav_item():
+    resp = client.get("/")
+    assert 'data-view="journal"' in resp.text
+    assert "Journal" in resp.text
+
+
+def test_ui_journal_combines_decisions_and_operations():
+    resp = client.get("/")
+    assert "renderJournal" in resp.text
+
+
+def test_ui_journal_has_timeline_layout():
+    resp = client.get("/")
+    assert "journal" in resp.text.lower()
 
 
 # -- UI: Documents screen --------------------------------------------------
@@ -1176,9 +1324,9 @@ def test_ui_badges_compute_failed_count():
     assert '"failed"' in resp.text
 
 
-def test_ui_badges_render_on_today_nav():
+def test_ui_badges_render_on_home_nav():
     resp = client.get("/")
-    assert 'setBadge("today"' in resp.text
+    assert 'setBadge("home"' in resp.text
 
 
 def test_ui_badges_render_on_operations_nav():
