@@ -272,3 +272,129 @@ def test_stream_chat_raises_without_conductor():
 
     with pytest.raises(RuntimeError, match="Conductor"):
         list(service.stream_chat(messages, workspace_id="AVANZIA"))
+
+
+# -- Operation & Job integration (Sprint 13) --------------------------------
+
+
+def _mocked_service_with_stores(tmp_path):
+    from hermes.kernel.job_store import JobStore
+    from hermes.kernel.operation_store import OperationStore
+
+    service, mocks = _mocked_service()
+    op_store = OperationStore(workspaces_root=tmp_path)
+    job_store = JobStore(workspaces_root=tmp_path)
+    service.operation_store = op_store
+    service.job_store = job_store
+    return service, mocks, op_store, job_store
+
+
+def test_generate_with_stores_creates_operation(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    service.generate("do something")
+    ops = op_store.list("AVANZIA")
+    assert len(ops) == 1
+    assert ops[0].status == "completed"
+    assert ops[0].request == "do something"
+
+
+def test_generate_with_stores_creates_job(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    service.generate("do something")
+    jobs = job_store.list("AVANZIA")
+    assert len(jobs) == 1
+    assert jobs[0].operation_id == op_store.list("AVANZIA")[0].id
+
+
+def test_generate_without_stores_works_unchanged():
+    service, mocks = _mocked_service()
+    result = service.generate("do something")
+    assert isinstance(result, ExecutionResult)
+
+
+def test_generate_returns_execution_result_unchanged(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    result = service.generate("do something")
+    assert isinstance(result, ExecutionResult)
+    assert result.status == mocks["executor_result"].status
+
+
+def test_job_captures_execution_result_fields(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    service.generate("do something")
+    job = job_store.list("AVANZIA")[0]
+    er = mocks["executor_result"]
+    assert job.status == er.status
+    assert job.completed_steps == er.completed_steps
+
+
+def test_generate_with_stores_handles_execution_failure(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    mocks["executor"].execute.side_effect = RuntimeError("Boom")
+
+    with pytest.raises(RuntimeError, match="Boom"):
+        service.generate("do something")
+
+    ops = op_store.list("AVANZIA")
+    assert len(ops) == 1
+    assert ops[0].status == "failed"
+    assert job_store.list("AVANZIA") == []
+
+
+# -- list/get delegation (Sprint 13) ----------------------------------------
+
+
+def test_list_operations_delegates_to_store(tmp_path):
+    from hermes.kernel.operation_store import OperationStore
+
+    service = HermesService(operation_store=OperationStore(workspaces_root=tmp_path))
+    assert service.list_operations("TEST") == []
+
+
+def test_list_operations_without_store_returns_empty():
+    service = HermesService()
+    assert service.list_operations("TEST") == []
+
+
+def test_get_operation_without_store_returns_none():
+    service = HermesService()
+    assert service.get_operation("TEST", "OP-NONEXISTENT") is None
+
+
+def test_list_jobs_without_store_returns_empty():
+    service = HermesService()
+    assert service.list_jobs("TEST") == []
+
+
+def test_get_job_without_store_returns_none():
+    service = HermesService()
+    assert service.get_job("TEST", "JOB-NONEXISTENT") is None
+
+
+# -- Serialization (Sprint 14) ----------------------------------------------
+
+
+def test_serialize_operation_excludes_extra_fields(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    service.generate("do something")
+    ops = service.list_operations("AVANZIA")
+    assert len(ops) == 1
+    assert "extra_fields" not in ops[0]
+    assert "id" in ops[0]
+    assert "status" in ops[0]
+
+
+def test_serialize_job_list_excludes_generated_output(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    service.generate("do something")
+    jobs = service.list_jobs("AVANZIA")
+    assert len(jobs) == 1
+    assert "generated_output" not in jobs[0]
+
+
+def test_serialize_job_detail_includes_generated_output(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    service.generate("do something")
+    jobs = job_store.list("AVANZIA")
+    detail = service.get_job("AVANZIA", jobs[0].id)
+    assert "generated_output" in detail

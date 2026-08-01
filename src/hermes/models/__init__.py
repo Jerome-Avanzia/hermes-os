@@ -5,9 +5,11 @@ from hermes.models.execution_plan import ExecutionPlan
 from hermes.models.execution_result import ExecutionResult
 from hermes.models.execution_step import ExecutionStep
 from hermes.models.file_content import FileContent
+from hermes.models.job import Job
 from hermes.models.knowledge_context import KnowledgeContext
 from hermes.models.knowledge_document import KnowledgeDocument
 from hermes.models.loaded_skill import LoadedSkill
+from hermes.models.operation import InvalidTransitionError, Operation, transition_operation
 from hermes.models.organization import Organization
 from hermes.models.plan import Plan
 from hermes.models.profile import Profile
@@ -39,6 +41,10 @@ __all__ = [
     "LoadedSkill",
     "Organization",
     "ExecutionResult",
+    "Job",
+    "Operation",
+    "InvalidTransitionError",
+    "transition_operation",
     "WorkspaceFile",
     "WorkspaceSnapshot",
     "DiagnosticsReport",

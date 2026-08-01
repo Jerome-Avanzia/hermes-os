@@ -1,12 +1,14 @@
 """Hermes Gateway — protocol boundary between the Workspace UI and HermesService.
 
 Exposes SSE chat (POST /v1/chat), profile listing (GET /v1/profiles),
-workspace bootstrap (GET /v1/workspace), health check (GET /health),
-and the static Workspace shell (GET /).
+workspace bootstrap (GET /v1/workspace), dashboard summary (GET /v1/dashboard),
+knowledge browsing (GET /v1/knowledge), operations management
+(GET/POST /v1/operations), jobs listing (GET /v1/jobs),
+health check (GET /health), and the static Workspace shell (GET /).
 
-The Gateway performs protocol translation only (ADR-0002). All chat
-requests are delegated to HermesService, which orchestrates context
-assembly and conversation rendering.
+The Gateway performs protocol translation only (ADR-0002). All requests
+are delegated to HermesService, which orchestrates context assembly,
+conversation rendering, and operation lifecycle management.
 """
 
 import json
@@ -23,7 +25,9 @@ from pydantic import BaseModel
 
 from hermes.conductor import Conductor
 from hermes.kernel.profile_loader import ProfileLoader
+from hermes.kernel.operation_store import OperationNotFoundError
 from hermes.kernel.workspace_engine import WorkspaceEngine, WorkspaceNotFoundError
+from hermes.models.operation import InvalidTransitionError
 from hermes.providers.ollama_provider import ChatMessage, OllamaConnectionError, OllamaProvider
 from hermes.runtime.context_engine import ContextEngine
 from hermes.service import HermesService
@@ -193,6 +197,102 @@ async def get_workspace() -> dict:
         },
         "sprint": None,
     }
+
+
+@app.get("/v1/dashboard")
+async def get_dashboard() -> dict:
+    """Return a CEO-oriented workspace operating summary for the Today screen."""
+    return _hermes_service.get_dashboard(_active_workspace_id)
+
+
+@app.get("/v1/knowledge")
+async def list_knowledge() -> list[dict]:
+    """List all Knowledge Documents for the active workspace."""
+    return _hermes_service.list_knowledge(_active_workspace_id)
+
+
+@app.get("/v1/knowledge/{document_id}")
+async def get_knowledge(document_id: str) -> JSONResponse:
+    """Return a single Knowledge Document with full content."""
+    doc = _hermes_service.get_knowledge(_active_workspace_id, document_id)
+    if doc is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Knowledge document not found: {document_id}"},
+        )
+    return JSONResponse(content=doc)
+
+
+@app.get("/v1/operations")
+async def list_operations() -> list[dict]:
+    """List all Operations for the active workspace."""
+    return _hermes_service.list_operations(_active_workspace_id)
+
+
+@app.get("/v1/operations/{operation_id}")
+async def get_operation(operation_id: str) -> JSONResponse:
+    """Return a single Operation."""
+    op = _hermes_service.get_operation(_active_workspace_id, operation_id)
+    if op is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Operation not found: {operation_id}"},
+        )
+    return JSONResponse(content=op)
+
+
+@app.post("/v1/operations/{operation_id}/approve")
+async def approve_operation(operation_id: str) -> JSONResponse:
+    """Approve an escalated Operation, returning it to executing."""
+    try:
+        result = _hermes_service.approve_operation(_active_workspace_id, operation_id)
+    except OperationNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Operation not found: {operation_id}"},
+        )
+    except InvalidTransitionError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={"error": str(exc)},
+        )
+    return JSONResponse(content=result)
+
+
+@app.post("/v1/operations/{operation_id}/reject")
+async def reject_operation(operation_id: str) -> JSONResponse:
+    """Reject an escalated Operation."""
+    try:
+        result = _hermes_service.reject_operation(_active_workspace_id, operation_id)
+    except OperationNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Operation not found: {operation_id}"},
+        )
+    except InvalidTransitionError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={"error": str(exc)},
+        )
+    return JSONResponse(content=result)
+
+
+@app.get("/v1/jobs")
+async def list_jobs() -> list[dict]:
+    """List all Jobs for the active workspace."""
+    return _hermes_service.list_jobs(_active_workspace_id)
+
+
+@app.get("/v1/jobs/{job_id}")
+async def get_job(job_id: str) -> JSONResponse:
+    """Return a single Job with full output."""
+    job = _hermes_service.get_job(_active_workspace_id, job_id)
+    if job is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Job not found: {job_id}"},
+        )
+    return JSONResponse(content=job)
 
 
 @app.get("/health")

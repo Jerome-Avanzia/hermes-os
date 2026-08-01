@@ -227,3 +227,452 @@ def test_ui_contains_profile_selector():
     resp = client.get("/")
     assert "profile-select" in resp.text
     assert "/v1/profiles" in resp.text
+
+
+# -- Knowledge API ---------------------------------------------------------
+
+
+def test_knowledge_list_returns_documents():
+    resp = client.get("/v1/knowledge")
+    assert resp.status_code == 200
+    docs = resp.json()
+    assert isinstance(docs, list)
+    for doc in docs:
+        assert "id" in doc
+        assert "title" in doc
+        assert "size" in doc
+        assert "path" in doc
+
+
+def test_knowledge_list_contains_expected_count():
+    resp = client.get("/v1/knowledge")
+    docs = resp.json()
+    assert len(docs) == 12
+
+
+def test_knowledge_list_documents_have_positive_size():
+    resp = client.get("/v1/knowledge")
+    for doc in resp.json():
+        assert doc["size"] > 0
+
+
+def test_knowledge_list_preserves_manifest_order():
+    resp = client.get("/v1/knowledge")
+    docs = resp.json()
+    assert docs[0]["id"] == "01-purpose"
+    assert docs[-1]["id"] == "12-homepage-tech-spec"
+
+
+def test_knowledge_detail_returns_full_document():
+    resp = client.get("/v1/knowledge/01-purpose")
+    assert resp.status_code == 200
+    doc = resp.json()
+    assert doc["id"] == "01-purpose"
+    assert doc["title"] != ""
+    assert doc["size"] > 0
+    assert doc["path"] != ""
+    assert "content" in doc
+    assert len(doc["content"]) > 0
+
+
+def test_knowledge_detail_content_matches_title():
+    resp = client.get("/v1/knowledge/01-purpose")
+    doc = resp.json()
+    assert doc["content"].startswith(f"# {doc['title']}")
+
+
+def test_knowledge_detail_invalid_id_returns_404():
+    resp = client.get("/v1/knowledge/nonexistent")
+    assert resp.status_code == 404
+    body = resp.json()
+    assert "error" in body
+    assert "nonexistent" in body["error"]
+
+
+def test_knowledge_list_does_not_expose_content():
+    resp = client.get("/v1/knowledge")
+    for doc in resp.json():
+        assert "content" not in doc
+
+
+def test_knowledge_list_with_unknown_workspace_returns_empty():
+    service = MagicMock()
+    service.list_knowledge.return_value = []
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/knowledge")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+# -- Dashboard API ---------------------------------------------------------
+
+
+def test_dashboard_returns_workspace_identity():
+    resp = client.get("/v1/dashboard")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "workspace" in data
+    assert "name" in data["workspace"]
+    assert "mission" in data["workspace"]
+
+
+def test_dashboard_contains_attention_section():
+    resp = client.get("/v1/dashboard")
+    data = resp.json()
+    assert "attention" in data
+    assert "count" in data["attention"]
+    assert "items" in data["attention"]
+    assert isinstance(data["attention"]["items"], list)
+
+
+def test_dashboard_contains_operations_section():
+    resp = client.get("/v1/dashboard")
+    data = resp.json()
+    assert "operations" in data
+    ops = data["operations"]
+    assert "active" in ops
+    assert "completed_today" in ops
+    assert "total" in ops
+
+
+def test_dashboard_contains_knowledge_count():
+    resp = client.get("/v1/dashboard")
+    data = resp.json()
+    assert "knowledge" in data
+    assert "count" in data["knowledge"]
+    assert data["knowledge"]["count"] > 0
+
+
+def test_dashboard_contains_repository_count():
+    resp = client.get("/v1/dashboard")
+    data = resp.json()
+    assert "repositories" in data
+    assert "count" in data["repositories"]
+
+
+def test_dashboard_knowledge_matches_knowledge_api():
+    """Dashboard knowledge count must match the Knowledge API dynamically."""
+    dashboard_resp = client.get("/v1/dashboard")
+    knowledge_resp = client.get("/v1/knowledge")
+    assert dashboard_resp.json()["knowledge"]["count"] == len(knowledge_resp.json())
+
+
+def test_dashboard_delegates_to_service():
+    service = MagicMock()
+    service.get_dashboard.return_value = {
+        "attention": {"count": 0, "items": []},
+        "operations": {"active": 0, "completed_today": 0, "total": 0},
+        "knowledge": {"count": 5},
+        "repositories": {"count": 2},
+        "workspace": {"name": "Test", "mission": ""},
+    }
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/dashboard")
+
+    assert resp.status_code == 200
+    service.get_dashboard.assert_called_once()
+    assert resp.json()["knowledge"]["count"] == 5
+
+
+# -- UI: Today screen ------------------------------------------------------
+
+
+def test_ui_contains_today_nav_item():
+    resp = client.get("/")
+    assert 'data-view="today"' in resp.text
+    assert "Today" in resp.text
+
+
+def test_ui_references_dashboard_endpoint():
+    resp = client.get("/")
+    assert "/v1/dashboard" in resp.text
+
+
+# -- UI: Documents screen --------------------------------------------------
+
+
+def test_ui_contains_documents_nav_item():
+    resp = client.get("/")
+    assert 'data-view="documents"' in resp.text
+    assert "Documents" in resp.text
+
+
+def test_ui_documents_view_references_knowledge_api():
+    resp = client.get("/")
+    assert "/v1/knowledge" in resp.text
+
+
+def test_ui_documents_view_has_list_container():
+    resp = client.get("/")
+    assert 'id="documents-list"' in resp.text
+
+
+def test_ui_documents_view_has_detail_container():
+    resp = client.get("/")
+    assert 'id="documents-detail"' in resp.text
+
+
+def test_ui_documents_view_has_ask_about_action():
+    resp = client.get("/")
+    assert "Ask about this" in resp.text
+
+
+def test_ui_documents_view_has_back_button():
+    resp = client.get("/")
+    assert "doc-back" in resp.text
+
+
+# -- Operations API --------------------------------------------------------
+
+
+def _mock_operation():
+    return {
+        "id": "OP-20260801-001",
+        "workspace_id": "AVANZIA",
+        "request": "Generate homepage copy",
+        "status": "executing",
+        "created_at": "2026-08-01T10:30:00+00:00",
+        "updated_at": "2026-08-01T10:35:00+00:00",
+    }
+
+
+def test_operations_list_returns_200():
+    service = MagicMock()
+    service.list_operations.return_value = []
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/operations")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_operations_list_delegates_to_service():
+    service = MagicMock()
+    service.list_operations.return_value = [_mock_operation()]
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/operations")
+
+    service.list_operations.assert_called_once()
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["id"] == "OP-20260801-001"
+
+
+def test_operations_list_deterministic_order():
+    service = MagicMock()
+    op1 = _mock_operation()
+    op2 = {**_mock_operation(), "id": "OP-20260801-002"}
+    service.list_operations.return_value = [op1, op2]
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/operations")
+
+    ids = [o["id"] for o in resp.json()]
+    assert ids == ["OP-20260801-001", "OP-20260801-002"]
+
+
+def test_operations_detail_returns_operation():
+    service = MagicMock()
+    service.get_operation.return_value = _mock_operation()
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/operations/OP-20260801-001")
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "OP-20260801-001"
+
+
+def test_operations_detail_not_found_returns_404():
+    service = MagicMock()
+    service.get_operation.return_value = None
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/operations/OP-NONEXISTENT")
+
+    assert resp.status_code == 404
+    assert "error" in resp.json()
+
+
+def test_operations_detail_excludes_extra_fields():
+    service = MagicMock()
+    service.get_operation.return_value = _mock_operation()
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/operations/OP-20260801-001")
+
+    assert "extra_fields" not in resp.json()
+
+
+def test_operations_approve_delegates_to_service():
+    service = MagicMock()
+    approved = {**_mock_operation(), "status": "executing"}
+    service.approve_operation.return_value = approved
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post("/v1/operations/OP-20260801-001/approve")
+
+    assert resp.status_code == 200
+    service.approve_operation.assert_called_once()
+    assert resp.json()["status"] == "executing"
+
+
+def test_operations_approve_not_found_returns_404():
+    from hermes.kernel.operation_store import OperationNotFoundError
+
+    service = MagicMock()
+    service.approve_operation.side_effect = OperationNotFoundError("not found")
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post("/v1/operations/OP-NONEXISTENT/approve")
+
+    assert resp.status_code == 404
+
+
+def test_operations_approve_invalid_transition_returns_409():
+    from hermes.models.operation import InvalidTransitionError
+
+    service = MagicMock()
+    service.approve_operation.side_effect = InvalidTransitionError("bad transition")
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post("/v1/operations/OP-20260801-001/approve")
+
+    assert resp.status_code == 409
+    assert "error" in resp.json()
+
+
+def test_operations_reject_delegates_to_service():
+    service = MagicMock()
+    rejected = {**_mock_operation(), "status": "rejected"}
+    service.reject_operation.return_value = rejected
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post("/v1/operations/OP-20260801-001/reject")
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "rejected"
+
+
+def test_operations_reject_not_found_returns_404():
+    from hermes.kernel.operation_store import OperationNotFoundError
+
+    service = MagicMock()
+    service.reject_operation.side_effect = OperationNotFoundError("not found")
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post("/v1/operations/OP-NONEXISTENT/reject")
+
+    assert resp.status_code == 404
+
+
+def test_operations_reject_invalid_transition_returns_409():
+    from hermes.models.operation import InvalidTransitionError
+
+    service = MagicMock()
+    service.reject_operation.side_effect = InvalidTransitionError("bad transition")
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post("/v1/operations/OP-20260801-001/reject")
+
+    assert resp.status_code == 409
+
+
+# -- Jobs API --------------------------------------------------------------
+
+
+def _mock_job(include_output=False):
+    data = {
+        "id": "JOB-20260801-001",
+        "workspace_id": "AVANZIA",
+        "operation_id": "OP-20260801-001",
+        "status": "completed",
+        "completed_steps": ["Python"],
+        "started_at": "2026-08-01T10:30:00+00:00",
+        "finished_at": "2026-08-01T10:30:05+00:00",
+        "created_at": "2026-08-01T10:30:05+00:00",
+        "updated_at": "2026-08-01T10:30:05+00:00",
+    }
+    if include_output:
+        data["generated_output"] = "Generated text"
+    return data
+
+
+def test_jobs_list_returns_200():
+    service = MagicMock()
+    service.list_jobs.return_value = []
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/jobs")
+
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_jobs_list_delegates_to_service():
+    service = MagicMock()
+    service.list_jobs.return_value = [_mock_job()]
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/jobs")
+
+    service.list_jobs.assert_called_once()
+    assert len(resp.json()) == 1
+
+
+def test_jobs_list_excludes_generated_output():
+    service = MagicMock()
+    service.list_jobs.return_value = [_mock_job(include_output=False)]
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/jobs")
+
+    assert "generated_output" not in resp.json()[0]
+
+
+def test_jobs_list_deterministic_order():
+    service = MagicMock()
+    j1 = _mock_job()
+    j2 = {**_mock_job(), "id": "JOB-20260801-002"}
+    service.list_jobs.return_value = [j1, j2]
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/jobs")
+
+    ids = [j["id"] for j in resp.json()]
+    assert ids == ["JOB-20260801-001", "JOB-20260801-002"]
+
+
+def test_jobs_detail_returns_job():
+    service = MagicMock()
+    service.get_job.return_value = _mock_job(include_output=True)
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/jobs/JOB-20260801-001")
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "JOB-20260801-001"
+
+
+def test_jobs_detail_includes_generated_output():
+    service = MagicMock()
+    service.get_job.return_value = _mock_job(include_output=True)
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/jobs/JOB-20260801-001")
+
+    assert "generated_output" in resp.json()
+
+
+def test_jobs_detail_not_found_returns_404():
+    service = MagicMock()
+    service.get_job.return_value = None
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/jobs/JOB-NONEXISTENT")
+
+    assert resp.status_code == 404
+    assert "error" in resp.json()

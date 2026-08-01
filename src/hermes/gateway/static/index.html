@@ -261,12 +261,28 @@
     display: flex;
   }
 
-  /* ── Dashboard view ───────────────────────────────── */
+  /* ── Today view ───────────────────────────────────── */
 
-  #view-dashboard {
+  #view-today {
     padding: 24px;
     gap: 20px;
     overflow-y: auto;
+  }
+
+  #today-header {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  #today-attention {
+    padding: 16px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-muted);
   }
 
   .widget-row {
@@ -415,6 +431,144 @@
   #input-area button:hover { background: var(--accent-hover); }
   #input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+  /* ── List / detail views (reused by Documents, Operations, Jobs) ── */
+
+  .list-view {
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .list-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .list-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .list-count {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  .list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s;
+  }
+
+  .list-item:hover {
+    background: var(--surface-hover);
+    border-color: var(--accent-dim);
+  }
+
+  .list-item-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .list-item-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .list-item-meta {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .list-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+
+  .detail-view {
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .detail-header {
+    margin-bottom: 20px;
+  }
+
+  .detail-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .detail-meta {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .detail-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .detail-btn {
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .detail-btn:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+
+  .detail-btn.accent {
+    border-color: var(--accent-dim);
+    color: var(--accent);
+  }
+
+  .detail-btn.accent:hover {
+    background: var(--accent-dim);
+  }
+
+  .detail-content {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-y: auto;
+  }
+
   /* ── Coming Soon view ─────────────────────────────── */
 
   .view-placeholder {
@@ -470,19 +624,15 @@
 
     <div class="nav-section">
       <div class="nav-section-title">Main</div>
-      <div class="nav-item active" data-view="dashboard">Dashboard</div>
+      <div class="nav-item active" data-view="today">Today</div>
       <div class="nav-item" data-view="chat">Chat</div>
-      <div class="nav-item" data-view="files">Files</div>
-      <div class="nav-item" data-view="terminal">Terminal</div>
-      <div class="nav-item" data-view="jobs">Jobs</div>
-      <div class="nav-item" data-view="kanban">Kanban</div>
-      <div class="nav-item" data-view="conductor">Conductor</div>
       <div class="nav-item" data-view="operations">Operations</div>
-      <div class="nav-item" data-view="swarm">Swarm</div>
+      <div class="nav-item" data-view="jobs">Jobs</div>
     </div>
 
     <div class="nav-section">
       <div class="nav-section-title">Knowledge</div>
+      <div class="nav-item" data-view="documents">Documents</div>
       <div class="nav-item" data-view="memory">Memory</div>
       <div class="nav-item" data-view="skills">Skills</div>
       <div class="nav-item" data-view="mcp">MCP</div>
@@ -523,10 +673,11 @@
 
     <div id="content">
 
-      <!-- Dashboard view -->
-      <div id="view-dashboard" class="view active">
-        <div class="widget-row" id="dashboard-widgets"></div>
-        <div class="widget" id="dashboard-model"></div>
+      <!-- Today view -->
+      <div id="view-today" class="view active">
+        <div id="today-header"></div>
+        <div id="today-attention"></div>
+        <div class="widget-row" id="today-widgets"></div>
       </div>
 
       <!-- Chat view -->
@@ -542,13 +693,12 @@
 
       <!-- Placeholder views -->
       <div id="view-search" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Search</div><div class="view-placeholder-sub">Coming soon</div></div></div>
-      <div id="view-files" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Files</div><div class="view-placeholder-sub">Coming soon</div></div></div>
-      <div id="view-terminal" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Terminal</div><div class="view-placeholder-sub">Coming soon</div></div></div>
-      <div id="view-jobs" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Jobs</div><div class="view-placeholder-sub">Coming soon</div></div></div>
-      <div id="view-kanban" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Kanban</div><div class="view-placeholder-sub">Coming soon</div></div></div>
-      <div id="view-conductor" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Conductor</div><div class="view-placeholder-sub">Coming soon</div></div></div>
       <div id="view-operations" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Operations</div><div class="view-placeholder-sub">Coming soon</div></div></div>
-      <div id="view-swarm" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Swarm</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-jobs" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Jobs</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-documents" class="view">
+        <div id="documents-list" class="list-view"></div>
+        <div id="documents-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-memory" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Memory</div><div class="view-placeholder-sub">Coming soon</div></div></div>
       <div id="view-skills" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Skills</div><div class="view-placeholder-sub">Coming soon</div></div></div>
       <div id="view-mcp" class="view"><div class="view-placeholder"><div class="view-placeholder-title">MCP</div><div class="view-placeholder-sub">Coming soon</div></div></div>
@@ -569,12 +719,13 @@
   var sendBtn      = document.getElementById("send");
   var profileSel   = document.getElementById("profile-select");
   var sessionsList = document.getElementById("sessions-list");
-  var dashWidgets  = document.getElementById("dashboard-widgets");
-  var dashModel    = document.getElementById("dashboard-model");
+  var todayHeader    = document.getElementById("today-header");
+  var todayAttention = document.getElementById("today-attention");
+  var todayWidgets   = document.getElementById("today-widgets");
 
   var history = [];
   var streaming = false;
-  var currentView = "dashboard";
+  var currentView = "today";
 
   // ── Navigation ────────────────────────────────────
 
@@ -590,6 +741,7 @@
 
     currentView = name;
     if (name === "chat") inputEl.focus();
+    if (name === "documents") loadDocuments();
   }
 
   document.querySelectorAll(".nav-item[data-view]").forEach(function (el) {
@@ -641,63 +793,69 @@
       });
   }
 
-  // ── Load workspace ────────────────────────────────
+  // ── Load dashboard ────────────────────────────────
 
-  function loadWorkspace() {
-    fetch(GATEWAY + "/v1/workspace")
+  function loadDashboard() {
+    fetch(GATEWAY + "/v1/dashboard")
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data) return;
-        renderDashboard(data);
-        renderStatusBar(data);
+        renderToday(data);
       })
       .catch(function () {});
   }
 
-  function renderDashboard(data) {
+  function renderToday(data) {
     var ws = data.workspace || {};
-    var repos = data.repositories || [];
-    var model = data.model || {};
+    var attention = data.attention || { count: 0, items: [] };
+    var operations = data.operations || {};
+    var knowledge = data.knowledge || {};
+    var repositories = data.repositories || {};
 
-    // Metric widgets
-    var html = "";
-    html += '<div class="widget">';
-    html += '  <div class="widget-title">Workspace</div>';
-    html += '  <div class="model-name">' + esc(ws.name || "Hermes") + '</div>';
-    html += '  <div class="model-meta">' + esc(ws.description || "") + '</div>';
-    if (ws.mission) {
-      html += '<div class="model-meta" style="margin-top:8px;color:var(--text-muted)">' + esc(ws.mission) + '</div>';
+    // Header
+    todayHeader.textContent = ws.name || "Hermes";
+
+    // Attention section (attention-first per UX spec)
+    if (attention.count > 0) {
+      var ahtml = "";
+      attention.items.forEach(function (item) {
+        ahtml += '<div style="margin-bottom:6px">' + esc(item.title || item) + '</div>';
+      });
+      todayAttention.innerHTML = ahtml;
+    } else {
+      todayAttention.textContent = "No items need your attention.";
     }
+
+    // Operating state widgets
+    var html = "";
+
+    html += '<div class="widget">';
+    html += '  <div class="widget-title">Operations</div>';
+    html += '  <div class="widget-value">' + (operations.active || 0) + '</div>';
+    html += '  <div class="widget-sub">active</div>';
+    html += '  <div class="widget-sub">' + (operations.completed_today || 0) + ' completed today &middot; ' + (operations.total || 0) + ' total</div>';
+    html += '</div>';
+
+    html += '<div class="widget">';
+    html += '  <div class="widget-title">Knowledge</div>';
+    html += '  <div class="widget-value">' + (knowledge.count || 0) + '</div>';
+    html += '  <div class="widget-sub">documents</div>';
     html += '</div>';
 
     html += '<div class="widget">';
     html += '  <div class="widget-title">Repositories</div>';
-    if (repos.length > 0) {
-      repos.forEach(function (r) {
-        html += '<div style="margin-bottom:6px">';
-        html += '  <span style="color:var(--text)">' + esc(r.name) + '</span>';
-        html += '  <span style="color:var(--text-dim);font-size:11px;margin-left:8px">' + esc(r.branch || "") + '</span>';
-        html += '</div>';
-      });
-    } else {
-      html += '<div class="widget-coming-soon">No repositories configured</div>';
-    }
+    html += '  <div class="widget-value">' + (repositories.count || 0) + '</div>';
+    html += '  <div class="widget-sub">connected</div>';
     html += '</div>';
 
-    dashWidgets.innerHTML = html;
+    if (ws.mission) {
+      html += '<div class="widget">';
+      html += '  <div class="widget-title">Mission</div>';
+      html += '  <div style="font-size:13px;color:var(--text-muted);line-height:1.5">' + esc(ws.mission) + '</div>';
+      html += '</div>';
+    }
 
-    // Model widget
-    var mhtml = '';
-    mhtml += '<div class="widget-title">Active Model</div>';
-    mhtml += '<div class="model-name">' + esc(model.name || "Unknown") + '</div>';
-    mhtml += '<div class="model-meta">Provider: Ollama</div>';
-    dashModel.innerHTML = mhtml;
-  }
-
-  function renderStatusBar(data) {
-    var gw = data.gateway || {};
-    var gwLabel = document.getElementById("status-gateway");
-    gwLabel.textContent = "Gateway v" + (gw.version || "?");
+    todayWidgets.innerHTML = html;
   }
 
   // ── Health check ──────────────────────────────────
@@ -718,6 +876,106 @@
         document.getElementById("status-gateway-dot").classList.add("offline");
         document.getElementById("status-api-dot").classList.add("offline");
       });
+  }
+
+  // ── Documents ─────────────────────────────────────
+
+  var docListEl   = document.getElementById("documents-list");
+  var docDetailEl = document.getElementById("documents-detail");
+
+  function loadDocuments() {
+    docListEl.style.display = "block";
+    docDetailEl.style.display = "none";
+    fetch(GATEWAY + "/v1/knowledge")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (docs) {
+        renderDocumentList(docs);
+      })
+      .catch(function () {
+        docListEl.innerHTML = '<div class="list-empty">Cannot load Knowledge.</div>';
+      });
+  }
+
+  function renderDocumentList(docs) {
+    var html = '<div class="list-header">';
+    html += '<div class="list-title">Knowledge</div>';
+    html += '<div class="list-count">' + docs.length + ' documents</div>';
+    html += '</div>';
+
+    if (docs.length === 0) {
+      html += '<div class="list-empty">No Knowledge Documents found for this Workspace.</div>';
+    } else {
+      for (var i = 0; i < docs.length; i++) {
+        html += '<div class="list-item" data-doc-id="' + esc(docs[i].id) + '">';
+        html += '  <div class="list-item-main">';
+        html += '    <div class="list-item-title">' + esc(docs[i].title) + '</div>';
+        html += '    <div class="list-item-meta">' + esc(docs[i].id) + '</div>';
+        html += '  </div>';
+        html += '  <div class="list-item-meta">' + formatSize(docs[i].size) + '</div>';
+        html += '</div>';
+      }
+    }
+
+    docListEl.innerHTML = html;
+
+    docListEl.querySelectorAll(".list-item[data-doc-id]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        openDocument(el.dataset.docId);
+      });
+    });
+  }
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' chars';
+    return (bytes / 1024).toFixed(1) + ' KB';
+  }
+
+  function openDocument(id) {
+    docListEl.style.display = "none";
+    docDetailEl.style.display = "flex";
+    docDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(GATEWAY + "/v1/knowledge/" + encodeURIComponent(id))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (doc) {
+        if (!doc) {
+          docDetailEl.innerHTML = '<div class="list-empty">Cannot load this document.</div>';
+          return;
+        }
+        var html = '<div class="detail-header">';
+        html += '  <div class="detail-title">' + esc(doc.title) + '</div>';
+        html += '  <div class="detail-meta">' + esc(doc.id) + '</div>';
+        html += '</div>';
+        html += '<div class="detail-actions">';
+        html += '  <button class="detail-btn" id="doc-back">Back</button>';
+        html += '  <button class="detail-btn accent" id="doc-ask">Ask about this</button>';
+        html += '</div>';
+        html += '<div class="detail-content">' + esc(doc.content) + '</div>';
+
+        docDetailEl.innerHTML = html;
+
+        document.getElementById("doc-back").addEventListener("click", function () {
+          docDetailEl.style.display = "none";
+          docListEl.style.display = "block";
+        });
+
+        document.getElementById("doc-ask").addEventListener("click", function () {
+          askAboutDocument(doc.title);
+        });
+      })
+      .catch(function () {
+        docDetailEl.innerHTML = '<div class="list-empty">Cannot load this document.</div>';
+      });
+  }
+
+  function askAboutDocument(title) {
+    switchView("chat");
+    inputEl.value = 'Regarding "' + title + '":\n\n';
+    inputEl.style.height = "auto";
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
+    inputEl.focus();
+    // Place cursor at end (after the blank line)
+    inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
   }
 
   // ── Chat ──────────────────────────────────────────
@@ -848,7 +1106,7 @@
 
   // ── Init ──────────────────────────────────────────
   loadProfiles();
-  loadWorkspace();
+  loadDashboard();
   checkHealth();
 })();
 </script>
