@@ -555,6 +555,15 @@
     background: var(--accent-dim);
   }
 
+  .detail-btn.danger {
+    border-color: #7f1d1d;
+    color: var(--red);
+  }
+
+  .detail-btn.danger:hover {
+    background: #7f1d1d;
+  }
+
   .detail-content {
     flex: 1;
     background: var(--surface);
@@ -567,6 +576,71 @@
     white-space: pre-wrap;
     word-break: break-word;
     overflow-y: auto;
+  }
+
+  /* ── Status badge ─────────────────────────────────── */
+
+  .status-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .status-badge.created       { background: var(--surface-hover); color: var(--text-muted); }
+  .status-badge.executing     { background: #1a3a32; color: var(--accent); }
+  .status-badge.completed     { background: #1a2a1a; color: #86efac; }
+  .status-badge.failed        { background: #2d1b1b; color: var(--red); }
+  .status-badge.awaiting_escalation { background: #3a2a0a; color: #fbbf24; }
+  .status-badge.rejected      { background: #2d1b1b; color: var(--red); }
+
+  /* ── Filter bar ─────────────────────────────────── */
+
+  .filter-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .filter-btn {
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  .filter-btn:hover {
+    background: var(--surface-hover);
+    color: var(--text);
+  }
+
+  .filter-btn.active {
+    border-color: var(--accent-dim);
+    color: var(--accent);
+    background: var(--accent-dim);
+  }
+
+  /* ── Detail section ─────────────────────────────── */
+
+  .detail-section {
+    margin-bottom: 20px;
+  }
+
+  .detail-section-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
   }
 
   /* ── Coming Soon view ─────────────────────────────── */
@@ -693,7 +767,10 @@
 
       <!-- Placeholder views -->
       <div id="view-search" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Search</div><div class="view-placeholder-sub">Coming soon</div></div></div>
-      <div id="view-operations" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Operations</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-operations" class="view">
+        <div id="operations-list" class="list-view"></div>
+        <div id="operations-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-jobs" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Jobs</div><div class="view-placeholder-sub">Coming soon</div></div></div>
       <div id="view-documents" class="view">
         <div id="documents-list" class="list-view"></div>
@@ -742,6 +819,7 @@
     currentView = name;
     if (name === "chat") inputEl.focus();
     if (name === "documents") loadDocuments();
+    if (name === "operations") loadOperations();
   }
 
   document.querySelectorAll(".nav-item[data-view]").forEach(function (el) {
@@ -976,6 +1054,215 @@
     inputEl.focus();
     // Place cursor at end (after the blank line)
     inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+  }
+
+  // ── Operations ────────────────────────────────────
+
+  var opsListEl   = document.getElementById("operations-list");
+  var opsDetailEl = document.getElementById("operations-detail");
+  var opsCache = [];
+  var opsFilter = "all";
+
+  function loadOperations() {
+    opsListEl.style.display = "block";
+    opsDetailEl.style.display = "none";
+    fetch(GATEWAY + "/v1/operations")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (ops) {
+        opsCache = ops;
+        opsFilter = "all";
+        renderOperationsList(ops);
+      })
+      .catch(function () {
+        opsListEl.innerHTML = '<div class="list-empty">Cannot load Operations.</div>';
+      });
+  }
+
+  function renderOperationsList(ops) {
+    // Sort by updated_at descending
+    ops = ops.slice().sort(function (a, b) {
+      return b.updated_at.localeCompare(a.updated_at);
+    });
+
+    var html = '<div class="list-header">';
+    html += '<div class="list-title">Operations</div>';
+    html += '<div class="list-count">' + ops.length + ' operations</div>';
+    html += '</div>';
+
+    // Filter bar
+    html += '<div class="filter-bar">';
+    var filters = ["all", "executing", "awaiting_escalation", "completed", "failed", "rejected"];
+    for (var fi = 0; fi < filters.length; fi++) {
+      var f = filters[fi];
+      var label = f === "all" ? "All" : f === "awaiting_escalation" ? "Escalated" : f.charAt(0).toUpperCase() + f.slice(1);
+      html += '<button class="filter-btn' + (opsFilter === f ? ' active' : '') + '" data-filter="' + f + '">' + label + '</button>';
+    }
+    html += '</div>';
+
+    var filtered = opsFilter === "all" ? ops : ops.filter(function (o) { return o.status === opsFilter; });
+
+    if (filtered.length === 0) {
+      if (opsCache.length === 0) {
+        html += '<div class="list-empty">No Operations yet.</div>';
+      } else {
+        html += '<div class="list-empty">No Operations match this filter.</div>';
+      }
+    } else {
+      for (var i = 0; i < filtered.length; i++) {
+        var op = filtered[i];
+        html += '<div class="list-item" data-op-id="' + esc(op.id) + '">';
+        html += '  <div class="list-item-main">';
+        html += '    <div class="list-item-title">' + esc(op.request) + '</div>';
+        html += '    <div class="list-item-meta">' + esc(op.id) + ' &middot; ' + formatDate(op.updated_at) + '</div>';
+        html += '  </div>';
+        html += '  <span class="status-badge ' + esc(op.status) + '">' + formatStatus(op.status) + '</span>';
+        html += '</div>';
+      }
+    }
+
+    opsListEl.innerHTML = html;
+
+    opsListEl.querySelectorAll(".filter-btn[data-filter]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        opsFilter = el.dataset.filter;
+        renderOperationsList(opsCache);
+      });
+    });
+
+    opsListEl.querySelectorAll(".list-item[data-op-id]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        openOperation(el.dataset.opId);
+      });
+    });
+  }
+
+  function formatStatus(status) {
+    if (status === "awaiting_escalation") return "Escalated";
+    return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+
+  function formatDate(iso) {
+    try {
+      var d = new Date(iso);
+      return d.toLocaleDateString() + " " + d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+    } catch (e) { return iso; }
+  }
+
+  function openOperation(id) {
+    opsListEl.style.display = "none";
+    opsDetailEl.style.display = "flex";
+    opsDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(GATEWAY + "/v1/operations/" + encodeURIComponent(id))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (op) {
+        if (!op) {
+          opsDetailEl.innerHTML = '<div class="list-empty">Cannot load this Operation.</div>';
+          return;
+        }
+        renderOperationDetail(op);
+      })
+      .catch(function () {
+        opsDetailEl.innerHTML = '<div class="list-empty">Cannot load this Operation.</div>';
+      });
+  }
+
+  function renderOperationDetail(op) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(op.request) + '</div>';
+    html += '  <div class="detail-meta">' + esc(op.id) + ' &middot; <span class="status-badge ' + esc(op.status) + '">' + formatStatus(op.status) + '</span></div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="op-back">Back</button>';
+    if (op.status === "awaiting_escalation") {
+      html += '  <button class="detail-btn accent" id="op-approve">Approve</button>';
+      html += '  <button class="detail-btn danger" id="op-reject">Reject</button>';
+    }
+    html += '</div>';
+
+    // Timestamps
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Timeline</div>';
+    html += '  <div class="list-item-meta">Created: ' + formatDate(op.created_at) + '</div>';
+    html += '  <div class="list-item-meta">Updated: ' + formatDate(op.updated_at) + '</div>';
+    html += '</div>';
+
+    // Jobs section
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Jobs</div>';
+    html += '  <div id="op-jobs-list"><div class="list-empty">Loading jobs...</div></div>';
+    html += '</div>';
+
+    // Decisions placeholder
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Decisions</div>';
+    html += '  <div class="list-empty">No Decisions recorded.</div>';
+    html += '</div>';
+
+    opsDetailEl.innerHTML = html;
+
+    document.getElementById("op-back").addEventListener("click", function () {
+      loadOperations();
+    });
+
+    if (op.status === "awaiting_escalation") {
+      document.getElementById("op-approve").addEventListener("click", function () {
+        approveOperation(op.id);
+      });
+      document.getElementById("op-reject").addEventListener("click", function () {
+        rejectOperation(op.id);
+      });
+    }
+
+    // Load jobs for this operation (client-side filter)
+    loadOperationJobs(op.id);
+  }
+
+  function loadOperationJobs(operationId) {
+    var jobsEl = document.getElementById("op-jobs-list");
+    fetch(GATEWAY + "/v1/jobs")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (jobs) {
+        var opJobs = jobs.filter(function (j) { return j.operation_id === operationId; });
+        if (opJobs.length === 0) {
+          jobsEl.innerHTML = '<div class="list-empty">No Jobs for this Operation.</div>';
+          return;
+        }
+        var html = "";
+        for (var i = 0; i < opJobs.length; i++) {
+          var j = opJobs[i];
+          html += '<div class="list-item">';
+          html += '  <div class="list-item-main">';
+          html += '    <div class="list-item-title">' + esc(j.id) + '</div>';
+          html += '    <div class="list-item-meta">' + (j.completed_steps || []).join(", ") + ' &middot; ' + formatDate(j.finished_at) + '</div>';
+          html += '  </div>';
+          html += '  <span class="status-badge ' + esc(j.status) + '">' + formatStatus(j.status) + '</span>';
+          html += '</div>';
+        }
+        jobsEl.innerHTML = html;
+      })
+      .catch(function () {
+        jobsEl.innerHTML = '<div class="list-empty">Cannot load Jobs.</div>';
+      });
+  }
+
+  function approveOperation(id) {
+    fetch(GATEWAY + "/v1/operations/" + encodeURIComponent(id) + "/approve", { method: "POST" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (op) {
+        if (op) renderOperationDetail(op);
+      })
+      .catch(function () {});
+  }
+
+  function rejectOperation(id) {
+    fetch(GATEWAY + "/v1/operations/" + encodeURIComponent(id) + "/reject", { method: "POST" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (op) {
+        if (op) renderOperationDetail(op);
+      })
+      .catch(function () {});
   }
 
   // ── Chat ──────────────────────────────────────────

@@ -676,3 +676,88 @@ def test_jobs_detail_not_found_returns_404():
 
     assert resp.status_code == 404
     assert "error" in resp.json()
+
+
+# -- UI: Operations screen -------------------------------------------------
+
+
+def test_ui_contains_operations_nav_item():
+    resp = client.get("/")
+    assert 'data-view="operations"' in resp.text
+    assert "Operations" in resp.text
+
+
+def test_ui_operations_view_references_operations_api():
+    resp = client.get("/")
+    assert "/v1/operations" in resp.text
+
+
+def test_ui_operations_view_has_list_container():
+    resp = client.get("/")
+    assert 'id="operations-list"' in resp.text
+
+
+def test_ui_operations_view_has_detail_container():
+    resp = client.get("/")
+    assert 'id="operations-detail"' in resp.text
+
+
+def test_ui_operations_view_has_filter_bar():
+    resp = client.get("/")
+    assert "filter-bar" in resp.text
+    assert "filter-btn" in resp.text
+
+
+def test_ui_operations_view_has_status_badges():
+    resp = client.get("/")
+    assert "status-badge" in resp.text
+
+
+def test_ui_operations_view_has_approve_button_logic():
+    resp = client.get("/")
+    assert "op-approve" in resp.text
+    assert "approveOperation" in resp.text
+
+
+def test_ui_operations_view_has_reject_button_logic():
+    resp = client.get("/")
+    assert "op-reject" in resp.text
+    assert "rejectOperation" in resp.text
+
+
+def test_ui_operations_view_has_back_button():
+    resp = client.get("/")
+    assert "op-back" in resp.text
+
+
+def test_ui_operations_view_has_jobs_section():
+    resp = client.get("/")
+    assert "op-jobs-list" in resp.text
+    assert "/v1/jobs" in resp.text
+
+
+def test_ui_operations_view_has_decisions_placeholder():
+    resp = client.get("/")
+    assert "No Decisions recorded." in resp.text
+
+
+def test_ui_operations_view_has_empty_state():
+    resp = client.get("/")
+    assert "No Operations yet." in resp.text
+
+
+def test_ui_operations_view_has_no_jobs_empty_state():
+    resp = client.get("/")
+    assert "No Jobs for this Operation." in resp.text
+
+
+def test_ui_operations_view_shows_approve_only_for_escalation():
+    """Approve/Reject buttons only render when status is awaiting_escalation."""
+    resp = client.get("/")
+    assert 'op.status === "awaiting_escalation"' in resp.text
+
+
+def test_ui_operations_view_sorts_by_updated_at():
+    """Operations are sorted by updated_at descending in the UI."""
+    resp = client.get("/")
+    assert "b.updated_at.localeCompare(a.updated_at)" in resp.text
