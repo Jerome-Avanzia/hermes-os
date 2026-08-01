@@ -771,7 +771,10 @@
         <div id="operations-list" class="list-view"></div>
         <div id="operations-detail" class="detail-view" style="display:none"></div>
       </div>
-      <div id="view-jobs" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Jobs</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-jobs" class="view">
+        <div id="jobs-list" class="list-view"></div>
+        <div id="jobs-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-documents" class="view">
         <div id="documents-list" class="list-view"></div>
         <div id="documents-detail" class="detail-view" style="display:none"></div>
@@ -820,6 +823,7 @@
     if (name === "chat") inputEl.focus();
     if (name === "documents") loadDocuments();
     if (name === "operations") loadOperations();
+    if (name === "jobs") loadJobs();
   }
 
   document.querySelectorAll(".nav-item[data-view]").forEach(function (el) {
@@ -1263,6 +1267,278 @@
         if (op) renderOperationDetail(op);
       })
       .catch(function () {});
+  }
+
+  // ── Jobs ──────────────────────────────────────────
+
+  var jobsListEl   = document.getElementById("jobs-list");
+  var jobsDetailEl = document.getElementById("jobs-detail");
+  var jobsCache = [];
+  var jobsStatusFilter = "all";
+  var jobsOpFilter = "all";
+
+  function loadJobs() {
+    jobsListEl.style.display = "block";
+    jobsDetailEl.style.display = "none";
+    fetch(GATEWAY + "/v1/jobs")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (jobs) {
+        jobsCache = jobs;
+        jobsStatusFilter = "all";
+        jobsOpFilter = "all";
+        renderJobsList(jobs);
+      })
+      .catch(function () {
+        jobsListEl.innerHTML = '<div class="list-empty">Cannot load Jobs.</div>';
+      });
+  }
+
+  function renderJobsList(jobs) {
+    // Sort by finished_at descending (most recent first)
+    jobs = jobs.slice().sort(function (a, b) {
+      return (b.finished_at || "").localeCompare(a.finished_at || "");
+    });
+
+    var html = '<div class="list-header">';
+    html += '<div class="list-title">Jobs</div>';
+    html += '<div class="list-count">' + jobs.length + ' jobs</div>';
+    html += '</div>';
+
+    // Status filter bar
+    html += '<div class="filter-bar" id="jobs-status-filter">';
+    var statuses = ["all", "completed", "awaiting_approval", "failed"];
+    for (var si = 0; si < statuses.length; si++) {
+      var s = statuses[si];
+      var label = s === "all" ? "All" : s === "awaiting_approval" ? "Awaiting Approval" : s.charAt(0).toUpperCase() + s.slice(1);
+      html += '<button class="filter-btn' + (jobsStatusFilter === s ? ' active' : '') + '" data-job-status="' + s + '">' + label + '</button>';
+    }
+
+    // Operation filter
+    var opIds = [];
+    for (var oi = 0; oi < jobsCache.length; oi++) {
+      var opId = jobsCache[oi].operation_id;
+      if (opId && opIds.indexOf(opId) === -1) opIds.push(opId);
+    }
+    opIds.sort();
+    html += '<select id="jobs-op-select" style="padding:4px 8px;font-size:11px;background:var(--surface);color:var(--text-muted);border:1px solid var(--border);border-radius:4px;font-family:inherit;cursor:pointer">';
+    html += '<option value="all"' + (jobsOpFilter === "all" ? ' selected' : '') + '>All Operations</option>';
+    for (var pi = 0; pi < opIds.length; pi++) {
+      html += '<option value="' + esc(opIds[pi]) + '"' + (jobsOpFilter === opIds[pi] ? ' selected' : '') + '>' + esc(opIds[pi]) + '</option>';
+    }
+    html += '</select>';
+    html += '</div>';
+
+    // Apply filters
+    var filtered = jobs;
+    if (jobsStatusFilter !== "all") {
+      filtered = filtered.filter(function (j) { return j.status === jobsStatusFilter; });
+    }
+    if (jobsOpFilter !== "all") {
+      filtered = filtered.filter(function (j) { return j.operation_id === jobsOpFilter; });
+    }
+
+    if (filtered.length === 0) {
+      if (jobsCache.length === 0) {
+        html += '<div class="list-empty">No Jobs have been executed yet.</div>';
+      } else {
+        html += '<div class="list-empty">No Jobs match this filter.</div>';
+      }
+    } else {
+      for (var i = 0; i < filtered.length; i++) {
+        var j = filtered[i];
+        html += '<div class="list-item" data-job-id="' + esc(j.id) + '">';
+        html += '  <div class="list-item-main">';
+        html += '    <div class="list-item-title">' + esc(j.id) + '</div>';
+        html += '    <div class="list-item-meta">' + esc(j.operation_id) + ' &middot; ' + (j.completed_steps || []).join(", ") + ' &middot; ' + formatDuration(j.started_at, j.finished_at) + '</div>';
+        html += '  </div>';
+        html += '  <span class="status-badge ' + esc(j.status) + '">' + formatStatus(j.status) + '</span>';
+        html += '</div>';
+      }
+    }
+
+    jobsListEl.innerHTML = html;
+
+    // Bind status filter buttons
+    jobsListEl.querySelectorAll(".filter-btn[data-job-status]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        jobsStatusFilter = el.dataset.jobStatus;
+        renderJobsList(jobsCache);
+      });
+    });
+
+    // Bind Operation filter
+    var opSelect = document.getElementById("jobs-op-select");
+    if (opSelect) {
+      opSelect.addEventListener("change", function () {
+        jobsOpFilter = opSelect.value;
+        renderJobsList(jobsCache);
+      });
+    }
+
+    // Bind list items
+    jobsListEl.querySelectorAll(".list-item[data-job-id]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        openJob(el.dataset.jobId);
+      });
+    });
+  }
+
+  function formatDuration(start, end) {
+    if (!start) return "Unknown";
+    if (!end) return "Running...";
+    try {
+      var ms = new Date(end) - new Date(start);
+      if (ms < 1000) return ms + "ms";
+      var secs = Math.floor(ms / 1000);
+      if (secs < 60) return secs + "s";
+      var mins = Math.floor(secs / 60);
+      secs = secs % 60;
+      return mins + "m " + secs + "s";
+    } catch (e) { return "Unknown"; }
+  }
+
+  function openJob(id) {
+    jobsListEl.style.display = "none";
+    jobsDetailEl.style.display = "flex";
+    jobsDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(GATEWAY + "/v1/jobs/" + encodeURIComponent(id))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (job) {
+        if (!job) {
+          jobsDetailEl.innerHTML = '<div class="list-empty">Cannot load this Job.</div>';
+          return;
+        }
+        renderJobDetail(job);
+      })
+      .catch(function () {
+        jobsDetailEl.innerHTML = '<div class="list-empty">Cannot load this Job.</div>';
+      });
+  }
+
+  function renderJobDetail(job) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(job.id) + '</div>';
+    html += '  <div class="detail-meta"><span class="job-parent-op" data-op="' + esc(job.operation_id) + '" style="cursor:pointer;color:var(--accent)">' + esc(job.operation_id) + '</span> &middot; <span class="status-badge ' + esc(job.status) + '">' + formatStatus(job.status) + '</span></div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="job-back">Back</button>';
+    html += '  <button class="detail-btn accent" id="job-view-op">View Operation</button>';
+    html += '</div>';
+
+    // Timeline
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Timeline</div>';
+    html += '  <div class="list-item-meta">Started: ' + formatDate(job.started_at) + '</div>';
+    html += '  <div class="list-item-meta">Finished: ' + formatDate(job.finished_at) + '</div>';
+    html += '  <div class="list-item-meta">Duration: ' + formatDuration(job.started_at, job.finished_at) + '</div>';
+    html += '</div>';
+
+    // Generated Output
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Generated Output</div>';
+    if (job.generated_output) {
+      html += '  <div class="detail-content">' + esc(job.generated_output) + '</div>';
+    } else {
+      html += '  <div class="list-empty">This Job completed without generated output.</div>';
+    }
+    html += '</div>';
+
+    // Completed Steps
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Completed Steps</div>';
+    if (job.completed_steps && job.completed_steps.length > 0) {
+      html += '  <div class="list-item-meta">' + job.completed_steps.map(function (s) { return esc(s); }).join(" &rarr; ") + '</div>';
+    } else {
+      html += '  <div class="list-empty">No steps recorded.</div>';
+    }
+    html += '</div>';
+
+    // Diagnostics (only if data exists — Founder amendment 1)
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title" id="job-diag-toggle" style="cursor:pointer">Diagnostics <span id="job-diag-arrow" style="font-size:8px">&#9654;</span></div>';
+    if (job.diagnostics) {
+      html += '  <div id="job-diag-content" style="display:none">';
+      var d = job.diagnostics;
+      if (d.project_id) html += '    <div class="list-item-meta">Project: ' + esc(d.project_id) + '</div>';
+      if (d.knowledge_documents && d.knowledge_documents.length > 0) html += '    <div class="list-item-meta">Knowledge: ' + d.knowledge_documents.map(function (k) { return esc(k); }).join(", ") + '</div>';
+      if (d.files_scanned !== undefined) html += '    <div class="list-item-meta">Files scanned: ' + d.files_scanned + '</div>';
+      if (d.files_selected && d.files_selected.length > 0) html += '    <div class="list-item-meta">Files selected: ' + d.files_selected.length + '</div>';
+      if (d.files_read !== undefined) html += '    <div class="list-item-meta">Files read: ' + d.files_read + '</div>';
+      if (d.chars_read !== undefined) html += '    <div class="list-item-meta">Chars read: ' + d.chars_read + (d.chars_truncated ? ' (' + d.chars_truncated + ' truncated)' : '') + '</div>';
+      if (d.prompt_chars !== undefined) html += '    <div class="list-item-meta">Prompt size: ' + d.prompt_chars + ' chars</div>';
+      html += '  </div>';
+    } else {
+      html += '  <div class="list-empty">No diagnostics recorded.</div>';
+    }
+    html += '</div>';
+
+    jobsDetailEl.innerHTML = html;
+
+    document.getElementById("job-back").addEventListener("click", function () {
+      loadJobs();
+    });
+
+    document.getElementById("job-view-op").addEventListener("click", function () {
+      navigateToOperation(job.operation_id);
+    });
+
+    // Parent Operation link in header
+    var parentLink = jobsDetailEl.querySelector(".job-parent-op");
+    if (parentLink) {
+      parentLink.addEventListener("click", function () {
+        navigateToOperation(parentLink.dataset.op);
+      });
+    }
+
+    // Diagnostics toggle (only if diagnostics exist)
+    if (job.diagnostics) {
+      document.getElementById("job-diag-toggle").addEventListener("click", function () {
+        var content = document.getElementById("job-diag-content");
+        var arrow = document.getElementById("job-diag-arrow");
+        if (content.style.display === "none") {
+          content.style.display = "block";
+          arrow.innerHTML = "&#9660;";
+        } else {
+          content.style.display = "none";
+          arrow.innerHTML = "&#9654;";
+        }
+      });
+    }
+  }
+
+  function navigateToOperation(operationId) {
+    // Founder amendment 2: if Operation cannot be loaded, stay on Job detail
+    fetch(GATEWAY + "/v1/operations/" + encodeURIComponent(operationId))
+      .then(function (r) {
+        if (!r.ok) throw new Error("not found");
+        return r.json();
+      })
+      .then(function (op) {
+        switchView("operations");
+        // Render the operation detail directly
+        opsListEl.style.display = "none";
+        opsDetailEl.style.display = "flex";
+        renderOperationDetail(op);
+      })
+      .catch(function () {
+        // Stay on Job detail, show error in a temporary notice
+        var notice = document.createElement("div");
+        notice.className = "list-empty";
+        notice.textContent = "The parent Operation could not be loaded.";
+        notice.style.color = "var(--red)";
+        // Insert after detail-actions
+        var actions = jobsDetailEl.querySelector(".detail-actions");
+        var existing = jobsDetailEl.querySelector(".op-load-error");
+        if (existing) existing.remove();
+        notice.className += " op-load-error";
+        if (actions && actions.nextSibling) {
+          actions.parentNode.insertBefore(notice, actions.nextSibling);
+        } else {
+          jobsDetailEl.appendChild(notice);
+        }
+      });
   }
 
   // ── Chat ──────────────────────────────────────────

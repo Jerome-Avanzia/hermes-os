@@ -761,3 +761,96 @@ def test_ui_operations_view_sorts_by_updated_at():
     """Operations are sorted by updated_at descending in the UI."""
     resp = client.get("/")
     assert "b.updated_at.localeCompare(a.updated_at)" in resp.text
+
+
+# -- UI: Jobs screen -------------------------------------------------------
+
+
+def test_ui_contains_jobs_nav_item():
+    resp = client.get("/")
+    assert 'data-view="jobs"' in resp.text
+    assert "Jobs" in resp.text
+
+
+def test_ui_jobs_view_references_jobs_api():
+    resp = client.get("/")
+    assert "/v1/jobs" in resp.text
+
+
+def test_ui_jobs_view_has_list_container():
+    resp = client.get("/")
+    assert 'id="jobs-list"' in resp.text
+
+
+def test_ui_jobs_view_has_detail_container():
+    resp = client.get("/")
+    assert 'id="jobs-detail"' in resp.text
+
+
+def test_ui_jobs_view_has_status_filter():
+    resp = client.get("/")
+    assert "data-job-status" in resp.text
+
+
+def test_ui_jobs_view_has_operation_filter():
+    resp = client.get("/")
+    assert "jobs-op-select" in resp.text
+
+
+def test_ui_jobs_view_has_back_button():
+    resp = client.get("/")
+    assert "job-back" in resp.text
+
+
+def test_ui_jobs_view_has_operation_link():
+    resp = client.get("/")
+    assert "navigateToOperation" in resp.text
+    assert "job-view-op" in resp.text
+
+
+def test_ui_jobs_view_has_output_section():
+    resp = client.get("/")
+    assert "Generated Output" in resp.text
+    assert "completed without generated output" in resp.text
+
+
+def test_ui_jobs_view_has_diagnostics_section():
+    resp = client.get("/")
+    assert "job-diag-toggle" in resp.text
+    assert "job-diag-content" in resp.text
+
+
+def test_ui_jobs_view_has_empty_state():
+    resp = client.get("/")
+    assert "No Jobs have been executed yet." in resp.text
+
+
+def test_ui_jobs_view_has_duration():
+    resp = client.get("/")
+    assert "formatDuration" in resp.text
+
+
+def test_ui_jobs_view_sorts_by_most_recent():
+    """Jobs are sorted by finished_at descending in the UI."""
+    resp = client.get("/")
+    assert "b.finished_at" in resp.text
+
+
+def test_ui_jobs_view_has_no_diagnostics_fallback():
+    """When diagnostics data is absent, show 'No diagnostics recorded.'"""
+    resp = client.get("/")
+    assert "No diagnostics recorded." in resp.text
+
+
+def test_ui_jobs_view_handles_parent_op_not_found():
+    """If parent Operation cannot be loaded, stay on Job detail with error."""
+    resp = client.get("/")
+    assert "The parent Operation could not be loaded." in resp.text
+
+
+def test_ui_jobs_view_duration_handles_missing_timestamps():
+    """formatDuration handles incomplete Jobs per Founder amendment 3."""
+    resp = client.get("/")
+    # Verify the function handles missing timestamps
+    assert 'if (!start) return "Unknown"' in resp.text
+    assert 'if (!end) return "Running..."' in resp.text
