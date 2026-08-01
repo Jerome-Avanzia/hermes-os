@@ -10,8 +10,8 @@ class Business:
     business_id: str
     name: str
     mission: str
-    status: str
-    created_at: str
+    status: str | None = None
+    created_at: str | None = None
     vision: str | None = None
     owner: str | None = None
     updated_at: str | None = None

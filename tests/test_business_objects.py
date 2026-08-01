@@ -48,10 +48,10 @@ class TestBusiness:
             business_id="biz_1",
             name="Test",
             mission="Build things",
-            status="draft",
-            created_at="2026-07-19T09:00:00Z",
         )
         assert b.business_id == "biz_1"
+        assert b.status is None
+        assert b.created_at is None
         assert b.vision is None
         assert b.owner is None
         assert b.updated_at is None
@@ -99,9 +99,9 @@ class TestStrategy:
             business_id="biz_1",
             title="Growth",
             objective="Grow revenue",
-            status="draft",
         )
         assert s.strategy_id == "strat_1"
+        assert s.status is None
         assert s.owner is None
         assert s.review_frequency is None
         assert s.created_at is None

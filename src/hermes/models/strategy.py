@@ -11,7 +11,7 @@ class Strategy:
     business_id: str
     title: str
     objective: str
-    status: str
+    status: str | None = None
     owner: str | None = None
     review_frequency: str | None = None
     created_at: str | None = None
