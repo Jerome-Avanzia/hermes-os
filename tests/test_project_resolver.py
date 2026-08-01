@@ -32,8 +32,6 @@ def test_resolves_by_alias():
     "hermes",
     "hermes-os",
     "avanzia-website",
-    "aka",
-    "akosmicanimals",
     "serelo",
 ])
 def test_resolves_by_ecosystem_alias(term):
@@ -41,6 +39,17 @@ def test_resolves_by_ecosystem_alias(term):
     project = _resolver().resolve(task)
 
     assert project.id == "AVANZIA"
+
+
+@pytest.mark.parametrize("term", [
+    "aka",
+    "akosmicanimals",
+])
+def test_resolves_akosmicanimals_alias(term):
+    task = Task(id="t", business="", request=f"Review the {term} project")
+    project = _resolver().resolve(task)
+
+    assert project.id == "AKOSMICANIMALS"
 
 
 def test_resolves_hermes_kernel_task():

@@ -1,12 +1,11 @@
-id: AVANZIA
-business_id: AVANZIA
-name: AVANZIA
-description: AI-powered business design, build, and operations.
-mission: Design, build, and operate AI-powered businesses through strategy, automation, and reusable systems.
+id: AKOSMICANIMALS
+business_id: AKosmicAnimals
+name: AKosmicAnimals
+description: Minimalist cat-themed apparel for cat lovers.
+mission: Help cat lovers express the unique emotional connection they have with their cats through minimalist, relatable apparel.
 profiles:
   - default
   - business
-  - developer
 organization:
   purpose: knowledge/AVANZIA/01-purpose.md
   vision: knowledge/AVANZIA/02-vision.md

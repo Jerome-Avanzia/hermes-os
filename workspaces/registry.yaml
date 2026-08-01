@@ -5,3 +5,5 @@ workspaces:
         path: ../avanzia-website
       - name: hermes-os
         path: ../hermes-os
+  AKOSMICANIMALS:
+    repositories: []

@@ -7,6 +7,10 @@ projects:
       - hermes
       - hermes-os
       - avanzia-website
+      - serelo
+  AKOSMICANIMALS:
+    name: AKosmicAnimals
+    path: AKOSMICANIMALS
+    aliases:
       - aka
       - akosmicanimals
-      - serelo
