@@ -431,6 +431,40 @@
   #input-area button:hover { background: var(--accent-hover); }
   #input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+  #btn-promote {
+    padding: 10px 14px;
+    background: var(--surface);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+
+  #btn-promote:hover { background: var(--surface-hover); color: var(--text); }
+  #btn-promote:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .message.notification {
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    align-self: center;
+    font-size: 13px;
+    cursor: default;
+  }
+
+  .notification-link {
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: underline;
+    margin-left: 8px;
+  }
+
+  .notification-link:hover { color: var(--accent-hover); }
+
   /* ── List / detail views (reused by Documents, Operations, Jobs) ── */
 
   .list-view {
@@ -762,6 +796,7 @@
         <div id="input-area">
           <textarea id="input" rows="1" placeholder="Send a message..." autofocus></textarea>
           <button id="send">Send</button>
+          <button id="btn-promote">Promote to Operation</button>
         </div>
       </div>
 
@@ -1721,6 +1756,60 @@
     this.style.height = "auto";
     this.style.height = Math.min(this.scrollHeight, 160) + "px";
   });
+
+  // ── Promote to Operation ─────────────────────────
+
+  var promoteBtn = document.getElementById("btn-promote");
+
+  function promoteToOperation() {
+    var text = inputEl.value.trim();
+    if (!text) return;
+
+    promoteBtn.disabled = true;
+    promoteBtn.textContent = "Creating...";
+
+    fetch(GATEWAY + "/v1/operations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request: text }),
+    })
+    .then(function (resp) {
+      if (!resp.ok) {
+        return resp.json().catch(function () { return {}; }).then(function (body) {
+          throw new Error(body.error || "Failed to create Operation");
+        });
+      }
+      return resp.json();
+    })
+    .then(function (op) {
+      promoteBtn.disabled = false;
+      promoteBtn.textContent = "Promote to Operation";
+      inputEl.value = "";
+      inputEl.style.height = "auto";
+
+      // Show inline notification with navigation link
+      var empty = document.getElementById("chat-empty");
+      if (empty) empty.remove();
+
+      var div = document.createElement("div");
+      div.className = "message notification";
+      div.innerHTML = 'Operation ' + esc(op.id) + ' created. <span class="notification-link" data-op-id="' + esc(op.id) + '">View &rarr;</span>';
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+
+      div.querySelector(".notification-link").addEventListener("click", function () {
+        switchView("operations");
+        openOperation(this.dataset.opId);
+      });
+    })
+    .catch(function (err) {
+      promoteBtn.disabled = false;
+      promoteBtn.textContent = "Promote to Operation";
+      addMessage("error", "Error: " + err.message);
+    });
+  }
+
+  promoteBtn.addEventListener("click", promoteToOperation);
 
   // ── Init ──────────────────────────────────────────
   loadProfiles();

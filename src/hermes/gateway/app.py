@@ -24,8 +24,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from hermes.conductor import Conductor
+from hermes.kernel.job_store import JobStore
+from hermes.kernel.operation_store import OperationNotFoundError, OperationStore
 from hermes.kernel.profile_loader import ProfileLoader
-from hermes.kernel.operation_store import OperationNotFoundError
 from hermes.kernel.workspace_engine import WorkspaceEngine, WorkspaceNotFoundError
 from hermes.models.operation import InvalidTransitionError
 from hermes.providers.ollama_provider import ChatMessage, OllamaConnectionError, OllamaProvider
@@ -54,6 +55,10 @@ class ChatRequest(BaseModel):
     stream: bool = True
 
 
+class CreateOperationRequest(BaseModel):
+    request: str
+
+
 # -- Application singletons ------------------------------------------------
 
 
@@ -68,6 +73,10 @@ _workspace_engine = WorkspaceEngine()
 _active_workspace_id = os.environ.get("HERMES_WORKSPACE", "AVANZIA")
 
 
+_operation_store = OperationStore()
+_job_store = JobStore()
+
+
 def _build_hermes_service(model: str | None = None) -> HermesService:
     provider = _build_provider(model)
     conductor = Conductor(provider=provider, profile_loader=_profile_loader)
@@ -75,7 +84,12 @@ def _build_hermes_service(model: str | None = None) -> HermesService:
         workspace_engine=_workspace_engine,
         profile_loader=_profile_loader,
     )
-    return HermesService(context_engine=context_engine, conductor=conductor)
+    return HermesService(
+        context_engine=context_engine,
+        conductor=conductor,
+        operation_store=_operation_store,
+        job_store=_job_store,
+    )
 
 
 _hermes_service = _build_hermes_service()
@@ -227,6 +241,15 @@ async def get_knowledge(document_id: str) -> JSONResponse:
 async def list_operations() -> list[dict]:
     """List all Operations for the active workspace."""
     return _hermes_service.list_operations(_active_workspace_id)
+
+
+@app.post("/v1/operations")
+async def create_operation(body: CreateOperationRequest) -> JSONResponse:
+    """Create an Operation from a conversation promotion."""
+    result = _hermes_service.create_operation_from_chat(
+        _active_workspace_id, body.request
+    )
+    return JSONResponse(status_code=201, content=result)
 
 
 @app.get("/v1/operations/{operation_id}")

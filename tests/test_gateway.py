@@ -907,3 +907,114 @@ def test_ui_jobs_view_duration_handles_missing_timestamps():
     # Verify the function handles missing timestamps
     assert 'if (!start) return "Unknown"' in resp.text
     assert 'if (!end) return "Running..."' in resp.text
+
+
+# -- Create Operation API (Sprint 18) --------------------------------------
+
+
+def test_create_operation_returns_201():
+    service = MagicMock()
+    service.create_operation_from_chat.return_value = {
+        **_mock_operation(),
+        "status": "created",
+    }
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post(
+            "/v1/operations",
+            json={"request": "Generate homepage copy"},
+        )
+
+    assert resp.status_code == 201
+    assert resp.json()["status"] == "created"
+
+
+def test_create_operation_delegates_to_service():
+    service = MagicMock()
+    service.create_operation_from_chat.return_value = {
+        **_mock_operation(),
+        "status": "created",
+    }
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        client.post(
+            "/v1/operations",
+            json={"request": "Generate homepage copy"},
+        )
+
+    service.create_operation_from_chat.assert_called_once()
+    call_args = service.create_operation_from_chat.call_args
+    assert call_args[0][1] == "Generate homepage copy"
+
+
+def test_create_operation_response_excludes_extra_fields():
+    service = MagicMock()
+    service.create_operation_from_chat.return_value = {
+        **_mock_operation(),
+        "status": "created",
+    }
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post(
+            "/v1/operations",
+            json={"request": "Test"},
+        )
+
+    assert "extra_fields" not in resp.json()
+
+
+def test_create_operation_missing_request_returns_422():
+    resp = client.post("/v1/operations", json={})
+    assert resp.status_code == 422
+
+
+def test_create_operation_empty_body_returns_422():
+    resp = client.post("/v1/operations")
+    assert resp.status_code == 422
+
+
+# -- UI: Chat promote to Operation (Sprint 18) -----------------------------
+
+
+def test_ui_chat_has_promote_button():
+    resp = client.get("/")
+    assert 'id="btn-promote"' in resp.text
+    assert "Promote to Operation" in resp.text
+
+
+def test_ui_chat_promote_calls_operations_api():
+    resp = client.get("/")
+    assert "promoteToOperation" in resp.text
+    assert 'method: "POST"' in resp.text
+    assert '"/v1/operations"' in resp.text
+
+
+def test_ui_chat_shows_inline_notification():
+    resp = client.get("/")
+    assert "notification" in resp.text
+    assert "created." in resp.text
+
+
+def test_ui_chat_notification_has_view_link():
+    resp = client.get("/")
+    assert "notification-link" in resp.text
+    assert "View" in resp.text
+
+
+def test_ui_chat_promote_uses_input_text():
+    """Promote uses text from input field, not last message (Founder amendment 1)."""
+    resp = client.get("/")
+    assert "inputEl.value.trim()" in resp.text
+
+
+def test_ui_chat_promote_shows_creating_state():
+    """Button shows Creating... while POST is in flight (Founder amendment 3)."""
+    resp = client.get("/")
+    assert '"Creating..."' in resp.text
+
+
+def test_ui_chat_promote_disables_during_request():
+    """Button is disabled during POST (Founder amendment 3)."""
+    resp = client.get("/")
+    assert "promoteBtn.disabled = true" in resp.text
+    assert "promoteBtn.disabled = false" in resp.text

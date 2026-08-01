@@ -176,6 +176,32 @@ class HermesService:
         """Non-streaming conversation through the full context assembly pipeline."""
         return "".join(self.stream_chat(messages, workspace_id, profile_id))
 
+    # -- Conversation-to-Operation Bridge --------------------------------------
+
+    def create_operation_from_chat(self, workspace_id: str, request: str) -> dict:
+        """Create an Operation from a conversation promotion.
+
+        The Operation is created in 'created' status only.
+        It is NOT executed and no Job is produced.
+        """
+        if not self.operation_store:
+            raise RuntimeError("OperationStore is required to create Operations")
+
+        now = datetime.now(timezone.utc)
+        op_id = generate_operation_id(
+            self.operation_store.operations_dir(workspace_id)
+        )
+        operation = Operation(
+            id=op_id,
+            workspace_id=workspace_id,
+            request=request,
+            status="created",
+            created_at=now,
+            updated_at=now,
+        )
+        self.operation_store.save(operation)
+        return self._serialize_operation(operation)
+
     # -- Operations & Jobs -----------------------------------------------------
 
     def list_operations(self, workspace_id: str) -> list[dict]:

@@ -398,3 +398,51 @@ def test_serialize_job_detail_includes_generated_output(tmp_path):
     jobs = job_store.list("AVANZIA")
     detail = service.get_job("AVANZIA", jobs[0].id)
     assert "generated_output" in detail
+
+
+# -- Conversation-to-Operation Bridge (Sprint 18) ---------------------------
+
+
+def test_create_operation_from_chat_creates_operation(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    result = service.create_operation_from_chat("AVANZIA", "Generate homepage copy")
+    ops = op_store.list("AVANZIA")
+    assert len(ops) == 1
+    assert ops[0].status == "created"
+    assert ops[0].request == "Generate homepage copy"
+
+
+def test_create_operation_from_chat_returns_serialized_dict(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    result = service.create_operation_from_chat("AVANZIA", "Generate homepage copy")
+    assert isinstance(result, dict)
+    assert "id" in result
+    assert result["workspace_id"] == "AVANZIA"
+    assert result["request"] == "Generate homepage copy"
+    assert result["status"] == "created"
+    assert "created_at" in result
+    assert "updated_at" in result
+    assert "extra_fields" not in result
+
+
+def test_create_operation_from_chat_persists_to_store(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    result = service.create_operation_from_chat("AVANZIA", "Test task")
+    loaded = op_store.load("AVANZIA", result["id"])
+    assert loaded.request == "Test task"
+    assert loaded.status == "created"
+
+
+def test_create_operation_from_chat_without_stores_raises():
+    service, mocks = _mocked_service()
+    with pytest.raises(RuntimeError, match="OperationStore"):
+        service.create_operation_from_chat("AVANZIA", "Test task")
+
+
+def test_create_operation_from_chat_generates_unique_id(tmp_path):
+    service, mocks, op_store, job_store = _mocked_service_with_stores(tmp_path)
+    r1 = service.create_operation_from_chat("AVANZIA", "Task 1")
+    r2 = service.create_operation_from_chat("AVANZIA", "Task 2")
+    assert r1["id"] != r2["id"]
+    assert r1["id"].startswith("OP-")
+    assert r2["id"].startswith("OP-")
