@@ -720,6 +720,24 @@
   #profile-select:focus {
     border-color: var(--accent);
   }
+
+  /* ── Workspace selector ──────────────────────────── */
+
+  #workspace-select {
+    padding: 5px 8px;
+    background: var(--surface);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-family: inherit;
+    font-size: 11px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  #workspace-select:focus {
+    border-color: var(--accent);
+  }
 </style>
 </head>
 <body>
@@ -767,6 +785,7 @@
         <div id="topbar-title">Hermes Workspace</div>
       </div>
       <div id="topbar-right">
+        <select id="workspace-select"><option value="">Select workspace</option></select>
         <button class="topbar-btn primary" id="btn-new-chat">New Chat</button>
         <select id="profile-select"><option value="">Loading...</option></select>
       </div>
@@ -837,6 +856,7 @@
   var inputEl      = document.getElementById("input");
   var sendBtn      = document.getElementById("send");
   var profileSel   = document.getElementById("profile-select");
+  var workspaceSel = document.getElementById("workspace-select");
   var sessionsList = document.getElementById("sessions-list");
   var todayHeader    = document.getElementById("today-header");
   var todayAttention = document.getElementById("today-attention");
@@ -845,6 +865,11 @@
   var history = [];
   var streaming = false;
   var currentView = "today";
+  var activeWorkspaceId = null;
+
+  function wsBase() {
+    return GATEWAY + "/v1/workspaces/" + encodeURIComponent(activeWorkspaceId);
+  }
 
   // ── Navigation ────────────────────────────────────
 
@@ -861,6 +886,7 @@
     currentView = name;
     clearBadge(name);
     if (name === "chat") inputEl.focus();
+    if (!activeWorkspaceId) return;
     if (name === "documents") loadDocuments();
     if (name === "operations") loadOperations();
     if (name === "jobs") loadJobs();
@@ -898,7 +924,8 @@
   // ── Load profiles ─────────────────────────────────
 
   function loadProfiles() {
-    fetch(GATEWAY + "/v1/profiles")
+    if (!activeWorkspaceId) return;
+    fetch(wsBase() + "/profiles")
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (profiles) {
         profileSel.innerHTML = "";
@@ -918,12 +945,13 @@
   // ── Load dashboard ────────────────────────────────
 
   function loadDashboard() {
+    if (!activeWorkspaceId) return;
     // Fetch dashboard and operations in parallel (Founder amendment 1)
-    var dashboardPromise = fetch(GATEWAY + "/v1/dashboard")
+    var dashboardPromise = fetch(wsBase() + "/dashboard")
       .then(function (r) { return r.ok ? r.json() : null; })
       .catch(function () { return null; });
 
-    var operationsPromise = fetch(GATEWAY + "/v1/operations")
+    var operationsPromise = fetch(wsBase() + "/operations")
       .then(function (r) { return r.ok ? r.json() : null; })
       .catch(function () { return null; });
 
@@ -1063,7 +1091,7 @@
   function loadDocuments() {
     docListEl.style.display = "block";
     docDetailEl.style.display = "none";
-    fetch(GATEWAY + "/v1/knowledge")
+    fetch(wsBase() + "/knowledge")
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (docs) {
         renderDocumentList(docs);
@@ -1112,7 +1140,7 @@
     docDetailEl.style.display = "flex";
     docDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
 
-    fetch(GATEWAY + "/v1/knowledge/" + encodeURIComponent(id))
+    fetch(wsBase() + "/knowledge/" + encodeURIComponent(id))
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (doc) {
         if (!doc) {
@@ -1165,7 +1193,7 @@
   function loadOperations() {
     opsListEl.style.display = "block";
     opsDetailEl.style.display = "none";
-    fetch(GATEWAY + "/v1/operations")
+    fetch(wsBase() + "/operations")
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (ops) {
         opsCache = ops;
@@ -1252,7 +1280,7 @@
     opsDetailEl.style.display = "flex";
     opsDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
 
-    fetch(GATEWAY + "/v1/operations/" + encodeURIComponent(id))
+    fetch(wsBase() + "/operations/" + encodeURIComponent(id))
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (op) {
         if (!op) {
@@ -1320,7 +1348,7 @@
 
   function loadOperationJobs(operationId) {
     var jobsEl = document.getElementById("op-jobs-list");
-    fetch(GATEWAY + "/v1/jobs")
+    fetch(wsBase() + "/jobs")
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (jobs) {
         var opJobs = jobs.filter(function (j) { return j.operation_id === operationId; });
@@ -1347,7 +1375,7 @@
   }
 
   function approveOperation(id) {
-    fetch(GATEWAY + "/v1/operations/" + encodeURIComponent(id) + "/approve", { method: "POST" })
+    fetch(wsBase() + "/operations/" + encodeURIComponent(id) + "/approve", { method: "POST" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (op) {
         if (op) { renderOperationDetail(op); loadBadges(); }
@@ -1356,7 +1384,7 @@
   }
 
   function rejectOperation(id) {
-    fetch(GATEWAY + "/v1/operations/" + encodeURIComponent(id) + "/reject", { method: "POST" })
+    fetch(wsBase() + "/operations/" + encodeURIComponent(id) + "/reject", { method: "POST" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (op) {
         if (op) { renderOperationDetail(op); loadBadges(); }
@@ -1375,7 +1403,7 @@
   function loadJobs() {
     jobsListEl.style.display = "block";
     jobsDetailEl.style.display = "none";
-    fetch(GATEWAY + "/v1/jobs")
+    fetch(wsBase() + "/jobs")
       .then(function (r) { return r.ok ? r.json() : []; })
       .then(function (jobs) {
         jobsCache = jobs;
@@ -1497,7 +1525,7 @@
     jobsDetailEl.style.display = "flex";
     jobsDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
 
-    fetch(GATEWAY + "/v1/jobs/" + encodeURIComponent(id))
+    fetch(wsBase() + "/jobs/" + encodeURIComponent(id))
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (job) {
         if (!job) {
@@ -1605,7 +1633,7 @@
 
   function navigateToOperation(operationId) {
     // Founder amendment 2: if Operation cannot be loaded, stay on Job detail
-    fetch(GATEWAY + "/v1/operations/" + encodeURIComponent(operationId))
+    fetch(wsBase() + "/operations/" + encodeURIComponent(operationId))
       .then(function (r) {
         if (!r.ok) throw new Error("not found");
         return r.json();
@@ -1681,7 +1709,7 @@
     var assistantDiv = addMessage("assistant", "");
     var profile = profileSel.value || undefined;
 
-    fetch(GATEWAY + "/v1/chat", {
+    fetch(wsBase() + "/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages: history, profile: profile }),
@@ -1773,7 +1801,7 @@
     promoteBtn.disabled = true;
     promoteBtn.textContent = "Creating...";
 
-    fetch(GATEWAY + "/v1/operations", {
+    fetch(wsBase() + "/operations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ request: text }),
@@ -1851,8 +1879,9 @@
   }
 
   function loadBadges() {
+    if (!activeWorkspaceId) return;
     // Fetch operations and jobs independently (Founder amendment 4)
-    fetch(GATEWAY + "/v1/operations")
+    fetch(wsBase() + "/operations")
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (ops) {
         if (ops === null) return;
@@ -1865,7 +1894,7 @@
       })
       .catch(function () {});
 
-    fetch(GATEWAY + "/v1/jobs")
+    fetch(wsBase() + "/jobs")
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (jobs) {
         if (jobs === null) return;
@@ -1878,10 +1907,72 @@
       .catch(function () {});
   }
 
+  // ── Workspace selection ───────────────────────────
+
+  function selectWorkspace(wsId) {
+    activeWorkspaceId = wsId;
+    if (wsId) localStorage.setItem("hermes_workspace", wsId);
+    // Update selector
+    workspaceSel.value = wsId || "";
+    // Reload all data for new workspace
+    loadProfiles();
+    loadDashboard();
+    loadBadges();
+  }
+
+  function loadWorkspaces() {
+    fetch(GATEWAY + "/v1/workspaces")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (workspaces) {
+        workspaceSel.innerHTML = "";
+
+        if (workspaces.length === 0) {
+          workspaceSel.innerHTML = '<option value="">No workspaces</option>';
+          return;
+        }
+
+        // Build options (placeholder first if multiple)
+        if (workspaces.length > 1) {
+          var placeholder = document.createElement("option");
+          placeholder.value = "";
+          placeholder.textContent = "Select workspace";
+          workspaceSel.appendChild(placeholder);
+        }
+
+        for (var i = 0; i < workspaces.length; i++) {
+          var opt = document.createElement("option");
+          opt.value = workspaces[i].id;
+          opt.textContent = workspaces[i].name || workspaces[i].id;
+          workspaceSel.appendChild(opt);
+        }
+
+        // Three-tier selection logic (Founder amendment 2)
+        var lastUsed = localStorage.getItem("hermes_workspace");
+        var wsIds = workspaces.map(function (w) { return w.id; });
+
+        if (lastUsed && wsIds.indexOf(lastUsed) !== -1) {
+          // Tier 1: restore last-used if valid
+          selectWorkspace(lastUsed);
+        } else if (workspaces.length === 1) {
+          // Tier 2: auto-select only when exactly one workspace
+          selectWorkspace(workspaces[0].id);
+        } else {
+          // Tier 3: require explicit user selection
+          activeWorkspaceId = null;
+        }
+      })
+      .catch(function () {
+        workspaceSel.innerHTML = '<option value="">Error loading</option>';
+      });
+  }
+
+  workspaceSel.addEventListener("change", function () {
+    var wsId = workspaceSel.value;
+    if (wsId) selectWorkspace(wsId);
+  });
+
   // ── Init ──────────────────────────────────────────
-  loadProfiles();
-  loadDashboard();
-  loadBadges();
+  loadWorkspaces();
   checkHealth();
 })();
 </script>

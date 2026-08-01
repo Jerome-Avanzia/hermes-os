@@ -348,27 +348,27 @@ def test_list_operations_delegates_to_store(tmp_path):
     from hermes.kernel.operation_store import OperationStore
 
     service = HermesService(operation_store=OperationStore(workspaces_root=tmp_path))
-    assert service.list_operations("TEST") == []
+    assert service.list_operations("AVANZIA") == []
 
 
 def test_list_operations_without_store_returns_empty():
     service = HermesService()
-    assert service.list_operations("TEST") == []
+    assert service.list_operations("AVANZIA") == []
 
 
 def test_get_operation_without_store_returns_none():
     service = HermesService()
-    assert service.get_operation("TEST", "OP-NONEXISTENT") is None
+    assert service.get_operation("AVANZIA", "OP-NONEXISTENT") is None
 
 
 def test_list_jobs_without_store_returns_empty():
     service = HermesService()
-    assert service.list_jobs("TEST") == []
+    assert service.list_jobs("AVANZIA") == []
 
 
 def test_get_job_without_store_returns_none():
     service = HermesService()
-    assert service.get_job("TEST", "JOB-NONEXISTENT") is None
+    assert service.get_job("AVANZIA", "JOB-NONEXISTENT") is None
 
 
 # -- Serialization (Sprint 14) ----------------------------------------------

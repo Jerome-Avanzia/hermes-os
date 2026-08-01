@@ -20,6 +20,7 @@ from hermes.models import DiagnosticsReport, ExecutionResult, Job, Operation, Ta
 from hermes.models.operation import InvalidTransitionError, transition_operation
 from hermes.providers.ai_provider import AIProvider
 from hermes.providers.ollama_provider import ChatMessage
+from hermes.kernel.workspace_engine import WorkspaceNotFoundError  # noqa: F401 — re-exported for Gateway
 from hermes.runtime.context_engine import ContextEngine
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,16 @@ class HermesService:
         self.conductor = conductor
         self.operation_store = operation_store
         self.job_store = job_store
+
+    # -- Workspace validation --------------------------------------------------
+
+    def validate_workspace(self, workspace_id: str) -> None:
+        """Validate workspace exists. Raises WorkspaceNotFoundError if not."""
+        self.context_engine.workspace_engine.validate(workspace_id)
+
+    def list_workspaces(self) -> list[dict[str, str]]:
+        """Return summary info for all registered workspaces."""
+        return self.context_engine.workspace_engine.list_workspaces()
 
     def generate(
         self, task: str, provider: AIProvider | None = None, project: str = ""
@@ -153,6 +164,7 @@ class HermesService:
 
         Gateway → HermesService → ContextEngine → Conductor → Provider.
         """
+        self.validate_workspace(workspace_id)
         if self.conductor is None:
             raise RuntimeError("HermesService requires a Conductor for chat")
 
@@ -174,6 +186,7 @@ class HermesService:
         profile_id: str | None = None,
     ) -> str:
         """Non-streaming conversation through the full context assembly pipeline."""
+        # Validation delegated to stream_chat
         return "".join(self.stream_chat(messages, workspace_id, profile_id))
 
     # -- Conversation-to-Operation Bridge --------------------------------------
@@ -184,6 +197,7 @@ class HermesService:
         The Operation is created in 'created' status only.
         It is NOT executed and no Job is produced.
         """
+        self.validate_workspace(workspace_id)
         if not self.operation_store:
             raise RuntimeError("OperationStore is required to create Operations")
 
@@ -206,6 +220,7 @@ class HermesService:
 
     def list_operations(self, workspace_id: str) -> list[dict]:
         """Return all Operations for a workspace, ordered by ID."""
+        self.validate_workspace(workspace_id)
         if not self.operation_store:
             return []
         return [
@@ -215,6 +230,7 @@ class HermesService:
 
     def get_operation(self, workspace_id: str, operation_id: str) -> dict | None:
         """Return a single Operation, or None if not found."""
+        self.validate_workspace(workspace_id)
         if not self.operation_store:
             return None
         try:
@@ -226,9 +242,11 @@ class HermesService:
     def approve_operation(self, workspace_id: str, operation_id: str) -> dict:
         """Approve an escalated Operation, returning it to executing.
 
+        Raises WorkspaceNotFoundError if workspace not found.
         Raises OperationNotFoundError if not found.
         Raises InvalidTransitionError if not in awaiting_escalation state.
         """
+        self.validate_workspace(workspace_id)
         op = self.operation_store.load(workspace_id, operation_id)
         transition_operation(op, "executing")
         self.operation_store.save(op)
@@ -237,9 +255,11 @@ class HermesService:
     def reject_operation(self, workspace_id: str, operation_id: str) -> dict:
         """Reject an escalated Operation.
 
+        Raises WorkspaceNotFoundError if workspace not found.
         Raises OperationNotFoundError if not found.
         Raises InvalidTransitionError if not in awaiting_escalation state.
         """
+        self.validate_workspace(workspace_id)
         op = self.operation_store.load(workspace_id, operation_id)
         transition_operation(op, "rejected")
         self.operation_store.save(op)
@@ -247,6 +267,7 @@ class HermesService:
 
     def list_jobs(self, workspace_id: str) -> list[dict]:
         """Return all Jobs for a workspace, ordered by ID."""
+        self.validate_workspace(workspace_id)
         if not self.job_store:
             return []
         return [
@@ -256,6 +277,7 @@ class HermesService:
 
     def get_job(self, workspace_id: str, job_id: str) -> dict | None:
         """Return a single Job with full output, or None if not found."""
+        self.validate_workspace(workspace_id)
         if not self.job_store:
             return None
         try:
@@ -296,19 +318,15 @@ class HermesService:
 
     def get_dashboard(self, workspace_id: str) -> dict:
         """Return a CEO-oriented workspace operating summary."""
-        from hermes.kernel.workspace_engine import WorkspaceNotFoundError
+        self.validate_workspace(workspace_id)
 
-        try:
-            ws_context = self.context_engine.workspace_engine.resolve(workspace_id)
-            ws = ws_context.workspace
-            workspace_info = {
-                "name": ws.name or workspace_id,
-                "mission": ws.mission or "",
-            }
-            repositories = len(ws_context.repositories)
-        except WorkspaceNotFoundError:
-            workspace_info = {"name": workspace_id, "mission": ""}
-            repositories = 0
+        ws_context = self.context_engine.workspace_engine.resolve(workspace_id)
+        ws = ws_context.workspace
+        workspace_info = {
+            "name": ws.name or workspace_id,
+            "mission": ws.mission or "",
+        }
+        repositories = len(ws_context.repositories)
 
         knowledge_docs = self.list_knowledge(workspace_id)
 
@@ -333,6 +351,7 @@ class HermesService:
 
     def list_knowledge(self, workspace_id: str) -> list[dict]:
         """Return metadata for all Knowledge Documents in a workspace."""
+        self.validate_workspace(workspace_id)
         try:
             context = self.context_engine.knowledge_engine.load(workspace_id)
         except (ValueError, FileNotFoundError):
@@ -349,6 +368,7 @@ class HermesService:
 
     def get_knowledge(self, workspace_id: str, document_id: str) -> dict | None:
         """Return a single Knowledge Document with full content, or None."""
+        self.validate_workspace(workspace_id)
         try:
             context = self.context_engine.knowledge_engine.load(workspace_id)
         except (ValueError, FileNotFoundError):

@@ -1,14 +1,15 @@
 """Hermes Gateway — protocol boundary between the Workspace UI and HermesService.
 
-Exposes SSE chat (POST /v1/chat), profile listing (GET /v1/profiles),
-workspace bootstrap (GET /v1/workspace), dashboard summary (GET /v1/dashboard),
-knowledge browsing (GET /v1/knowledge), operations management
-(GET/POST /v1/operations), jobs listing (GET /v1/jobs),
-health check (GET /health), and the static Workspace shell (GET /).
+Exposes workspace listing (GET /v1/workspaces), workspace-scoped API routes
+under /v1/workspaces/{workspace_id}/..., health check (GET /health),
+and the static Workspace shell (GET /).
 
 The Gateway performs protocol translation only (ADR-0002). All requests
 are delegated to HermesService, which orchestrates context assembly,
 conversation rendering, and operation lifecycle management.
+
+Workspace validation is a service-layer concern — the Gateway only
+translates WorkspaceNotFoundError into HTTP 404 responses.
 """
 
 import json
@@ -17,7 +18,7 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -70,7 +71,6 @@ def _build_provider(model: str | None = None) -> OllamaProvider:
 
 _profile_loader = ProfileLoader()
 _workspace_engine = WorkspaceEngine()
-_active_workspace_id = os.environ.get("HERMES_WORKSPACE", "AVANZIA")
 
 
 _operation_store = OperationStore()
@@ -95,6 +95,17 @@ def _build_hermes_service(model: str | None = None) -> HermesService:
 _hermes_service = _build_hermes_service()
 
 
+# -- Exception handlers ----------------------------------------------------
+
+
+@app.exception_handler(WorkspaceNotFoundError)
+async def workspace_not_found_handler(request: Request, exc: WorkspaceNotFoundError) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={"error": str(exc)},
+    )
+
+
 # -- SSE helpers ------------------------------------------------------------
 
 
@@ -113,8 +124,14 @@ def _sse_stream(tokens: Iterator[str]) -> Iterator[str]:
 # -- Endpoints --------------------------------------------------------------
 
 
-@app.post("/v1/chat")
-async def chat(request: ChatRequest) -> StreamingResponse:
+@app.get("/v1/workspaces")
+async def list_workspaces() -> list[dict]:
+    """Return all registered workspaces."""
+    return _hermes_service.list_workspaces()
+
+
+@app.post("/v1/workspaces/{workspace_id}/chat")
+async def chat(workspace_id: str, request: ChatRequest) -> StreamingResponse:
     service = _hermes_service
     if request.model:
         service = _build_hermes_service(request.model)
@@ -128,7 +145,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
         if request.stream:
             tokens = service.stream_chat(
                 messages,
-                workspace_id=_active_workspace_id,
+                workspace_id=workspace_id,
                 profile_id=request.profile,
             )
             return StreamingResponse(
@@ -142,7 +159,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 
         result = service.chat(
             messages,
-            workspace_id=_active_workspace_id,
+            workspace_id=workspace_id,
             profile_id=request.profile,
         )
         return StreamingResponse(
@@ -157,8 +174,9 @@ async def chat(request: ChatRequest) -> StreamingResponse:
         )
 
 
-@app.get("/v1/profiles")
-async def list_profiles() -> list[dict]:
+@app.get("/v1/workspaces/{workspace_id}/profiles")
+async def list_profiles(workspace_id: str) -> list[dict]:
+    _hermes_service.validate_workspace(workspace_id)
     profiles = _profile_loader.list_all()
     return [
         {
@@ -170,17 +188,16 @@ async def list_profiles() -> list[dict]:
     ]
 
 
-@app.get("/v1/workspace")
-async def get_workspace() -> dict:
-    """Return the active workspace context for the UI bootstrap."""
+@app.get("/v1/workspaces/{workspace_id}/workspace")
+async def get_workspace(workspace_id: str) -> dict:
+    """Return the workspace context for the UI bootstrap."""
     try:
-        ctx = _workspace_engine.resolve(_active_workspace_id)
+        ctx = _workspace_engine.resolve(workspace_id)
     except WorkspaceNotFoundError:
-        return {
-            "workspace": {"id": "default", "name": "Hermes", "description": "", "mission": ""},
-            "profiles": [],
-            "sprint": None,
-        }
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"No registered workspace for project: {workspace_id}"},
+        )
 
     ws = ctx.workspace
     default_profile = _profile_loader.get_default()
@@ -213,22 +230,22 @@ async def get_workspace() -> dict:
     }
 
 
-@app.get("/v1/dashboard")
-async def get_dashboard() -> dict:
+@app.get("/v1/workspaces/{workspace_id}/dashboard")
+async def get_dashboard(workspace_id: str) -> dict:
     """Return a CEO-oriented workspace operating summary for the Today screen."""
-    return _hermes_service.get_dashboard(_active_workspace_id)
+    return _hermes_service.get_dashboard(workspace_id)
 
 
-@app.get("/v1/knowledge")
-async def list_knowledge() -> list[dict]:
-    """List all Knowledge Documents for the active workspace."""
-    return _hermes_service.list_knowledge(_active_workspace_id)
+@app.get("/v1/workspaces/{workspace_id}/knowledge")
+async def list_knowledge(workspace_id: str) -> list[dict]:
+    """List all Knowledge Documents for the workspace."""
+    return _hermes_service.list_knowledge(workspace_id)
 
 
-@app.get("/v1/knowledge/{document_id}")
-async def get_knowledge(document_id: str) -> JSONResponse:
+@app.get("/v1/workspaces/{workspace_id}/knowledge/{document_id}")
+async def get_knowledge(workspace_id: str, document_id: str) -> JSONResponse:
     """Return a single Knowledge Document with full content."""
-    doc = _hermes_service.get_knowledge(_active_workspace_id, document_id)
+    doc = _hermes_service.get_knowledge(workspace_id, document_id)
     if doc is None:
         return JSONResponse(
             status_code=404,
@@ -237,25 +254,25 @@ async def get_knowledge(document_id: str) -> JSONResponse:
     return JSONResponse(content=doc)
 
 
-@app.get("/v1/operations")
-async def list_operations() -> list[dict]:
-    """List all Operations for the active workspace."""
-    return _hermes_service.list_operations(_active_workspace_id)
+@app.get("/v1/workspaces/{workspace_id}/operations")
+async def list_operations(workspace_id: str) -> list[dict]:
+    """List all Operations for the workspace."""
+    return _hermes_service.list_operations(workspace_id)
 
 
-@app.post("/v1/operations")
-async def create_operation(body: CreateOperationRequest) -> JSONResponse:
+@app.post("/v1/workspaces/{workspace_id}/operations")
+async def create_operation(workspace_id: str, body: CreateOperationRequest) -> JSONResponse:
     """Create an Operation from a conversation promotion."""
     result = _hermes_service.create_operation_from_chat(
-        _active_workspace_id, body.request
+        workspace_id, body.request
     )
     return JSONResponse(status_code=201, content=result)
 
 
-@app.get("/v1/operations/{operation_id}")
-async def get_operation(operation_id: str) -> JSONResponse:
+@app.get("/v1/workspaces/{workspace_id}/operations/{operation_id}")
+async def get_operation(workspace_id: str, operation_id: str) -> JSONResponse:
     """Return a single Operation."""
-    op = _hermes_service.get_operation(_active_workspace_id, operation_id)
+    op = _hermes_service.get_operation(workspace_id, operation_id)
     if op is None:
         return JSONResponse(
             status_code=404,
@@ -264,11 +281,11 @@ async def get_operation(operation_id: str) -> JSONResponse:
     return JSONResponse(content=op)
 
 
-@app.post("/v1/operations/{operation_id}/approve")
-async def approve_operation(operation_id: str) -> JSONResponse:
+@app.post("/v1/workspaces/{workspace_id}/operations/{operation_id}/approve")
+async def approve_operation(workspace_id: str, operation_id: str) -> JSONResponse:
     """Approve an escalated Operation, returning it to executing."""
     try:
-        result = _hermes_service.approve_operation(_active_workspace_id, operation_id)
+        result = _hermes_service.approve_operation(workspace_id, operation_id)
     except OperationNotFoundError:
         return JSONResponse(
             status_code=404,
@@ -282,11 +299,11 @@ async def approve_operation(operation_id: str) -> JSONResponse:
     return JSONResponse(content=result)
 
 
-@app.post("/v1/operations/{operation_id}/reject")
-async def reject_operation(operation_id: str) -> JSONResponse:
+@app.post("/v1/workspaces/{workspace_id}/operations/{operation_id}/reject")
+async def reject_operation(workspace_id: str, operation_id: str) -> JSONResponse:
     """Reject an escalated Operation."""
     try:
-        result = _hermes_service.reject_operation(_active_workspace_id, operation_id)
+        result = _hermes_service.reject_operation(workspace_id, operation_id)
     except OperationNotFoundError:
         return JSONResponse(
             status_code=404,
@@ -300,16 +317,16 @@ async def reject_operation(operation_id: str) -> JSONResponse:
     return JSONResponse(content=result)
 
 
-@app.get("/v1/jobs")
-async def list_jobs() -> list[dict]:
-    """List all Jobs for the active workspace."""
-    return _hermes_service.list_jobs(_active_workspace_id)
+@app.get("/v1/workspaces/{workspace_id}/jobs")
+async def list_jobs(workspace_id: str) -> list[dict]:
+    """List all Jobs for the workspace."""
+    return _hermes_service.list_jobs(workspace_id)
 
 
-@app.get("/v1/jobs/{job_id}")
-async def get_job(job_id: str) -> JSONResponse:
+@app.get("/v1/workspaces/{workspace_id}/jobs/{job_id}")
+async def get_job(workspace_id: str, job_id: str) -> JSONResponse:
     """Return a single Job with full output."""
-    job = _hermes_service.get_job(_active_workspace_id, job_id)
+    job = _hermes_service.get_job(workspace_id, job_id)
     if job is None:
         return JSONResponse(
             status_code=404,

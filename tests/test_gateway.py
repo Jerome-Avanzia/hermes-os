@@ -7,6 +7,9 @@ from hermes.gateway.app import app
 
 client = TestClient(app)
 
+WS = "AVANZIA"
+WS_PREFIX = f"/v1/workspaces/{WS}"
+
 
 def _mock_hermes_service(tokens: list[str]):
     """Return a mock HermesService whose stream_chat yields the given tokens."""
@@ -25,6 +28,88 @@ def test_health_returns_ok():
     assert resp.json() == {"status": "ok"}
 
 
+# -- Workspace listing -----------------------------------------------------
+
+
+def test_list_workspaces_returns_200():
+    resp = client.get("/v1/workspaces")
+    assert resp.status_code == 200
+    workspaces = resp.json()
+    assert isinstance(workspaces, list)
+    assert len(workspaces) >= 1
+
+
+def test_list_workspaces_contains_avanzia():
+    resp = client.get("/v1/workspaces")
+    ids = [w["id"] for w in resp.json()]
+    assert "AVANZIA" in ids
+
+
+def test_list_workspaces_contains_expected_fields():
+    resp = client.get("/v1/workspaces")
+    for ws in resp.json():
+        assert "id" in ws
+        assert "name" in ws
+        assert "description" in ws
+
+
+# -- Workspace not found ---------------------------------------------------
+
+
+def test_workspace_not_found_returns_404():
+    resp = client.get("/v1/workspaces/NONEXISTENT/dashboard")
+    assert resp.status_code == 404
+    assert "error" in resp.json()
+
+
+def test_workspace_not_found_on_operations():
+    resp = client.get("/v1/workspaces/NONEXISTENT/operations")
+    assert resp.status_code == 404
+
+
+def test_workspace_not_found_on_knowledge():
+    resp = client.get("/v1/workspaces/NONEXISTENT/knowledge")
+    assert resp.status_code == 404
+
+
+def test_workspace_not_found_on_jobs():
+    resp = client.get("/v1/workspaces/NONEXISTENT/jobs")
+    assert resp.status_code == 404
+
+
+# -- Legacy routes removed -------------------------------------------------
+
+
+def test_legacy_chat_returns_not_found():
+    resp = client.post("/v1/chat", json={"messages": [{"role": "user", "content": "Hi"}]})
+    assert resp.status_code in (404, 405)  # POST to non-existent route may be 405
+
+
+def test_legacy_dashboard_returns_404():
+    resp = client.get("/v1/dashboard")
+    assert resp.status_code == 404
+
+
+def test_legacy_knowledge_returns_404():
+    resp = client.get("/v1/knowledge")
+    assert resp.status_code == 404
+
+
+def test_legacy_operations_returns_404():
+    resp = client.get("/v1/operations")
+    assert resp.status_code == 404
+
+
+def test_legacy_jobs_returns_404():
+    resp = client.get("/v1/jobs")
+    assert resp.status_code == 404
+
+
+def test_legacy_profiles_returns_404():
+    resp = client.get("/v1/profiles")
+    assert resp.status_code == 404
+
+
 # -- Streaming chat --------------------------------------------------------
 
 
@@ -34,7 +119,7 @@ def test_chat_streams_sse_tokens():
 
     with patch("hermes.gateway.app._hermes_service", service):
         resp = client.post(
-            "/v1/chat",
+            f"{WS_PREFIX}/chat",
             json={"messages": [{"role": "user", "content": "Hi"}]},
         )
 
@@ -59,7 +144,7 @@ def test_chat_passes_messages_to_service():
     ]
 
     with patch("hermes.gateway.app._hermes_service", service):
-        client.post("/v1/chat", json={"messages": messages})
+        client.post(f"{WS_PREFIX}/chat", json={"messages": messages})
 
     service.stream_chat.assert_called_once()
     call_messages = service.stream_chat.call_args[0][0]
@@ -68,12 +153,24 @@ def test_chat_passes_messages_to_service():
     assert call_messages[0].content == "Hello"
 
 
+def test_chat_passes_workspace_id_to_service():
+    service = _mock_hermes_service(["OK"])
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        client.post(
+            f"{WS_PREFIX}/chat",
+            json={"messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+    assert service.stream_chat.call_args[1]["workspace_id"] == WS
+
+
 def test_chat_passes_profile_to_service():
     service = _mock_hermes_service(["OK"])
 
     with patch("hermes.gateway.app._hermes_service", service):
         client.post(
-            "/v1/chat",
+            f"{WS_PREFIX}/chat",
             json={
                 "messages": [{"role": "user", "content": "Hi"}],
                 "profile": "developer",
@@ -89,7 +186,7 @@ def test_chat_passes_none_profile_when_omitted():
 
     with patch("hermes.gateway.app._hermes_service", service):
         client.post(
-            "/v1/chat",
+            f"{WS_PREFIX}/chat",
             json={"messages": [{"role": "user", "content": "Hi"}]},
         )
 
@@ -101,7 +198,7 @@ def test_chat_with_model_override_creates_new_service():
 
     with patch("hermes.gateway.app._build_hermes_service", return_value=service) as mock_build:
         client.post(
-            "/v1/chat",
+            f"{WS_PREFIX}/chat",
             json={
                 "messages": [{"role": "user", "content": "Hi"}],
                 "model": "mistral",
@@ -116,7 +213,7 @@ def test_chat_defaults_to_streaming():
 
     with patch("hermes.gateway.app._hermes_service", service):
         resp = client.post(
-            "/v1/chat",
+            f"{WS_PREFIX}/chat",
             json={"messages": [{"role": "user", "content": "Hi"}]},
         )
 
@@ -132,7 +229,7 @@ def test_chat_non_streaming_returns_json():
 
     with patch("hermes.gateway.app._hermes_service", service):
         resp = client.post(
-            "/v1/chat",
+            f"{WS_PREFIX}/chat",
             json={
                 "messages": [{"role": "user", "content": "Hi"}],
                 "stream": False,
@@ -150,7 +247,7 @@ def test_chat_non_streaming_passes_profile():
 
     with patch("hermes.gateway.app._hermes_service", service):
         client.post(
-            "/v1/chat",
+            f"{WS_PREFIX}/chat",
             json={
                 "messages": [{"role": "user", "content": "Hi"}],
                 "stream": False,
@@ -165,7 +262,7 @@ def test_chat_non_streaming_passes_profile():
 
 
 def test_list_profiles_returns_all():
-    resp = client.get("/v1/profiles")
+    resp = client.get(f"{WS_PREFIX}/profiles")
     assert resp.status_code == 200
     profiles = resp.json()
     ids = [p["id"] for p in profiles]
@@ -175,7 +272,7 @@ def test_list_profiles_returns_all():
 
 
 def test_list_profiles_contains_expected_fields():
-    resp = client.get("/v1/profiles")
+    resp = client.get(f"{WS_PREFIX}/profiles")
     profiles = resp.json()
     for p in profiles:
         assert "id" in p
@@ -190,7 +287,7 @@ def test_list_profiles_contains_expected_fields():
 
 def test_cors_allows_origin():
     resp = client.options(
-        "/v1/chat",
+        f"{WS_PREFIX}/chat",
         headers={
             "Origin": "http://localhost:3000",
             "Access-Control-Request-Method": "POST",
@@ -203,12 +300,12 @@ def test_cors_allows_origin():
 
 
 def test_chat_rejects_empty_body():
-    resp = client.post("/v1/chat")
+    resp = client.post(f"{WS_PREFIX}/chat")
     assert resp.status_code == 422
 
 
 def test_chat_rejects_missing_messages():
-    resp = client.post("/v1/chat", json={"stream": True})
+    resp = client.post(f"{WS_PREFIX}/chat", json={"stream": True})
     assert resp.status_code == 422
 
 
@@ -220,20 +317,23 @@ def test_root_serves_chat_ui():
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
     assert "Hermes" in resp.text
-    assert "/v1/chat" in resp.text
 
 
 def test_ui_contains_profile_selector():
     resp = client.get("/")
     assert "profile-select" in resp.text
-    assert "/v1/profiles" in resp.text
+
+
+def test_ui_contains_workspace_selector():
+    resp = client.get("/")
+    assert "workspace-select" in resp.text
 
 
 # -- Knowledge API ---------------------------------------------------------
 
 
 def test_knowledge_list_returns_documents():
-    resp = client.get("/v1/knowledge")
+    resp = client.get(f"{WS_PREFIX}/knowledge")
     assert resp.status_code == 200
     docs = resp.json()
     assert isinstance(docs, list)
@@ -245,26 +345,26 @@ def test_knowledge_list_returns_documents():
 
 
 def test_knowledge_list_contains_expected_count():
-    resp = client.get("/v1/knowledge")
+    resp = client.get(f"{WS_PREFIX}/knowledge")
     docs = resp.json()
     assert len(docs) == 12
 
 
 def test_knowledge_list_documents_have_positive_size():
-    resp = client.get("/v1/knowledge")
+    resp = client.get(f"{WS_PREFIX}/knowledge")
     for doc in resp.json():
         assert doc["size"] > 0
 
 
 def test_knowledge_list_preserves_manifest_order():
-    resp = client.get("/v1/knowledge")
+    resp = client.get(f"{WS_PREFIX}/knowledge")
     docs = resp.json()
     assert docs[0]["id"] == "01-purpose"
     assert docs[-1]["id"] == "12-homepage-tech-spec"
 
 
 def test_knowledge_detail_returns_full_document():
-    resp = client.get("/v1/knowledge/01-purpose")
+    resp = client.get(f"{WS_PREFIX}/knowledge/01-purpose")
     assert resp.status_code == 200
     doc = resp.json()
     assert doc["id"] == "01-purpose"
@@ -276,13 +376,13 @@ def test_knowledge_detail_returns_full_document():
 
 
 def test_knowledge_detail_content_matches_title():
-    resp = client.get("/v1/knowledge/01-purpose")
+    resp = client.get(f"{WS_PREFIX}/knowledge/01-purpose")
     doc = resp.json()
     assert doc["content"].startswith(f"# {doc['title']}")
 
 
 def test_knowledge_detail_invalid_id_returns_404():
-    resp = client.get("/v1/knowledge/nonexistent")
+    resp = client.get(f"{WS_PREFIX}/knowledge/nonexistent")
     assert resp.status_code == 404
     body = resp.json()
     assert "error" in body
@@ -290,17 +390,17 @@ def test_knowledge_detail_invalid_id_returns_404():
 
 
 def test_knowledge_list_does_not_expose_content():
-    resp = client.get("/v1/knowledge")
+    resp = client.get(f"{WS_PREFIX}/knowledge")
     for doc in resp.json():
         assert "content" not in doc
 
 
-def test_knowledge_list_with_unknown_workspace_returns_empty():
+def test_knowledge_list_with_mocked_service_returns_empty():
     service = MagicMock()
     service.list_knowledge.return_value = []
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/knowledge")
+        resp = client.get(f"{WS_PREFIX}/knowledge")
 
     assert resp.status_code == 200
     assert resp.json() == []
@@ -310,7 +410,7 @@ def test_knowledge_list_with_unknown_workspace_returns_empty():
 
 
 def test_dashboard_returns_workspace_identity():
-    resp = client.get("/v1/dashboard")
+    resp = client.get(f"{WS_PREFIX}/dashboard")
     assert resp.status_code == 200
     data = resp.json()
     assert "workspace" in data
@@ -319,7 +419,7 @@ def test_dashboard_returns_workspace_identity():
 
 
 def test_dashboard_contains_attention_section():
-    resp = client.get("/v1/dashboard")
+    resp = client.get(f"{WS_PREFIX}/dashboard")
     data = resp.json()
     assert "attention" in data
     assert "count" in data["attention"]
@@ -328,7 +428,7 @@ def test_dashboard_contains_attention_section():
 
 
 def test_dashboard_contains_operations_section():
-    resp = client.get("/v1/dashboard")
+    resp = client.get(f"{WS_PREFIX}/dashboard")
     data = resp.json()
     assert "operations" in data
     ops = data["operations"]
@@ -338,7 +438,7 @@ def test_dashboard_contains_operations_section():
 
 
 def test_dashboard_contains_knowledge_count():
-    resp = client.get("/v1/dashboard")
+    resp = client.get(f"{WS_PREFIX}/dashboard")
     data = resp.json()
     assert "knowledge" in data
     assert "count" in data["knowledge"]
@@ -346,7 +446,7 @@ def test_dashboard_contains_knowledge_count():
 
 
 def test_dashboard_contains_repository_count():
-    resp = client.get("/v1/dashboard")
+    resp = client.get(f"{WS_PREFIX}/dashboard")
     data = resp.json()
     assert "repositories" in data
     assert "count" in data["repositories"]
@@ -354,8 +454,8 @@ def test_dashboard_contains_repository_count():
 
 def test_dashboard_knowledge_matches_knowledge_api():
     """Dashboard knowledge count must match the Knowledge API dynamically."""
-    dashboard_resp = client.get("/v1/dashboard")
-    knowledge_resp = client.get("/v1/knowledge")
+    dashboard_resp = client.get(f"{WS_PREFIX}/dashboard")
+    knowledge_resp = client.get(f"{WS_PREFIX}/knowledge")
     assert dashboard_resp.json()["knowledge"]["count"] == len(knowledge_resp.json())
 
 
@@ -370,10 +470,10 @@ def test_dashboard_delegates_to_service():
     }
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/dashboard")
+        resp = client.get(f"{WS_PREFIX}/dashboard")
 
     assert resp.status_code == 200
-    service.get_dashboard.assert_called_once()
+    service.get_dashboard.assert_called_once_with(WS)
     assert resp.json()["knowledge"]["count"] == 5
 
 
@@ -388,14 +488,14 @@ def test_ui_contains_today_nav_item():
 
 def test_ui_references_dashboard_endpoint():
     resp = client.get("/")
-    assert "/v1/dashboard" in resp.text
+    assert "/dashboard" in resp.text
 
 
 def test_ui_today_fetches_operations_for_counts():
     resp = client.get("/")
-    # Today screen fetches /v1/operations in parallel with /v1/dashboard
+    # Today screen fetches operations in parallel with dashboard
     assert "operationsPromise" in resp.text
-    assert 'fetch(GATEWAY + "/v1/operations")' in resp.text
+    assert "wsBase()" in resp.text
 
 
 def test_ui_today_attention_items_are_clickable():
@@ -455,7 +555,7 @@ def test_ui_contains_documents_nav_item():
 
 def test_ui_documents_view_references_knowledge_api():
     resp = client.get("/")
-    assert "/v1/knowledge" in resp.text
+    assert "/knowledge" in resp.text
 
 
 def test_ui_documents_view_has_list_container():
@@ -484,7 +584,7 @@ def test_ui_documents_view_has_back_button():
 def _mock_operation():
     return {
         "id": "OP-20260801-001",
-        "workspace_id": "AVANZIA",
+        "workspace_id": WS,
         "request": "Generate homepage copy",
         "status": "executing",
         "created_at": "2026-08-01T10:30:00+00:00",
@@ -497,7 +597,7 @@ def test_operations_list_returns_200():
     service.list_operations.return_value = []
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/operations")
+        resp = client.get(f"{WS_PREFIX}/operations")
 
     assert resp.status_code == 200
     assert resp.json() == []
@@ -508,9 +608,9 @@ def test_operations_list_delegates_to_service():
     service.list_operations.return_value = [_mock_operation()]
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/operations")
+        resp = client.get(f"{WS_PREFIX}/operations")
 
-    service.list_operations.assert_called_once()
+    service.list_operations.assert_called_once_with(WS)
     assert len(resp.json()) == 1
     assert resp.json()[0]["id"] == "OP-20260801-001"
 
@@ -522,7 +622,7 @@ def test_operations_list_deterministic_order():
     service.list_operations.return_value = [op1, op2]
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/operations")
+        resp = client.get(f"{WS_PREFIX}/operations")
 
     ids = [o["id"] for o in resp.json()]
     assert ids == ["OP-20260801-001", "OP-20260801-002"]
@@ -533,10 +633,20 @@ def test_operations_detail_returns_operation():
     service.get_operation.return_value = _mock_operation()
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/operations/OP-20260801-001")
+        resp = client.get(f"{WS_PREFIX}/operations/OP-20260801-001")
 
     assert resp.status_code == 200
     assert resp.json()["id"] == "OP-20260801-001"
+
+
+def test_operations_detail_passes_workspace_id():
+    service = MagicMock()
+    service.get_operation.return_value = _mock_operation()
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        client.get(f"{WS_PREFIX}/operations/OP-20260801-001")
+
+    service.get_operation.assert_called_once_with(WS, "OP-20260801-001")
 
 
 def test_operations_detail_not_found_returns_404():
@@ -544,7 +654,7 @@ def test_operations_detail_not_found_returns_404():
     service.get_operation.return_value = None
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/operations/OP-NONEXISTENT")
+        resp = client.get(f"{WS_PREFIX}/operations/OP-NONEXISTENT")
 
     assert resp.status_code == 404
     assert "error" in resp.json()
@@ -555,7 +665,7 @@ def test_operations_detail_excludes_extra_fields():
     service.get_operation.return_value = _mock_operation()
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/operations/OP-20260801-001")
+        resp = client.get(f"{WS_PREFIX}/operations/OP-20260801-001")
 
     assert "extra_fields" not in resp.json()
 
@@ -566,10 +676,10 @@ def test_operations_approve_delegates_to_service():
     service.approve_operation.return_value = approved
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.post("/v1/operations/OP-20260801-001/approve")
+        resp = client.post(f"{WS_PREFIX}/operations/OP-20260801-001/approve")
 
     assert resp.status_code == 200
-    service.approve_operation.assert_called_once()
+    service.approve_operation.assert_called_once_with(WS, "OP-20260801-001")
     assert resp.json()["status"] == "executing"
 
 
@@ -580,7 +690,7 @@ def test_operations_approve_not_found_returns_404():
     service.approve_operation.side_effect = OperationNotFoundError("not found")
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.post("/v1/operations/OP-NONEXISTENT/approve")
+        resp = client.post(f"{WS_PREFIX}/operations/OP-NONEXISTENT/approve")
 
     assert resp.status_code == 404
 
@@ -592,7 +702,7 @@ def test_operations_approve_invalid_transition_returns_409():
     service.approve_operation.side_effect = InvalidTransitionError("bad transition")
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.post("/v1/operations/OP-20260801-001/approve")
+        resp = client.post(f"{WS_PREFIX}/operations/OP-20260801-001/approve")
 
     assert resp.status_code == 409
     assert "error" in resp.json()
@@ -604,7 +714,7 @@ def test_operations_reject_delegates_to_service():
     service.reject_operation.return_value = rejected
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.post("/v1/operations/OP-20260801-001/reject")
+        resp = client.post(f"{WS_PREFIX}/operations/OP-20260801-001/reject")
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "rejected"
@@ -617,7 +727,7 @@ def test_operations_reject_not_found_returns_404():
     service.reject_operation.side_effect = OperationNotFoundError("not found")
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.post("/v1/operations/OP-NONEXISTENT/reject")
+        resp = client.post(f"{WS_PREFIX}/operations/OP-NONEXISTENT/reject")
 
     assert resp.status_code == 404
 
@@ -629,7 +739,7 @@ def test_operations_reject_invalid_transition_returns_409():
     service.reject_operation.side_effect = InvalidTransitionError("bad transition")
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.post("/v1/operations/OP-20260801-001/reject")
+        resp = client.post(f"{WS_PREFIX}/operations/OP-20260801-001/reject")
 
     assert resp.status_code == 409
 
@@ -640,7 +750,7 @@ def test_operations_reject_invalid_transition_returns_409():
 def _mock_job(include_output=False):
     data = {
         "id": "JOB-20260801-001",
-        "workspace_id": "AVANZIA",
+        "workspace_id": WS,
         "operation_id": "OP-20260801-001",
         "status": "completed",
         "completed_steps": ["Python"],
@@ -659,7 +769,7 @@ def test_jobs_list_returns_200():
     service.list_jobs.return_value = []
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/jobs")
+        resp = client.get(f"{WS_PREFIX}/jobs")
 
     assert resp.status_code == 200
     assert resp.json() == []
@@ -670,9 +780,9 @@ def test_jobs_list_delegates_to_service():
     service.list_jobs.return_value = [_mock_job()]
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/jobs")
+        resp = client.get(f"{WS_PREFIX}/jobs")
 
-    service.list_jobs.assert_called_once()
+    service.list_jobs.assert_called_once_with(WS)
     assert len(resp.json()) == 1
 
 
@@ -681,7 +791,7 @@ def test_jobs_list_excludes_generated_output():
     service.list_jobs.return_value = [_mock_job(include_output=False)]
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/jobs")
+        resp = client.get(f"{WS_PREFIX}/jobs")
 
     assert "generated_output" not in resp.json()[0]
 
@@ -693,7 +803,7 @@ def test_jobs_list_deterministic_order():
     service.list_jobs.return_value = [j1, j2]
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/jobs")
+        resp = client.get(f"{WS_PREFIX}/jobs")
 
     ids = [j["id"] for j in resp.json()]
     assert ids == ["JOB-20260801-001", "JOB-20260801-002"]
@@ -704,10 +814,20 @@ def test_jobs_detail_returns_job():
     service.get_job.return_value = _mock_job(include_output=True)
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/jobs/JOB-20260801-001")
+        resp = client.get(f"{WS_PREFIX}/jobs/JOB-20260801-001")
 
     assert resp.status_code == 200
     assert resp.json()["id"] == "JOB-20260801-001"
+
+
+def test_jobs_detail_passes_workspace_id():
+    service = MagicMock()
+    service.get_job.return_value = _mock_job(include_output=True)
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        client.get(f"{WS_PREFIX}/jobs/JOB-20260801-001")
+
+    service.get_job.assert_called_once_with(WS, "JOB-20260801-001")
 
 
 def test_jobs_detail_includes_generated_output():
@@ -715,7 +835,7 @@ def test_jobs_detail_includes_generated_output():
     service.get_job.return_value = _mock_job(include_output=True)
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/jobs/JOB-20260801-001")
+        resp = client.get(f"{WS_PREFIX}/jobs/JOB-20260801-001")
 
     assert "generated_output" in resp.json()
 
@@ -725,7 +845,7 @@ def test_jobs_detail_not_found_returns_404():
     service.get_job.return_value = None
 
     with patch("hermes.gateway.app._hermes_service", service):
-        resp = client.get("/v1/jobs/JOB-NONEXISTENT")
+        resp = client.get(f"{WS_PREFIX}/jobs/JOB-NONEXISTENT")
 
     assert resp.status_code == 404
     assert "error" in resp.json()
@@ -742,7 +862,7 @@ def test_ui_contains_operations_nav_item():
 
 def test_ui_operations_view_references_operations_api():
     resp = client.get("/")
-    assert "/v1/operations" in resp.text
+    assert "/operations" in resp.text
 
 
 def test_ui_operations_view_has_list_container():
@@ -786,7 +906,6 @@ def test_ui_operations_view_has_back_button():
 def test_ui_operations_view_has_jobs_section():
     resp = client.get("/")
     assert "op-jobs-list" in resp.text
-    assert "/v1/jobs" in resp.text
 
 
 def test_ui_operations_view_has_decisions_placeholder():
@@ -827,7 +946,7 @@ def test_ui_contains_jobs_nav_item():
 
 def test_ui_jobs_view_references_jobs_api():
     resp = client.get("/")
-    assert "/v1/jobs" in resp.text
+    assert "/jobs" in resp.text
 
 
 def test_ui_jobs_view_has_list_container():
@@ -921,7 +1040,7 @@ def test_create_operation_returns_201():
 
     with patch("hermes.gateway.app._hermes_service", service):
         resp = client.post(
-            "/v1/operations",
+            f"{WS_PREFIX}/operations",
             json={"request": "Generate homepage copy"},
         )
 
@@ -938,13 +1057,11 @@ def test_create_operation_delegates_to_service():
 
     with patch("hermes.gateway.app._hermes_service", service):
         client.post(
-            "/v1/operations",
+            f"{WS_PREFIX}/operations",
             json={"request": "Generate homepage copy"},
         )
 
-    service.create_operation_from_chat.assert_called_once()
-    call_args = service.create_operation_from_chat.call_args
-    assert call_args[0][1] == "Generate homepage copy"
+    service.create_operation_from_chat.assert_called_once_with(WS, "Generate homepage copy")
 
 
 def test_create_operation_response_excludes_extra_fields():
@@ -956,7 +1073,7 @@ def test_create_operation_response_excludes_extra_fields():
 
     with patch("hermes.gateway.app._hermes_service", service):
         resp = client.post(
-            "/v1/operations",
+            f"{WS_PREFIX}/operations",
             json={"request": "Test"},
         )
 
@@ -964,12 +1081,12 @@ def test_create_operation_response_excludes_extra_fields():
 
 
 def test_create_operation_missing_request_returns_422():
-    resp = client.post("/v1/operations", json={})
+    resp = client.post(f"{WS_PREFIX}/operations", json={})
     assert resp.status_code == 422
 
 
 def test_create_operation_empty_body_returns_422():
-    resp = client.post("/v1/operations")
+    resp = client.post(f"{WS_PREFIX}/operations")
     assert resp.status_code == 422
 
 
@@ -986,7 +1103,7 @@ def test_ui_chat_promote_calls_operations_api():
     resp = client.get("/")
     assert "promoteToOperation" in resp.text
     assert 'method: "POST"' in resp.text
-    assert '"/v1/operations"' in resp.text
+    assert "wsBase()" in resp.text
 
 
 def test_ui_chat_shows_inline_notification():
@@ -1040,15 +1157,12 @@ def test_ui_has_load_badges_function():
 
 def test_ui_badges_fetch_operations():
     resp = client.get("/")
-    # loadBadges fetches /v1/operations for escalation count
     assert "loadBadges" in resp.text
-    assert '"/v1/operations"' in resp.text
 
 
 def test_ui_badges_fetch_jobs():
     resp = client.get("/")
-    # loadBadges fetches /v1/jobs for failed count
-    assert '"/v1/jobs"' in resp.text
+    assert "/jobs" in resp.text
 
 
 def test_ui_badges_compute_escalation_count():
@@ -1084,15 +1198,9 @@ def test_ui_badges_clear_on_navigation():
 
 def test_ui_badges_loaded_on_init():
     resp = client.get("/")
-    # loadBadges() must be called during init
+    # loadBadges() is called via selectWorkspace during init
     lines = resp.text.split("\n")
-    init_found = False
-    for line in lines:
-        if "// ── Init" in line:
-            init_found = True
-        if init_found and "loadBadges()" in line:
-            break
-    assert init_found
+    assert any("loadBadges()" in line for line in lines)
 
 
 def test_ui_badges_format_count_caps_at_99():
@@ -1142,6 +1250,67 @@ def test_ui_badges_independent_failure():
     assert idx > 0
     end = text.find("// ──", idx + 1)
     section = text[idx:end]
-    # Should have two separate fetch calls
-    fetches = section.count("fetch(GATEWAY")
+    # Should have two separate fetch calls using wsBase()
+    fetches = section.count("fetch(wsBase()")
     assert fetches == 2
+
+
+# -- UI: Workspace selector (Sprint 26) ------------------------------------
+
+
+def test_ui_has_workspace_selector_css():
+    resp = client.get("/")
+    assert "#workspace-select" in resp.text
+
+
+def test_ui_has_workspace_select_element():
+    resp = client.get("/")
+    assert 'id="workspace-select"' in resp.text
+
+
+def test_ui_has_load_workspaces_function():
+    resp = client.get("/")
+    assert "function loadWorkspaces()" in resp.text
+
+
+def test_ui_workspace_selection_uses_localstorage():
+    resp = client.get("/")
+    assert 'localStorage.getItem("hermes_workspace")' in resp.text
+    assert 'localStorage.setItem("hermes_workspace"' in resp.text
+
+
+def test_ui_workspace_three_tier_selection():
+    """Workspace selection follows restore → auto-select singleton → require explicit."""
+    resp = client.get("/")
+    text = resp.text
+    # Tier 1: restore last-used
+    assert "lastUsed" in text
+    assert "wsIds.indexOf(lastUsed)" in text
+    # Tier 2: auto-select singleton
+    assert "workspaces.length === 1" in text
+    # Tier 3: require explicit
+    assert "activeWorkspaceId = null" in text
+
+
+def test_ui_workspace_fetch_uses_wsbase():
+    """All data fetches use wsBase() for workspace-scoped URLs."""
+    resp = client.get("/")
+    assert "function wsBase()" in resp.text
+    assert "wsBase()" in resp.text
+
+
+def test_ui_workspace_init_loads_workspaces():
+    """Init calls loadWorkspaces() instead of direct loadProfiles/loadDashboard."""
+    resp = client.get("/")
+    text = resp.text
+    idx = text.find("// ── Init")
+    assert idx > 0
+    init_section = text[idx:]
+    assert "loadWorkspaces()" in init_section
+
+
+def test_ui_workspace_select_change_triggers_reload():
+    """Changing workspace selector triggers data reload."""
+    resp = client.get("/")
+    assert 'workspaceSel.addEventListener("change"' in resp.text
+    assert "selectWorkspace" in resp.text

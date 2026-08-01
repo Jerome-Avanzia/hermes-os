@@ -37,6 +37,29 @@ class WorkspaceEngine:
         self.registry_path = self.workspaces_root / "registry.yaml"
         self.base_dir = Path(base_dir) if base_dir is not None else config.repositories_root()
 
+    def validate(self, project_id: str) -> None:
+        """Raise WorkspaceNotFoundError if project_id is not in the registry."""
+        registry = self._read_yaml(self.registry_path)
+        entries = registry.get("workspaces", {})
+        if project_id not in entries:
+            raise WorkspaceNotFoundError(
+                f"No registered workspace for project: {project_id}"
+            )
+
+    def list_workspaces(self) -> list[dict[str, str]]:
+        """Return summary info for all registered workspaces."""
+        registry = self._read_yaml(self.registry_path)
+        entries = registry.get("workspaces", {})
+        result = []
+        for ws_id in entries:
+            identity = self._load_workspace_identity(ws_id)
+            result.append({
+                "id": ws_id,
+                "name": identity.get("name", ws_id),
+                "description": identity.get("description", ""),
+            })
+        return result
+
     def resolve(self, project_id: str) -> WorkspaceContext:
         registry = self._read_yaml(self.registry_path)
         entries = registry.get("workspaces", {})
