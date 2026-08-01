@@ -26,7 +26,7 @@ _BOTTLENECK_CATEGORIES = frozenset(
     {"product", "marketing", "sales", "operations", "finance", "technology"}
 )
 _BOTTLENECK_STATUSES = frozenset({"open", "mitigating", "resolved"})
-_DECISION_STATUSES = frozenset({"proposed", "approved", "implemented", "reversed"})
+_DECISION_STATUSES = frozenset({"proposed", "approved", "implemented", "reversed", "closed"})
 _EXPERIMENT_STATUSES = frozenset({"planned", "running", "completed", "cancelled"})
 _GOAL_STATUSES = frozenset({"planned", "active", "completed", "cancelled"})
 _KPI_STATUSES = frozenset({"on_track", "at_risk", "off_track"})

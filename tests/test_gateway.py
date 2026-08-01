@@ -573,6 +573,98 @@ def test_brief_unknown_workspace_returns_404():
     assert resp.status_code == 404
 
 
+# -- Decision endpoints ----------------------------------------------------
+
+
+def test_list_decisions_returns_200():
+    resp = client.get(f"{WS_PREFIX}/decisions")
+    assert resp.status_code == 200
+    decisions = resp.json()
+    assert isinstance(decisions, list)
+    assert len(decisions) == 6  # AVANZIA has 6 existing decisions
+
+
+def test_list_decisions_contains_expected_fields():
+    resp = client.get(f"{WS_PREFIX}/decisions")
+    for d in resp.json():
+        assert "id" in d
+        assert "title" in d
+        assert "date" in d
+        assert "status" in d
+        assert "rationale" in d
+
+
+def test_create_decision_invalid_action_returns_422():
+    body = {"recommendation_id": "rec_bot_001", "action": "invalid"}
+    resp = client.post(f"{WS_PREFIX}/decisions", json=body)
+    assert resp.status_code == 422
+
+
+def test_create_decision_unknown_recommendation_returns_404():
+    body = {"recommendation_id": "nonexistent", "action": "approve"}
+    resp = client.post(f"{WS_PREFIX}/decisions", json=body)
+    assert resp.status_code == 404
+
+
+def test_create_decision_delegates_to_service():
+    service = MagicMock()
+    service.act_on_recommendation.return_value = {
+        "decision": {
+            "id": "DEC-007",
+            "business_id": "AVANZIA",
+            "title": "Test",
+            "context": "Test",
+            "rationale": "Test",
+            "status": "approved",
+            "decision_date": "2026-08",
+            "owner": "Founder",
+            "recommendation_id": "rec_bot_001",
+            "review_id": "review_test",
+            "brief_id": "brief_test",
+            "created_at": "2026-08-01T00:00:00+00:00",
+            "updated_at": "2026-08-01T00:00:00+00:00",
+        },
+        "operation": None,
+    }
+
+    body = {"recommendation_id": "rec_bot_001", "action": "approve"}
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post(f"{WS_PREFIX}/decisions", json=body)
+
+    assert resp.status_code == 201
+    service.act_on_recommendation.assert_called_once_with(
+        WS, "rec_bot_001", "approve", create_operation=False,
+    )
+
+
+def test_create_decision_with_operation():
+    service = MagicMock()
+    service.act_on_recommendation.return_value = {
+        "decision": {"id": "DEC-007", "status": "approved"},
+        "operation": {"id": "OP-20260801-001", "status": "created"},
+    }
+
+    body = {
+        "recommendation_id": "rec_bot_001",
+        "action": "approve",
+        "create_operation": True,
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post(f"{WS_PREFIX}/decisions", json=body)
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["operation"] is not None
+    service.act_on_recommendation.assert_called_once_with(
+        WS, "rec_bot_001", "approve", create_operation=True,
+    )
+
+
+def test_decisions_unknown_workspace_returns_404():
+    resp = client.get("/v1/workspaces/NONEXISTENT/decisions")
+    assert resp.status_code == 404
+
+
 # -- UI: Home screen -------------------------------------------------------
 
 
@@ -671,6 +763,60 @@ def test_ui_brief_renders_recommendations():
 def test_ui_brief_caches_result():
     resp = client.get("/")
     assert "cachedBrief" in resp.text
+
+
+# -- UI: Decision Inbox (within Brief) ------------------------------------
+
+
+def test_ui_brief_has_decision_inbox_title():
+    resp = client.get("/")
+    assert "Decision Inbox" in resp.text
+
+
+def test_ui_brief_has_approve_button():
+    resp = client.get("/")
+    assert "btn-approve" in resp.text
+    assert "Approve" in resp.text
+
+
+def test_ui_brief_has_reject_button():
+    resp = client.get("/")
+    assert "btn-reject" in resp.text
+    assert "Reject" in resp.text
+
+
+def test_ui_brief_has_postpone_button():
+    resp = client.get("/")
+    assert "btn-postpone" in resp.text
+    assert "Postpone" in resp.text
+
+
+def test_ui_brief_has_create_operation_checkbox():
+    resp = client.get("/")
+    assert "create-op-check" in resp.text
+    assert "Create Operation" in resp.text
+
+
+def test_ui_brief_has_decision_detail_modal():
+    resp = client.get("/")
+    assert "decision-modal" in resp.text
+    assert "showDecisionDetail" in resp.text
+
+
+def test_ui_brief_tracks_decision_actions():
+    resp = client.get("/")
+    assert "decisionActions" in resp.text
+    assert "submitDecisionAction" in resp.text
+
+
+def test_ui_brief_posts_to_decisions_endpoint():
+    resp = client.get("/")
+    assert '"/decisions"' in resp.text
+
+
+def test_ui_decision_actions_cleared_on_workspace_switch():
+    resp = client.get("/")
+    assert "decisionActions = {}" in resp.text
 
 
 # -- UI: Journal screen ----------------------------------------------------

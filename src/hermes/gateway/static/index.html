@@ -421,6 +421,107 @@
     margin-right: 8px;
   }
 
+  .rec-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    align-items: center;
+  }
+
+  .rec-actions button {
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    background: var(--surface);
+    color: var(--text-muted);
+  }
+
+  .rec-actions button:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .rec-actions button.btn-approve { background: #065f46; color: #6ee7b7; border-color: #065f46; }
+  .rec-actions button.btn-reject { background: #7f1d1d; color: #fca5a5; border-color: #7f1d1d; }
+  .rec-actions button.btn-postpone { background: #78350f; color: #fcd34d; border-color: #78350f; }
+  .rec-actions button.btn-approve:hover { background: #047857; }
+  .rec-actions button.btn-reject:hover { background: #991b1b; }
+  .rec-actions button.btn-postpone:hover { background: #92400e; }
+
+  .rec-decided {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-top: 8px;
+  }
+
+  .rec-decided.approved { background: #065f46; color: #6ee7b7; }
+  .rec-decided.closed { background: #7f1d1d; color: #fca5a5; }
+  .rec-decided.proposed { background: #78350f; color: #fcd34d; }
+
+  .rec-op-check {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-left: 8px;
+  }
+
+  .rec-op-check input {
+    cursor: pointer;
+  }
+
+  /* ── Decision detail modal ──────────────────────── */
+
+  .decision-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .decision-modal {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    max-width: 520px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  .decision-modal h3 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    color: var(--text);
+  }
+
+  .decision-modal .field-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    font-weight: 600;
+    margin-top: 12px;
+    margin-bottom: 4px;
+  }
+
+  .decision-modal .field-value {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
   /* ── Journal view ────────────────────────────────── */
 
   #view-journal {
@@ -1069,6 +1170,7 @@
   var streaming = false;
   var currentView = "home";
   var cachedBrief = null;
+  var decisionActions = {}; // { recommendation_id: { status, decision_id } }
   var activeWorkspaceId = null;
 
   function wsBase() {
@@ -1376,19 +1478,31 @@
       html += '</div>';
     }
 
-    // Recommendations
+    // Recommendations (Decision Inbox)
     if (recs.length > 0) {
       html += '<div class="brief-section">';
-      html += '  <div class="brief-section-title">Recommendations</div>';
+      html += '  <div class="brief-section-title">Recommendations — Decision Inbox</div>';
       for (var ri = 0; ri < recs.length; ri++) {
         var r = recs[ri];
-        html += '  <div class="rec-item">';
-        html += '    <div class="rec-title">';
+        var recId = r.id;
+        var decided = decisionActions[recId];
+        html += '  <div class="rec-item" data-rec-id="' + esc(recId) + '">';
+        html += '    <div class="rec-title" style="cursor:pointer" data-rec-detail="' + esc(recId) + '">';
         html += '      <span class="rec-score">[' + r.priority_score + ']</span>';
         html += '      <span class="focus-action ' + esc(r.suggested_action) + '">' + esc(r.suggested_action) + '</span> ';
         html += '      ' + esc(r.title);
         html += '    </div>';
         html += '    <div class="rec-meta">' + esc(r.rationale) + '</div>';
+        if (decided) {
+          html += '    <div class="rec-decided ' + esc(decided.status) + '">' + esc(decided.status.replace("_", " ").toUpperCase()) + (decided.decision_id ? " — " + esc(decided.decision_id) : "") + '</div>';
+        } else {
+          html += '    <div class="rec-actions" data-rec-id="' + esc(recId) + '">';
+          html += '      <button class="btn-approve" data-action="approve">Approve</button>';
+          html += '      <button class="btn-reject" data-action="reject">Reject</button>';
+          html += '      <button class="btn-postpone" data-action="postpone">Postpone</button>';
+          html += '      <label class="rec-op-check"><input type="checkbox" class="create-op-check"> Create Operation</label>';
+          html += '    </div>';
+        }
         html += '  </div>';
       }
       html += '</div>';
@@ -1419,6 +1533,81 @@
     }
 
     briefContent.innerHTML = html;
+
+    // Bind recommendation action buttons
+    briefContent.querySelectorAll(".rec-actions button").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var actionsDiv = btn.closest(".rec-actions");
+        var recId = actionsDiv.dataset.recId;
+        var action = btn.dataset.action;
+        var createOp = false;
+        var checkbox = actionsDiv.querySelector(".create-op-check");
+        if (checkbox) createOp = checkbox.checked;
+        submitDecisionAction(recId, action, createOp, data);
+      });
+    });
+
+    // Bind recommendation detail click
+    briefContent.querySelectorAll("[data-rec-detail]").forEach(function (el) {
+      el.addEventListener("click", function () {
+        var recId = el.dataset.recDetail;
+        var recs = data.recommendations || [];
+        for (var i = 0; i < recs.length; i++) {
+          if (recs[i].id === recId) { showDecisionDetail(recs[i]); return; }
+        }
+      });
+    });
+  }
+
+  function submitDecisionAction(recId, action, createOp, briefData) {
+    var body = { recommendation_id: recId, action: action, create_operation: createOp };
+    fetch(wsBase() + "/decisions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (result) {
+        if (!result) return;
+        var dec = result.decision || {};
+        decisionActions[recId] = { status: dec.status, decision_id: dec.id };
+        cachedBrief = null; // Invalidate so Journal picks up new decision
+        renderBrief(briefData);
+      })
+      .catch(function () {});
+  }
+
+  function showDecisionDetail(rec) {
+    var overlay = document.createElement("div");
+    overlay.className = "decision-modal-overlay";
+    var modal = document.createElement("div");
+    modal.className = "decision-modal";
+    var decided = decisionActions[rec.id];
+
+    var html = '<h3>' + esc(rec.title) + '</h3>';
+    html += '<div class="field-label">Source</div>';
+    html += '<div class="field-value">' + esc(rec.source_type) + ' / ' + esc(rec.source_id) + '</div>';
+    html += '<div class="field-label">Context</div>';
+    html += '<div class="field-value">' + esc(rec.context) + '</div>';
+    html += '<div class="field-label">Rationale</div>';
+    html += '<div class="field-value">' + esc(rec.rationale) + '</div>';
+    html += '<div class="field-label">Suggested Action</div>';
+    html += '<div class="field-value">' + esc(rec.suggested_action) + '</div>';
+    html += '<div class="field-label">Priority Score</div>';
+    html += '<div class="field-value">' + rec.priority_score + '</div>';
+    html += '<div class="field-label">Confidence</div>';
+    html += '<div class="field-value">' + esc(rec.confidence) + '</div>';
+
+    if (decided) {
+      html += '<div style="margin-top:16px"><span class="rec-decided ' + esc(decided.status) + '">' + esc(decided.status.toUpperCase()) + '</span></div>';
+    }
+
+    html += '<div style="margin-top:16px;text-align:right"><button onclick="this.closest(\'.decision-modal-overlay\').remove()" style="font-family:inherit;font-size:12px;padding:6px 16px;background:var(--surface);color:var(--text-muted);border:1px solid var(--border);border-radius:4px;cursor:pointer">Close</button></div>';
+
+    modal.innerHTML = html;
+    overlay.appendChild(modal);
+    overlay.addEventListener("click", function (e) { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
   }
 
   // ── Business Journal ──────────────────────────────
@@ -2343,6 +2532,7 @@
     workspaceSel.value = wsId || "";
     // Reload all data for new workspace
     cachedBrief = null;
+    decisionActions = {};
     loadProfiles();
     loadHome();
     loadBadges();

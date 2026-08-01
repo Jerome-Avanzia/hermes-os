@@ -1,5 +1,5 @@
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -446,3 +446,181 @@ def test_create_operation_from_chat_generates_unique_id(tmp_path):
     assert r1["id"] != r2["id"]
     assert r1["id"].startswith("OP-")
     assert r2["id"].startswith("OP-")
+
+
+# -- Executive Decision Loop (Sprint 29) ------------------------------------
+
+
+def _decision_service(tmp_path):
+    """Build a service with real stores and a real business directory."""
+    import shutil
+    from pathlib import Path
+
+    from hermes.kernel.decision_engine import Recommendation, DimensionScore
+    from hermes.kernel.ceo_loop import CEOReviewResult
+    from hermes.kernel.job_store import JobStore
+    from hermes.kernel.operation_store import OperationStore
+    from hermes.models import ExecutiveBrief
+
+    service, mocks = _mocked_service()
+    op_store = OperationStore(workspaces_root=tmp_path)
+    job_store = JobStore(workspaces_root=tmp_path)
+    service.operation_store = op_store
+    service.job_store = job_store
+
+    # Set up a temp business dir with Decisions.md
+    business_dir = tmp_path / "businesses" / "TEST"
+    business_dir.mkdir(parents=True)
+    src = Path("businesses/AVANZIA/Decisions.md")
+    shutil.copy2(src, business_dir / "Decisions.md")
+
+    # Mock workspace_engine.resolve_business_dir to return our temp dir
+    mocks["context_engine"].workspace_engine.resolve_business_dir.return_value = business_dir
+
+    # Build a mock CEOReviewResult with one recommendation
+    from hermes.kernel.business_data_loader import BusinessData
+    from hermes.kernel.decision_engine import EngineResult
+
+    rec = Recommendation(
+        recommendation_id="rec_bot_001",
+        business_id="TEST",
+        title="Address sales bottleneck",
+        context="Sales pipeline is constrained",
+        rationale="Improving sales will increase revenue by 30%.",
+        source_type="bottleneck",
+        source_id="BOT-001",
+        dimension_scores=[],
+        priority_score=4.2,
+        confidence="high",
+        suggested_action="decide",
+    )
+
+    brief = ExecutiveBrief(
+        brief_id="brief_TEST_2026-08-01",
+        business_id="TEST",
+        reporting_period="daily",
+        generated_at="2026-08-01T00:00:00+00:00",
+        summary="Test brief",
+        priorities=[],
+        recommendations=[],
+        risks=[],
+        status="draft",
+    )
+
+    review = CEOReviewResult(
+        review_id="review_2026-08-01T00:00:00+00:00",
+        business_id="TEST",
+        data=BusinessData(),
+        engine_result=EngineResult(
+            business_id="TEST",
+            recommendations=[rec],
+        ),
+        brief=brief,
+        steps=[],
+        execution_status="completed",
+    )
+
+    return service, mocks, review, business_dir
+
+
+def test_act_on_recommendation_approve_creates_decision(tmp_path):
+    service, mocks, review, business_dir = _decision_service(tmp_path)
+
+    with patch.object(
+        service, "_run_ceo_review", return_value=review
+    ):
+        result = service.act_on_recommendation("AVANZIA", "rec_bot_001", "approve")
+
+    dec = result["decision"]
+    assert dec["id"] == "DEC-007"
+    assert dec["status"] == "approved"
+    assert dec["recommendation_id"] == "rec_bot_001"
+    assert dec["review_id"] == "review_2026-08-01T00:00:00+00:00"
+    assert dec["brief_id"] == "brief_TEST_2026-08-01"
+    assert result["operation"] is None
+
+
+def test_act_on_recommendation_reject_creates_closed_decision(tmp_path):
+    service, mocks, review, business_dir = _decision_service(tmp_path)
+
+    with patch.object(
+        service, "_run_ceo_review", return_value=review
+    ):
+        result = service.act_on_recommendation("AVANZIA", "rec_bot_001", "reject")
+
+    assert result["decision"]["status"] == "closed"
+
+
+def test_act_on_recommendation_postpone_creates_proposed_decision(tmp_path):
+    service, mocks, review, business_dir = _decision_service(tmp_path)
+
+    with patch.object(
+        service, "_run_ceo_review", return_value=review
+    ):
+        result = service.act_on_recommendation("AVANZIA", "rec_bot_001", "postpone")
+
+    assert result["decision"]["status"] == "proposed"
+
+
+def test_act_on_recommendation_approve_with_operation(tmp_path):
+    service, mocks, review, business_dir = _decision_service(tmp_path)
+
+    with patch.object(
+        service, "_run_ceo_review", return_value=review
+    ):
+        result = service.act_on_recommendation(
+            "AVANZIA", "rec_bot_001", "approve", create_operation=True,
+        )
+
+    assert result["operation"] is not None
+    assert result["operation"]["id"].startswith("OP-")
+    assert "[DEC-007]" in result["operation"]["request"]
+
+
+def test_act_on_recommendation_unknown_raises(tmp_path):
+    from hermes.service import RecommendationNotFoundError
+
+    service, mocks, review, business_dir = _decision_service(tmp_path)
+
+    with patch.object(
+        service, "_run_ceo_review", return_value=review
+    ):
+        with pytest.raises(RecommendationNotFoundError):
+            service.act_on_recommendation("AVANZIA", "nonexistent", "approve")
+
+
+def test_act_on_recommendation_invalid_action_raises(tmp_path):
+    service, mocks, review, business_dir = _decision_service(tmp_path)
+
+    with patch.object(
+        service, "_run_ceo_review", return_value=review
+    ):
+        with pytest.raises(ValueError, match="Invalid action"):
+            service.act_on_recommendation("AVANZIA", "rec_bot_001", "invalid")
+
+
+def test_act_on_recommendation_appends_to_decisions_md(tmp_path):
+    service, mocks, review, business_dir = _decision_service(tmp_path)
+
+    with patch.object(
+        service, "_run_ceo_review", return_value=review
+    ):
+        service.act_on_recommendation("AVANZIA", "rec_bot_001", "approve")
+
+    text = (business_dir / "Decisions.md").read_text()
+    assert "DEC-007" in text
+    assert "Address sales" in text
+
+
+def test_act_on_recommendation_decision_has_traceability(tmp_path):
+    service, mocks, review, business_dir = _decision_service(tmp_path)
+
+    with patch.object(
+        service, "_run_ceo_review", return_value=review
+    ):
+        result = service.act_on_recommendation("AVANZIA", "rec_bot_001", "approve")
+
+    dec = result["decision"]
+    assert dec["recommendation_id"] is not None
+    assert dec["review_id"] is not None
+    assert dec["brief_id"] is not None

@@ -32,7 +32,7 @@ from hermes.kernel.workspace_engine import WorkspaceEngine, WorkspaceNotFoundErr
 from hermes.models.operation import InvalidTransitionError
 from hermes.providers.ollama_provider import ChatMessage, OllamaConnectionError, OllamaProvider
 from hermes.runtime.context_engine import ContextEngine
-from hermes.service import HermesService
+from hermes.service import HermesService, RecommendationNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,12 @@ class ChatRequest(BaseModel):
 
 class CreateOperationRequest(BaseModel):
     request: str
+
+
+class CreateDecisionRequest(BaseModel):
+    recommendation_id: str
+    action: str
+    create_operation: bool = False
 
 
 # -- Application singletons ------------------------------------------------
@@ -340,6 +346,38 @@ async def get_job(workspace_id: str, job_id: str) -> JSONResponse:
             content={"error": f"Job not found: {job_id}"},
         )
     return JSONResponse(content=job)
+
+
+@app.get("/v1/workspaces/{workspace_id}/decisions")
+async def list_decisions(workspace_id: str) -> list[dict]:
+    """List all Decisions from the business knowledge layer."""
+    return _hermes_service.list_decisions(workspace_id)
+
+
+@app.post("/v1/workspaces/{workspace_id}/decisions")
+async def create_decision(workspace_id: str, body: CreateDecisionRequest) -> JSONResponse:
+    """Act on a recommendation to create a tracked Decision."""
+    from hermes.service import VALID_DECISION_ACTIONS
+
+    if body.action not in VALID_DECISION_ACTIONS:
+        return JSONResponse(
+            status_code=422,
+            content={"error": f"Invalid action: {body.action}. Must be one of: {', '.join(sorted(VALID_DECISION_ACTIONS))}"},
+        )
+
+    try:
+        result = _hermes_service.act_on_recommendation(
+            workspace_id,
+            body.recommendation_id,
+            body.action,
+            create_operation=body.create_operation,
+        )
+    except RecommendationNotFoundError as exc:
+        return JSONResponse(
+            status_code=404,
+            content={"error": str(exc)},
+        )
+    return JSONResponse(status_code=201, content=result)
 
 
 @app.get("/health")

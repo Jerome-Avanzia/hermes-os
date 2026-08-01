@@ -17,5 +17,8 @@ class Decision:
     strategy_id: str | None = None
     goal_id: str | None = None
     owner: str | None = None
+    recommendation_id: str | None = None
+    review_id: str | None = None
+    brief_id: str | None = None
     created_at: str | None = None
     updated_at: str | None = None

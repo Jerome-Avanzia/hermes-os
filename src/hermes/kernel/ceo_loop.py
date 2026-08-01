@@ -37,6 +37,7 @@ class CEOReviewResult:
     aggregated list.
     """
 
+    review_id: str
     business_id: str
     data: BusinessData
     engine_result: EngineResult
@@ -116,6 +117,7 @@ class CEOLoop:
     ) -> CEOReviewResult:
         """Execute the Ten-Step Loop and return a CEOReviewResult."""
         started_at = _now()
+        review_id = f"review_{started_at}"
         steps: list[StepRecord] = []
         loop_warnings: list[str] = []
 
@@ -129,6 +131,7 @@ class CEOLoop:
                     steps.append(_step(i, name, "skipped",
                                        "Skipped due to governance failure"))
             return CEOReviewResult(
+                review_id=review_id,
                 business_id="",
                 data=_EMPTY_DATA,
                 engine_result=_EMPTY_ENGINE,
@@ -192,6 +195,7 @@ class CEOLoop:
                 steps.append(_step(i, _REMAINING_STEPS[i], "skipped",
                                    "Skipped due to execution failure"))
             return CEOReviewResult(
+                review_id=review_id,
                 business_id=business_id,
                 data=data,
                 engine_result=_EMPTY_ENGINE,
@@ -245,6 +249,7 @@ class CEOLoop:
         )
 
         return CEOReviewResult(
+            review_id=review_id,
             business_id=business_id,
             data=data,
             engine_result=engine_result,

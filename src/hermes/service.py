@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 
 from hermes.conductor import Conductor
 from hermes.kernel.ceo_loop import CEOLoop
+from hermes.kernel.decision_id import generate_decision_id
+from hermes.kernel.decision_writer import DecisionWriter
 from hermes.kernel.executor import Executor
 from hermes.kernel.file_content_reader import FileContentReader
 from hermes.kernel.file_selector import FileSelector
@@ -18,6 +20,7 @@ from hermes.kernel.planner import Planner
 from hermes.kernel.skill_loader import SkillLoader
 from hermes.kernel.workspace_reader import WorkspaceReader
 from hermes.models import DiagnosticsReport, ExecutionResult, Job, Operation, Task
+from hermes.models.decision import Decision
 from hermes.models.operation import InvalidTransitionError, transition_operation
 from hermes.providers.ai_provider import AIProvider
 from hermes.providers.ollama_provider import ChatMessage
@@ -27,6 +30,18 @@ from hermes.runtime.context_engine import ContextEngine
 logger = logging.getLogger(__name__)
 
 _MAX_KNOWLEDGE_DOCS_IN_PROMPT = 3
+
+_ACTION_TO_STATUS = {
+    "approve": "approved",
+    "reject": "closed",
+    "postpone": "proposed",
+}
+
+VALID_DECISION_ACTIONS = frozenset(_ACTION_TO_STATUS.keys())
+
+
+class RecommendationNotFoundError(Exception):
+    pass
 
 
 class HermesService:
@@ -265,6 +280,116 @@ class HermesService:
         transition_operation(op, "rejected")
         self.operation_store.save(op)
         return self._serialize_operation(op)
+
+    # -- Executive Decision Loop -------------------------------------------------
+
+    def act_on_recommendation(
+        self,
+        workspace_id: str,
+        recommendation_id: str,
+        action: str,
+        create_operation: bool = False,
+    ) -> dict:
+        """Act on an Executive Brief recommendation to create a tracked Decision.
+
+        Actions: approve → "approved", reject → "closed", postpone → "proposed".
+        Appends the Decision to Decisions.md.  Optionally creates an Operation.
+        Recommendations are immutable — the Decision only references them.
+        """
+        self.validate_workspace(workspace_id)
+
+        if action not in VALID_DECISION_ACTIONS:
+            raise ValueError(f"Invalid action: {action}. Must be one of: {', '.join(sorted(VALID_DECISION_ACTIONS))}")
+
+        # Run CEO review to find the recommendation
+        review = self._run_ceo_review(workspace_id)
+        rec = None
+        for r in review.engine_result.recommendations:
+            if r.recommendation_id == recommendation_id:
+                rec = r
+                break
+
+        if rec is None:
+            raise RecommendationNotFoundError(
+                f"Recommendation not found: {recommendation_id}"
+            )
+
+        # Resolve business directory for ID generation and file write
+        business_dir = self.context_engine.workspace_engine.resolve_business_dir(
+            workspace_id
+        )
+        decision_id = generate_decision_id(business_dir)
+
+        now = datetime.now(timezone.utc)
+        decision_date = now.strftime("%Y-%m")
+        status = _ACTION_TO_STATUS[action]
+
+        decision = Decision(
+            decision_id=decision_id,
+            business_id=review.business_id,
+            title=rec.title,
+            context=f"Source: {rec.source_type}/{rec.source_id}. {rec.context}",
+            rationale=rec.rationale,
+            status=status,
+            decision_date=decision_date,
+            owner="Founder",
+            recommendation_id=rec.recommendation_id,
+            review_id=review.review_id,
+            brief_id=review.brief.brief_id,
+            created_at=now.isoformat(),
+            updated_at=now.isoformat(),
+        )
+
+        # Append to Decisions.md
+        writer = DecisionWriter()
+        writer.append_decision(business_dir, decision)
+
+        result: dict = {"decision": self._serialize_decision(decision)}
+
+        # Optionally create an Operation for approved decisions
+        if create_operation and action == "approve" and self.operation_store:
+            op_dict = self.create_operation_from_chat(
+                workspace_id,
+                f"[{decision_id}] {rec.title}",
+            )
+            result["operation"] = op_dict
+        else:
+            result["operation"] = None
+
+        return result
+
+    def list_decisions(self, workspace_id: str) -> list[dict]:
+        """Return all Decisions from the business knowledge layer."""
+        self.validate_workspace(workspace_id)
+        review = self._run_ceo_review(workspace_id)
+        return [
+            {
+                "id": d.decision_id,
+                "title": d.title,
+                "date": d.decision_date,
+                "status": d.status,
+                "rationale": d.rationale,
+            }
+            for d in review.data.decisions
+        ]
+
+    @staticmethod
+    def _serialize_decision(d: Decision) -> dict:
+        return {
+            "id": d.decision_id,
+            "business_id": d.business_id,
+            "title": d.title,
+            "context": d.context,
+            "rationale": d.rationale,
+            "status": d.status,
+            "decision_date": d.decision_date,
+            "owner": d.owner,
+            "recommendation_id": d.recommendation_id,
+            "review_id": d.review_id,
+            "brief_id": d.brief_id,
+            "created_at": d.created_at,
+            "updated_at": d.updated_at,
+        }
 
     def list_jobs(self, workspace_id: str) -> list[dict]:
         """Return all Jobs for a workspace, ordered by ID."""

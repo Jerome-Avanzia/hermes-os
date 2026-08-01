@@ -45,12 +45,22 @@
         "proposed",
         "approved",
         "implemented",
-        "reversed"
+        "reversed",
+        "closed"
       ]
     },
     "decision_date": {
       "type": "string",
       "format": "date"
+    },
+    "recommendation_id": {
+      "type": "string"
+    },
+    "review_id": {
+      "type": "string"
+    },
+    "brief_id": {
+      "type": "string"
     },
     "created_at": {
       "type": "string",

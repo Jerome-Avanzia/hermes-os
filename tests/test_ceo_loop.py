@@ -42,6 +42,7 @@ class TestStepRecord:
 class TestCEOReviewResult:
     def test_all_warnings_aggregates(self):
         result = CEOReviewResult(
+            review_id="review_test",
             business_id="biz_test",
             data=BusinessData(),
             engine_result=EngineResult(business_id=""),
@@ -62,6 +63,7 @@ class TestCEOReviewResult:
 
     def test_empty_warnings(self):
         result = CEOReviewResult(
+            review_id="review_test",
             business_id="", data=BusinessData(),
             engine_result=EngineResult(business_id=""),
             brief=ExecutiveBrief(
