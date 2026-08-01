@@ -391,6 +391,59 @@ def test_ui_references_dashboard_endpoint():
     assert "/v1/dashboard" in resp.text
 
 
+def test_ui_today_fetches_operations_for_counts():
+    resp = client.get("/")
+    # Today screen fetches /v1/operations in parallel with /v1/dashboard
+    assert "operationsPromise" in resp.text
+    assert 'fetch(GATEWAY + "/v1/operations")' in resp.text
+
+
+def test_ui_today_attention_items_are_clickable():
+    resp = client.get("/")
+    assert "today-attention-item" in resp.text
+    assert "openOperation" in resp.text
+
+
+def test_ui_today_operations_widget_is_clickable():
+    resp = client.get("/")
+    assert "today-ops-widget" in resp.text
+    assert 'switchView("operations")' in resp.text
+
+
+def test_ui_today_computes_active_operations():
+    resp = client.get("/")
+    assert "computeTodayOpsStats" in resp.text
+    assert '"created"' in resp.text
+    assert '"executing"' in resp.text
+
+
+def test_ui_today_computes_escalated_operations():
+    resp = client.get("/")
+    assert '"awaiting_escalation"' in resp.text
+    assert "escalated.push" in resp.text
+
+
+def test_ui_today_computes_completed_today():
+    resp = client.get("/")
+    assert "completedToday" in resp.text
+    assert "today" in resp.text
+
+
+def test_ui_today_handles_operations_failure():
+    """If Operations API fails, Today still renders with 'Unavailable'."""
+    resp = client.get("/")
+    assert "Unavailable" in resp.text
+    assert "Unable to load Operations." in resp.text
+
+
+def test_ui_today_limits_escalation_items():
+    """At most 5 escalation items shown, with '...and N more' for overflow."""
+    resp = client.get("/")
+    assert "maxShow" in resp.text
+    assert "...and " in resp.text
+    assert " more" in resp.text
+
+
 # -- UI: Documents screen --------------------------------------------------
 
 

@@ -878,32 +878,75 @@
   // ── Load dashboard ────────────────────────────────
 
   function loadDashboard() {
-    fetch(GATEWAY + "/v1/dashboard")
+    // Fetch dashboard and operations in parallel (Founder amendment 1)
+    var dashboardPromise = fetch(GATEWAY + "/v1/dashboard")
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (data) {
-        if (!data) return;
-        renderToday(data);
-      })
-      .catch(function () {});
+      .catch(function () { return null; });
+
+    var operationsPromise = fetch(GATEWAY + "/v1/operations")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+
+    Promise.all([dashboardPromise, operationsPromise]).then(function (results) {
+      var data = results[0];
+      var opsList = results[1];
+      if (!data) return;
+      renderToday(data, opsList);
+    });
   }
 
-  function renderToday(data) {
+  function computeTodayOpsStats(opsList) {
+    var today = new Date().toISOString().slice(0, 10);
+    var active = 0;
+    var completedToday = 0;
+    var escalated = [];
+
+    for (var i = 0; i < opsList.length; i++) {
+      var op = opsList[i];
+      if (op.status === "created" || op.status === "executing") active++;
+      if (op.status === "completed" && op.updated_at && op.updated_at.slice(0, 10) === today) completedToday++;
+      if (op.status === "awaiting_escalation") escalated.push(op);
+    }
+
+    return { active: active, completedToday: completedToday, total: opsList.length, escalated: escalated };
+  }
+
+  function renderToday(data, opsList) {
     var ws = data.workspace || {};
-    var attention = data.attention || { count: 0, items: [] };
-    var operations = data.operations || {};
     var knowledge = data.knowledge || {};
     var repositories = data.repositories || {};
+    var opsAvailable = opsList !== null;
+    var opsStats = opsAvailable ? computeTodayOpsStats(opsList) : null;
 
     // Header
     todayHeader.textContent = ws.name || "Hermes";
 
     // Attention section (attention-first per UX spec)
-    if (attention.count > 0) {
+    if (!opsAvailable) {
+      todayAttention.innerHTML = '<div style="color:var(--text-dim)">Unable to load Operations.</div>';
+    } else if (opsStats.escalated.length > 0) {
+      var maxShow = 5;
       var ahtml = "";
-      attention.items.forEach(function (item) {
-        ahtml += '<div style="margin-bottom:6px">' + esc(item.title || item) + '</div>';
-      });
+      var shown = Math.min(opsStats.escalated.length, maxShow);
+      for (var ai = 0; ai < shown; ai++) {
+        var esc_op = opsStats.escalated[ai];
+        ahtml += '<div class="today-attention-item" data-op-id="' + esc(esc_op.id) + '" style="margin-bottom:6px;cursor:pointer;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px">';
+        ahtml += '<span class="status-badge awaiting_escalation" style="margin-right:8px">Escalated</span>';
+        ahtml += '<span>' + esc(esc_op.request) + '</span>';
+        ahtml += '<span style="margin-left:8px;color:var(--text-dim);font-size:11px">' + esc(esc_op.id) + '</span>';
+        ahtml += '</div>';
+      }
+      if (opsStats.escalated.length > maxShow) {
+        ahtml += '<div style="font-size:12px;color:var(--text-dim);margin-top:4px">...and ' + (opsStats.escalated.length - maxShow) + ' more</div>';
+      }
       todayAttention.innerHTML = ahtml;
+
+      todayAttention.querySelectorAll(".today-attention-item[data-op-id]").forEach(function (el) {
+        el.addEventListener("click", function () {
+          switchView("operations");
+          openOperation(el.dataset.opId);
+        });
+      });
     } else {
       todayAttention.textContent = "No items need your attention.";
     }
@@ -911,11 +954,15 @@
     // Operating state widgets
     var html = "";
 
-    html += '<div class="widget">';
+    html += '<div class="widget" id="today-ops-widget" style="cursor:pointer">';
     html += '  <div class="widget-title">Operations</div>';
-    html += '  <div class="widget-value">' + (operations.active || 0) + '</div>';
-    html += '  <div class="widget-sub">active</div>';
-    html += '  <div class="widget-sub">' + (operations.completed_today || 0) + ' completed today &middot; ' + (operations.total || 0) + ' total</div>';
+    if (opsAvailable) {
+      html += '  <div class="widget-value">' + opsStats.active + '</div>';
+      html += '  <div class="widget-sub">active</div>';
+      html += '  <div class="widget-sub">' + opsStats.completedToday + ' completed today &middot; ' + opsStats.total + ' total</div>';
+    } else {
+      html += '  <div class="widget-coming-soon">Unavailable</div>';
+    }
     html += '</div>';
 
     html += '<div class="widget">';
@@ -938,6 +985,14 @@
     }
 
     todayWidgets.innerHTML = html;
+
+    // Operations widget click-through
+    var opsWidget = document.getElementById("today-ops-widget");
+    if (opsWidget) {
+      opsWidget.addEventListener("click", function () {
+        switchView("operations");
+      });
+    }
   }
 
   // ── Health check ──────────────────────────────────
