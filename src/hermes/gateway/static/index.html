@@ -1052,6 +1052,7 @@
     <div class="nav-section">
       <div class="nav-section-title">Main</div>
       <div class="nav-item active" data-view="home">Home</div>
+      <div class="nav-item" data-view="notifications">Notifications</div>
       <div class="nav-item" data-view="brief">Brief</div>
       <div class="nav-item" data-view="chat">Chat</div>
       <div class="nav-item" data-view="operations">Operations</div>
@@ -1111,6 +1112,11 @@
         <div id="home-attention"></div>
         <div id="home-focus"></div>
         <div class="widget-row" id="home-widgets"></div>
+      </div>
+
+      <!-- Notifications view -->
+      <div id="view-notifications" class="view">
+        <div id="notifications-content" class="list-view"></div>
       </div>
 
       <!-- Brief view (Executive Brief) -->
@@ -1223,6 +1229,7 @@
     if (name === "departments") loadDepartments();
     if (name === "capabilities") loadCapabilities();
     if (name === "sops") loadSOPs();
+    if (name === "notifications") loadNotifications();
   }
 
   document.querySelectorAll(".nav-item[data-view]").forEach(function (el) {
@@ -1288,16 +1295,11 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .catch(function () { return null; });
 
-    var stalePromise = fetch(wsBase() + "/operations/stale")
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .catch(function () { return null; });
-
-    Promise.all([dashboardPromise, operationsPromise, stalePromise]).then(function (results) {
+    Promise.all([dashboardPromise, operationsPromise]).then(function (results) {
       var data = results[0];
       var opsList = results[1];
-      var staleOps = results[2];
       if (!data) return;
-      renderHome(data, opsList, staleOps);
+      renderHome(data, opsList);
     });
   }
 
@@ -1317,7 +1319,7 @@
     return { active: active, completedToday: completedToday, total: opsList.length, escalated: escalated };
   }
 
-  function renderHome(data, opsList, staleOps) {
+  function renderHome(data, opsList) {
     var ws = data.workspace || {};
     var knowledge = data.knowledge || {};
     var repositories = data.repositories || {};
@@ -1329,62 +1331,31 @@
     // Header
     homeHeader.textContent = ws.name || "Hermes";
 
-    // Attention section — escalated + blocked operations
-    if (!opsAvailable) {
-      homeAttention.innerHTML = '<div style="color:var(--text-dim)">Unable to load Operations.</div>';
-    } else if (opsStats.escalated.length > 0) {
-      var maxShow = 5;
-      var ahtml = "";
-      var shown = Math.min(opsStats.escalated.length, maxShow);
-      for (var ai = 0; ai < shown; ai++) {
-        var esc_op = opsStats.escalated[ai];
-        ahtml += '<div class="home-attention-item" data-op-id="' + esc(esc_op.id) + '" style="margin-bottom:6px;cursor:pointer;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px">';
-        ahtml += '<span class="status-badge awaiting_escalation" style="margin-right:8px">Escalated</span>';
-        ahtml += '<span>' + esc(esc_op.request) + '</span>';
-        ahtml += '<span style="margin-left:8px;color:var(--text-dim);font-size:11px">' + esc(esc_op.id) + '</span>';
-        ahtml += '</div>';
-      }
-      if (opsStats.escalated.length > maxShow) {
-        ahtml += '<div style="font-size:12px;color:var(--text-dim);margin-top:4px">...and ' + (opsStats.escalated.length - maxShow) + ' more</div>';
-      }
-      homeAttention.innerHTML = ahtml;
+    // Attention section — compact notification counters (Sprint 36)
+    var notifs = data.notifications || {};
+    var unread = notifs.unread_count || 0;
+    var critical = notifs.critical_count || 0;
+    var warning = notifs.warning_count || 0;
 
-      homeAttention.querySelectorAll(".home-attention-item[data-op-id]").forEach(function (el) {
-        el.addEventListener("click", function () {
-          switchView("operations");
-          openOperation(el.dataset.opId);
-        });
+    if (unread > 0) {
+      var ahtml = '<div id="home-notif-link" style="cursor:pointer;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;gap:12px">';
+      if (critical > 0) {
+        ahtml += '<span style="background:#fca5a5;color:#1a1a2e;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600">' + critical + ' critical</span>';
+      }
+      if (warning > 0) {
+        ahtml += '<span style="background:#fcd34d;color:#1a1a2e;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600">' + warning + ' warning</span>';
+      }
+      if (unread - critical - warning > 0) {
+        ahtml += '<span style="color:var(--text-muted);font-size:12px">' + (unread - critical - warning) + ' info</span>';
+      }
+      ahtml += '<span style="color:var(--text-dim);font-size:12px;margin-left:auto">View all &rarr;</span>';
+      ahtml += '</div>';
+      homeAttention.innerHTML = ahtml;
+      document.getElementById("home-notif-link").addEventListener("click", function () {
+        switchView("notifications");
       });
     } else {
       homeAttention.textContent = "No items need your attention.";
-    }
-
-    // Blocked operations from heartbeats (Sprint 35)
-    if (staleOps && staleOps.length > 0) {
-      var blockedOps = staleOps.filter(function (s) {
-        return s.latest_heartbeat && s.latest_heartbeat.status === "blocked";
-      });
-      if (blockedOps.length > 0) {
-        var bhtml = homeAttention.innerHTML || "";
-        if (bhtml === "No items need your attention.") bhtml = "";
-        for (var bi = 0; bi < blockedOps.length; bi++) {
-          var bop = blockedOps[bi];
-          bhtml += '<div class="home-attention-item" data-op-id="' + esc(bop.operation_id) + '" style="margin-bottom:6px;cursor:pointer;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px">';
-          bhtml += '<span class="status-badge blocked" style="margin-right:8px;background:#fca5a5;color:#1a1a2e">Blocked</span>';
-          bhtml += '<span>' + esc(bop.request) + '</span>';
-          if (bop.latest_heartbeat && bop.latest_heartbeat.summary) {
-            bhtml += '<div style="font-size:11px;color:var(--text-dim);margin-top:4px">' + esc(bop.latest_heartbeat.summary) + '</div>';
-          }
-          bhtml += '</div>';
-        }
-        homeAttention.innerHTML = bhtml;
-        homeAttention.querySelectorAll(".home-attention-item[data-op-id]").forEach(function (el) {
-          el.addEventListener("click", function () {
-            switchView("operations");
-            openOperation(el.dataset.opId);
-          });
-        });
-      }
     }
 
     // Today's Focus — Top 3 priorities (amendment 4)
@@ -3152,6 +3123,103 @@
     this.style.height = Math.min(this.scrollHeight, 160) + "px";
   });
 
+  // ── Notifications ───────────────────────────────
+
+  var notificationsEl = document.getElementById("notifications-content");
+
+  function loadNotifications() {
+    if (!activeWorkspaceId) return;
+    notificationsEl.innerHTML = '<div class="list-empty">Loading notifications...</div>';
+    fetch(wsBase() + "/notifications")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) {
+          notificationsEl.innerHTML = '<div class="list-empty">Cannot load notifications.</div>';
+          return;
+        }
+        renderNotifications(data.notifications || [], data.unread_count || 0);
+      })
+      .catch(function () {
+        notificationsEl.innerHTML = '<div class="list-empty">Cannot load notifications.</div>';
+      });
+  }
+
+  function renderNotifications(notifications, unreadCount) {
+    if (notifications.length === 0) {
+      notificationsEl.innerHTML = '<div class="list-header"><div class="list-title">Notifications</div><div class="list-count">0 items</div></div><div class="list-empty">No notifications. Everything is on track.</div>';
+      return;
+    }
+
+    var html = '<div class="list-header"><div class="list-title">Notifications</div><div class="list-count">' + unreadCount + ' unread / ' + notifications.length + ' total</div></div>';
+
+    // Group by severity
+    var groups = { critical: [], warning: [], info: [] };
+    for (var i = 0; i < notifications.length; i++) {
+      var n = notifications[i];
+      if (groups[n.severity]) groups[n.severity].push(n);
+    }
+
+    var severities = ["critical", "warning", "info"];
+    var severityLabels = { critical: "Critical", warning: "Warnings", info: "Information" };
+    var severityColors = { critical: "#fca5a5", warning: "#fcd34d", info: "var(--accent)" };
+
+    for (var si = 0; si < severities.length; si++) {
+      var sev = severities[si];
+      var items = groups[sev];
+      if (items.length === 0) continue;
+
+      html += '<div style="margin:12px 0 6px;font-size:11px;font-weight:600;color:' + severityColors[sev] + ';text-transform:uppercase;letter-spacing:0.05em">' + severityLabels[sev] + ' (' + items.length + ')</div>';
+
+      for (var ni = 0; ni < items.length; ni++) {
+        var notif = items[ni];
+        var opacity = notif.acknowledged ? "opacity:0.5;" : "";
+        html += '<div class="list-item" style="' + opacity + 'border-left:3px solid ' + severityColors[sev] + '" data-notif-id="' + esc(notif.id) + '" data-obj-type="' + esc(notif.related_object_type) + '" data-obj-id="' + esc(notif.related_object_id) + '">';
+        html += '  <div class="list-item-main" style="cursor:pointer">';
+        html += '    <div class="list-item-title">' + esc(notif.title) + '</div>';
+        html += '    <div class="list-item-meta">' + esc(notif.summary) + '</div>';
+        html += '    <div class="list-item-meta" style="font-size:10px">' + esc(notif.category.replace(/_/g, " ")) + '</div>';
+        html += '  </div>';
+        if (!notif.acknowledged) {
+          html += '  <button class="detail-btn notif-ack-btn" data-ack-id="' + esc(notif.id) + '" style="font-size:11px;padding:4px 10px" title="Acknowledge">&#10003;</button>';
+        } else {
+          html += '  <span style="color:var(--text-dim);font-size:11px">Ack</span>';
+        }
+        html += '</div>';
+      }
+    }
+
+    notificationsEl.innerHTML = html;
+
+    // Acknowledge click handlers
+    notificationsEl.querySelectorAll(".notif-ack-btn").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var nid = btn.getAttribute("data-ack-id");
+        fetch(wsBase() + "/notifications/" + encodeURIComponent(nid) + "/acknowledge", { method: "POST" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function () {
+            loadNotifications();
+            loadBadges();
+          })
+          .catch(function () {});
+      });
+    });
+
+    // Navigate to related object on click
+    notificationsEl.querySelectorAll(".list-item[data-notif-id]").forEach(function (el) {
+      el.querySelector(".list-item-main").addEventListener("click", function () {
+        var objType = el.getAttribute("data-obj-type");
+        var objId = el.getAttribute("data-obj-id");
+        if (objType === "operation") {
+          switchView("operations");
+          openOperation(objId);
+        } else if (objType === "recommendation" || objType === "kpi" || objType === "bottleneck") {
+          switchView("brief");
+        }
+      });
+    });
+  }
+
   // ── Promote to Operation ─────────────────────────
 
   var promoteBtn = document.getElementById("btn-promote");
@@ -3265,6 +3333,16 @@
           if (jobs[i].status === "failed") failed++;
         }
         if (currentView !== "jobs") setBadge("jobs", failed, true);
+      })
+      .catch(function () {});
+
+    // Notification badge (Sprint 36)
+    fetch(wsBase() + "/notifications/unread")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data === null) return;
+        var count = data.unread_count || 0;
+        if (currentView !== "notifications") setBadge("notifications", count, count > 0);
       })
       .catch(function () {});
   }

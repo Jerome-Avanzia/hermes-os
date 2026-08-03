@@ -18,6 +18,7 @@ from hermes.models.kpi import KPI
 from hermes.models.knowledge_context import KnowledgeContext
 from hermes.models.knowledge_document import KnowledgeDocument
 from hermes.models.lesson import Lesson
+from hermes.models.notification import Notification
 from hermes.models.loaded_skill import LoadedSkill
 from hermes.models.operation import InvalidTransitionError, Operation, transition_operation
 from hermes.models.operation_progress import OperationProgress
@@ -62,6 +63,7 @@ __all__ = [
     "KnowledgeDocument",
     "Lesson",
     "LoadedSkill",
+    "Notification",
     "Operation",
     "OperationProgress",
     "Opportunity",

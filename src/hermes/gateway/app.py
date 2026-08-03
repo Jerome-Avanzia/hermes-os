@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from hermes.conductor import Conductor
+from hermes.kernel.acknowledgement_store import AcknowledgementStore
 from hermes.kernel.heartbeat_runtime import InvalidHeartbeatStatusError
 from hermes.kernel.heartbeat_store import HeartbeatStore
 from hermes.kernel.job_store import JobStore
@@ -107,6 +108,7 @@ _workspace_engine = WorkspaceEngine()
 _operation_store = OperationStore()
 _job_store = JobStore()
 _heartbeat_store = HeartbeatStore()
+_acknowledgement_store = AcknowledgementStore()
 
 
 def _build_hermes_service(model: str | None = None) -> HermesService:
@@ -122,6 +124,7 @@ def _build_hermes_service(model: str | None = None) -> HermesService:
         operation_store=_operation_store,
         job_store=_job_store,
         heartbeat_store=_heartbeat_store,
+        acknowledgement_store=_acknowledgement_store,
     )
 
 
@@ -619,6 +622,25 @@ async def create_decision(workspace_id: str, body: CreateDecisionRequest) -> JSO
             content={"error": str(exc)},
         )
     return JSONResponse(status_code=201, content=result)
+
+
+@app.get("/v1/workspaces/{workspace_id}/notifications")
+async def list_notifications(workspace_id: str) -> JSONResponse:
+    """Return all current notifications with unread count."""
+    return JSONResponse(content=_hermes_service.list_notifications(workspace_id))
+
+
+@app.get("/v1/workspaces/{workspace_id}/notifications/unread")
+async def list_unread_notifications(workspace_id: str) -> JSONResponse:
+    """Return only unacknowledged notifications."""
+    return JSONResponse(content=_hermes_service.list_unread_notifications(workspace_id))
+
+
+@app.post("/v1/workspaces/{workspace_id}/notifications/{notification_id}/acknowledge")
+async def acknowledge_notification(workspace_id: str, notification_id: str) -> JSONResponse:
+    """Acknowledge a notification. Idempotent."""
+    result = _hermes_service.acknowledge_notification(workspace_id, notification_id)
+    return JSONResponse(content=result)
 
 
 @app.get("/health")

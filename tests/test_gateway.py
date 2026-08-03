@@ -688,8 +688,8 @@ def test_ui_home_fetches_operations_for_counts():
 
 def test_ui_home_attention_items_are_clickable():
     resp = client.get("/")
-    assert "home-attention-item" in resp.text
-    assert "openOperation" in resp.text
+    assert "home-notif-link" in resp.text
+    assert 'switchView("notifications")' in resp.text
 
 
 def test_ui_home_operations_widget_is_clickable():
@@ -717,18 +717,17 @@ def test_ui_home_computes_completed_today():
 
 
 def test_ui_home_handles_operations_failure():
-    """If Operations API fails, Home still renders with 'Unavailable'."""
+    """If Operations API fails, Home still renders with operations widget."""
     resp = client.get("/")
     assert "Unavailable" in resp.text
-    assert "Unable to load Operations." in resp.text
+    assert "home-ops-widget" in resp.text
 
 
-def test_ui_home_limits_escalation_items():
-    """At most 5 escalation items shown, with '...and N more' for overflow."""
+def test_ui_home_has_notification_counters():
+    """Home attention section shows compact notification counters (Sprint 36)."""
     resp = client.get("/")
-    assert "maxShow" in resp.text
-    assert "...and " in resp.text
-    assert " more" in resp.text
+    assert "critical_count" in resp.text or "unread_count" in resp.text
+    assert "View all" in resp.text
 
 
 # -- UI: Brief screen ------------------------------------------------------
@@ -1647,17 +1646,17 @@ def test_ui_badges_refresh_after_reject():
 
 
 def test_ui_badges_independent_failure():
-    """Operations and Jobs badges are fetched independently (Founder amendment 4)."""
+    """Operations, Jobs, and Notifications badges are fetched independently."""
     resp = client.get("/")
-    # Two separate fetch calls, not Promise.all
+    # Three separate fetch calls, not Promise.all
     text = resp.text
     idx = text.find("function loadBadges()")
     assert idx > 0
     end = text.find("// ──", idx + 1)
     section = text[idx:end]
-    # Should have two separate fetch calls using wsBase()
+    # Should have three separate fetch calls using wsBase()
     fetches = section.count("fetch(wsBase()")
-    assert fetches == 2
+    assert fetches == 3
 
 
 # -- UI: Workspace selector (Sprint 26) ------------------------------------

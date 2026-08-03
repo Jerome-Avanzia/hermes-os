@@ -11,6 +11,7 @@ from hermes.kernel.ceo_loop import CEOLoop
 from hermes.kernel.decision_id import generate_decision_id
 from hermes.kernel.decision_writer import DecisionWriter
 from hermes.kernel.department_registry import DepartmentRegistry
+from hermes.kernel.acknowledgement_store import AcknowledgementStore
 from hermes.kernel.heartbeat_runtime import (
     InvalidHeartbeatStatusError,
     append_heartbeat,
@@ -19,6 +20,11 @@ from hermes.kernel.heartbeat_runtime import (
     list_heartbeats,
 )
 from hermes.kernel.heartbeat_store import HeartbeatStore
+from hermes.kernel.notification_runtime import (
+    apply_acknowledgements,
+    filter_unread,
+    generate_notifications,
+)
 from hermes.kernel.operation_id_bk import generate_bk_operation_id
 from hermes.kernel.operation_runtime import (
     StepNotActionableError,
@@ -79,6 +85,7 @@ class HermesService:
         sop_registry: SOPRegistry | None = None,
         department_registry: DepartmentRegistry | None = None,
         heartbeat_store: HeartbeatStore | None = None,
+        acknowledgement_store: AcknowledgementStore | None = None,
     ) -> None:
         self.context_engine = context_engine or ContextEngine()
         self.planner = planner or Planner()
@@ -93,6 +100,7 @@ class HermesService:
         self.sop_registry = sop_registry or SOPRegistry()
         self.department_registry = department_registry or DepartmentRegistry()
         self.heartbeat_store = heartbeat_store
+        self.acknowledgement_store = acknowledgement_store
 
     # -- Workspace validation --------------------------------------------------
 
@@ -668,6 +676,73 @@ class HermesService:
             data["latest_heartbeat"] = None
         return data
 
+    # -- Executive Notifications (Sprint 36) -------------------------------------
+
+    def _generate_notifications(self, workspace_id: str) -> list:
+        """Compute notifications from current state and apply acknowledgements."""
+        ops = self.operation_store.list(workspace_id) if self.operation_store else []
+        review = None
+        try:
+            review = self._run_ceo_review(workspace_id)
+        except Exception:
+            pass  # CEO review may fail — notifications still work from operations
+
+        from hermes.kernel.notification_runtime import generate_notifications as gen
+        threshold = config.stale_threshold_hours()
+        notifications = gen(
+            ops, self.heartbeat_store, review, workspace_id, threshold,
+        )
+
+        if self.acknowledgement_store:
+            acked = self.acknowledgement_store.load(workspace_id)
+            apply_acknowledgements(notifications, acked)
+
+        return notifications
+
+    def list_notifications(self, workspace_id: str) -> dict:
+        """Return all current notifications with unread count."""
+        self.validate_workspace(workspace_id)
+        notifications = self._generate_notifications(workspace_id)
+        unread = sum(1 for n in notifications if not n.acknowledged)
+        return {
+            "notifications": [self._serialize_notification(n) for n in notifications],
+            "unread_count": unread,
+        }
+
+    def list_unread_notifications(self, workspace_id: str) -> dict:
+        """Return only unacknowledged notifications."""
+        self.validate_workspace(workspace_id)
+        notifications = self._generate_notifications(workspace_id)
+        unread = filter_unread(notifications)
+        return {
+            "notifications": [self._serialize_notification(n) for n in unread],
+            "unread_count": len(unread),
+        }
+
+    def acknowledge_notification(
+        self, workspace_id: str, notification_id: str,
+    ) -> dict:
+        """Acknowledge a notification. Idempotent."""
+        self.validate_workspace(workspace_id)
+        if not self.acknowledgement_store:
+            raise RuntimeError("AcknowledgementStore is required")
+        self.acknowledgement_store.acknowledge(workspace_id, notification_id)
+        return {"acknowledged": True}
+
+    @staticmethod
+    def _serialize_notification(n) -> dict:
+        return {
+            "id": n.id,
+            "timestamp": n.timestamp.isoformat(),
+            "severity": n.severity,
+            "category": n.category,
+            "title": n.title,
+            "summary": n.summary,
+            "related_object_type": n.related_object_type,
+            "related_object_id": n.related_object_id,
+            "acknowledged": n.acknowledged,
+        }
+
     # -- Capability Runtime (Sprint 31) -----------------------------------------
 
     def list_capabilities(self, workspace_id: str) -> list[dict]:
@@ -982,6 +1057,29 @@ class HermesService:
             "execution_status": review.execution_status,
             "warnings": review.all_warnings,
             "heartbeat_pulse": heartbeat_pulse,
+            "notifications": self._compute_notification_summary(workspace_id, ops, review),
+        }
+
+    def _compute_notification_summary(
+        self, workspace_id: str, ops: list, review: object,
+    ) -> dict:
+        """Compute compact notification counters for the dashboard."""
+        threshold = config.stale_threshold_hours()
+        notifications = generate_notifications(
+            ops, self.heartbeat_store, review, workspace_id, threshold,
+        )
+        if self.acknowledgement_store:
+            acked = self.acknowledgement_store.load(workspace_id)
+            apply_acknowledgements(notifications, acked)
+
+        unread = [n for n in notifications if not n.acknowledged]
+        critical = sum(1 for n in unread if n.severity == "critical")
+        warning = sum(1 for n in unread if n.severity == "warning")
+
+        return {
+            "unread_count": len(unread),
+            "critical_count": critical,
+            "warning_count": warning,
         }
 
     @staticmethod

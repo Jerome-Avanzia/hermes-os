@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-os.dev/contracts/notification.schema.json",
+  "title": "Notification",
+  "description": "Ephemeral executive attention item computed from business state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "timestamp",
+    "severity",
+    "category",
+    "title",
+    "summary",
+    "related_object_type",
+    "related_object_id"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "info",
+        "warning",
+        "critical"
+      ]
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "operation_blocked",
+        "operation_stale",
+        "operation_escalated",
+        "kpi_off_track",
+        "kpi_at_risk",
+        "recommendation",
+        "bottleneck"
+      ]
+    },
+    "title": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "related_object_type": {
+      "type": "string"
+    },
+    "related_object_id": {
+      "type": "string"
+    },
+    "acknowledged": {
+      "type": "boolean"
+    }
+  }
+}

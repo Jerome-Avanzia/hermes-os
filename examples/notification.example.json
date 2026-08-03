@@ -1,0 +1,11 @@
+{
+  "id": "notif-blocked-OP-20260803-001",
+  "timestamp": "2026-08-03T15:00:00Z",
+  "severity": "critical",
+  "category": "operation_blocked",
+  "title": "Operation blocked: Launch summer collection landing page",
+  "summary": "Waiting for vendor response. Blocker: Design assets not delivered",
+  "related_object_type": "operation",
+  "related_object_id": "OP-20260803-001",
+  "acknowledged": false
+}
