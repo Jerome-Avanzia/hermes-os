@@ -1182,6 +1182,7 @@
       <div class="nav-section-title">Knowledge</div>
       <div class="nav-item" data-view="documents">Documents</div>
       <div class="nav-item" data-view="memory">Memory</div>
+      <div class="nav-item" data-view="people">People</div>
       <div class="nav-item" data-view="departments">Departments</div>
       <div class="nav-item" data-view="capabilities">Capabilities</div>
       <div class="nav-item" data-view="sops">SOPs</div>
@@ -1276,6 +1277,10 @@
         <div id="documents-detail" class="detail-view" style="display:none"></div>
       </div>
       <div id="view-memory" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Memory</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-people" class="view">
+        <div id="people-list" class="list-view"></div>
+        <div id="people-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-departments" class="view">
         <div id="departments-list" class="list-view"></div>
         <div id="departments-detail" class="detail-view" style="display:none"></div>
@@ -1346,6 +1351,7 @@
     if (name === "documents") loadDocuments();
     if (name === "operations") loadOperations();
     if (name === "jobs") loadJobs();
+    if (name === "people") loadPeople();
     if (name === "departments") loadDepartments();
     if (name === "capabilities") loadCapabilities();
     if (name === "sops") loadSOPs();
@@ -2070,6 +2076,178 @@
         e.preventDefault();
         switchView("sops");
         loadSOPDetail(el.dataset.sopId);
+      });
+    });
+  }
+
+  // ── People (Sprint 38) ────────────────────────────────
+
+  var peopleListEl   = document.getElementById("people-list");
+  var peopleDetailEl = document.getElementById("people-detail");
+
+  function loadPeople() {
+    if (!activeWorkspaceId) return;
+    peopleListEl.style.display = "";
+    peopleDetailEl.style.display = "none";
+    peopleListEl.innerHTML = '<div class="list-empty">Loading people...</div>';
+
+    fetch(wsBase() + "/people")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (people) { renderPeopleList(people); })
+      .catch(function () { peopleListEl.innerHTML = '<div class="list-empty">Cannot load people.</div>'; });
+  }
+
+  function renderPeopleList(people) {
+    if (people.length === 0) {
+      peopleListEl.innerHTML = '<div class="list-empty">No people registered.</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < people.length; i++) {
+      var p = people[i];
+      html += '<div class="list-item" data-person-id="' + esc(p.id) + '" style="cursor:pointer">';
+      html += '  <div class="list-item-main">';
+      html += '    <div class="list-item-title">' + esc(p.name) + '</div>';
+      html += '    <div class="list-item-meta">' + esc(p.title) + '</div>';
+      html += '    <div class="list-item-meta" style="margin-top:2px">';
+      html += p.owned_departments + ' depts &middot; ' + p.owned_capabilities + ' caps &middot; ' + p.active_operations + ' ops';
+      if (p.blocked_operations > 0) {
+        html += ' &middot; <span style="color:#fca5a5">' + p.blocked_operations + ' blocked</span>';
+      }
+      html += '</div>';
+      html += '  </div>';
+      html += '  <span class="status-badge ' + esc(p.status) + '">' + formatStatus(p.status) + '</span>';
+      html += '</div>';
+    }
+    peopleListEl.innerHTML = html;
+    peopleListEl.querySelectorAll("[data-person-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadPersonDetail(el.dataset.personId); });
+    });
+  }
+
+  function loadPersonDetail(personId) {
+    peopleListEl.style.display = "none";
+    peopleDetailEl.style.display = "";
+    peopleDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(wsBase() + "/people/" + encodeURIComponent(personId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (person) {
+        if (!person) { peopleDetailEl.innerHTML = '<div class="list-empty">Person not found.</div>'; return; }
+        renderPersonDetail(person);
+      })
+      .catch(function () { peopleDetailEl.innerHTML = '<div class="list-empty">Cannot load person.</div>'; });
+  }
+
+  function renderPersonDetail(person) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(person.name) + '</div>';
+    html += '  <div class="detail-meta">' + esc(person.title) + ' &middot; <span class="status-badge ' + esc(person.status) + '">' + formatStatus(person.status) + '</span></div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="person-back">Back</button>';
+    html += '</div>';
+
+    // Contact
+    if (person.email) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Contact</div>';
+      html += '  <div class="list-item-meta">' + esc(person.email) + '</div>';
+      html += '</div>';
+    }
+
+    // Responsibilities (tags)
+    if (person.responsibilities && person.responsibilities.length > 0) {
+      html += '<div class="cap-section">';
+      html += '  <div class="cap-section-title">Responsibilities</div>';
+      for (var i = 0; i < person.responsibilities.length; i++) {
+        html += '<span class="cap-tag">' + esc(person.responsibilities[i]) + '</span>';
+      }
+      html += '</div>';
+    }
+
+    // Workload summary
+    var wl = person.workload || {};
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Workload</div>';
+    html += '  <div class="list-item-meta">';
+    html += wl.owned_departments + ' departments &middot; ';
+    html += wl.owned_capabilities + ' capabilities &middot; ';
+    html += wl.active_operations + ' active operations';
+    if (wl.blocked_operations > 0) {
+      html += ' &middot; <span style="color:#fca5a5">' + wl.blocked_operations + ' blocked</span>';
+    }
+    html += '</div>';
+    html += '</div>';
+
+    // Owned departments
+    if (person.departments && person.departments.length > 0) {
+      html += '<div class="cap-section">';
+      html += '  <div class="cap-section-title">Owned Departments</div>';
+      for (var di = 0; di < person.departments.length; di++) {
+        var d = person.departments[di];
+        html += '<a class="cap-tag person-dept-link" data-dept-id="' + esc(d.id) + '" href="#" style="cursor:pointer;text-decoration:underline;color:var(--accent)">' + esc(d.name) + '</a>';
+      }
+      html += '</div>';
+    }
+
+    // Owned capabilities
+    if (person.capabilities && person.capabilities.length > 0) {
+      html += '<div class="cap-section">';
+      html += '  <div class="cap-section-title">Owned Capabilities</div>';
+      for (var ci = 0; ci < person.capabilities.length; ci++) {
+        var c = person.capabilities[ci];
+        html += '<a class="cap-tag person-cap-link" data-cap-id="' + esc(c.id) + '" href="#" style="cursor:pointer;text-decoration:underline;color:var(--accent)">' + esc(c.name) + '</a>';
+      }
+      html += '</div>';
+    }
+
+    // Active operations
+    if (person.operations && person.operations.length > 0) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Active Operations</div>';
+      for (var oi = 0; oi < person.operations.length; oi++) {
+        var op = person.operations[oi];
+        html += '<div class="list-item person-op-link" data-op-id="' + esc(op.id) + '" style="cursor:pointer">';
+        html += '  <div class="list-item-main">';
+        html += '    <div class="list-item-title" style="font-size:13px">' + esc(op.id) + '</div>';
+        html += '    <div class="list-item-meta">' + esc(op.request) + '</div>';
+        html += '  </div>';
+        html += '  <span class="status-badge ' + esc(op.status) + '">' + formatStatus(op.status) + '</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    peopleDetailEl.innerHTML = html;
+
+    // Back button
+    document.getElementById("person-back").addEventListener("click", function () { loadPeople(); });
+
+    // Cross-navigation to departments
+    peopleDetailEl.querySelectorAll(".person-dept-link").forEach(function (el) {
+      el.addEventListener("click", function (e) {
+        e.preventDefault();
+        switchView("departments");
+        loadDepartmentDetail(el.dataset.deptId);
+      });
+    });
+
+    // Cross-navigation to capabilities
+    peopleDetailEl.querySelectorAll(".person-cap-link").forEach(function (el) {
+      el.addEventListener("click", function (e) {
+        e.preventDefault();
+        switchView("capabilities");
+        loadCapabilityDetail(el.dataset.capId);
+      });
+    });
+
+    // Cross-navigation to operations
+    peopleDetailEl.querySelectorAll(".person-op-link").forEach(function (el) {
+      el.addEventListener("click", function () {
+        switchView("operations");
+        loadOperationDetail(el.dataset.opId);
       });
     });
   }

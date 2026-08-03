@@ -1,0 +1,13 @@
+id: marketing-lead
+name: Marketing Lead
+title: Chief Marketing Officer
+department_ids:
+  - marketing
+status: active
+responsibilities:
+  - marketing-strategy
+  - brand-management
+  - content-creation
+owner_aliases:
+  - Chief Marketing Officer
+  - Marketing

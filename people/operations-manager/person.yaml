@@ -1,0 +1,11 @@
+id: operations-manager
+name: Operations Manager
+title: Operations Manager
+department_ids: []
+status: active
+responsibilities:
+  - process-improvement
+  - resource-allocation
+  - execution-tracking
+owner_aliases:
+  - Operations

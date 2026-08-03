@@ -1,0 +1,11 @@
+id: sales-manager
+name: Sales Manager
+title: Sales Manager
+department_ids: []
+status: active
+responsibilities:
+  - sales-pipeline
+  - client-relations
+  - revenue-generation
+owner_aliases:
+  - Sales

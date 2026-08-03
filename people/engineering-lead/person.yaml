@@ -1,0 +1,16 @@
+id: engineering-lead
+name: Engineering Lead
+title: Chief Technology Officer
+department_ids:
+  - technology
+  - platform
+status: active
+responsibilities:
+  - software-development
+  - technical-architecture
+  - code-review
+  - infrastructure
+owner_aliases:
+  - Chief Technology Officer
+  - Technology
+  - Platform Lead

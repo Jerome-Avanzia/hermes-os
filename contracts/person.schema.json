@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-os.dev/contracts/person.schema.json",
+  "title": "Person",
+  "description": "Organizational member with stable identity and responsibility tags.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "title"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Stable personal identifier (e.g. jerome-cornet), not a role."
+    },
+    "name": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string",
+      "description": "Organizational role or title."
+    },
+    "department_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Departments this person belongs to (supports matrix orgs)."
+    },
+    "email": {
+      "type": "string",
+      "format": "email"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "inactive"]
+    },
+    "responsibilities": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Stable responsibility tags for cross-linking."
+    },
+    "owner_aliases": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Legacy owner strings that map to this person."
+    }
+  }
+}

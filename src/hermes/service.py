@@ -20,6 +20,7 @@ from hermes.kernel.heartbeat_runtime import (
     list_heartbeats,
 )
 from hermes.kernel.heartbeat_store import HeartbeatStore
+from hermes.kernel.people_registry import PeopleRegistry
 from hermes.kernel.notification_runtime import (
     apply_acknowledgements,
     filter_unread,
@@ -88,6 +89,7 @@ class HermesService:
         department_registry: DepartmentRegistry | None = None,
         heartbeat_store: HeartbeatStore | None = None,
         acknowledgement_store: AcknowledgementStore | None = None,
+        people_registry: PeopleRegistry | None = None,
     ) -> None:
         self.context_engine = context_engine or ContextEngine()
         self.planner = planner or Planner()
@@ -103,6 +105,7 @@ class HermesService:
         self.department_registry = department_registry or DepartmentRegistry()
         self.heartbeat_store = heartbeat_store
         self.acknowledgement_store = acknowledgement_store
+        self.people_registry = people_registry or PeopleRegistry()
 
     # -- Workspace validation --------------------------------------------------
 
@@ -905,6 +908,113 @@ class HermesService:
             "owner": dept.owner,
             "status": dept.status,
             "tags": dept.tags,
+        }
+
+    # -- People (Sprint 38) ----------------------------------------------------
+
+    def _owner_matches(self, owner_str: str | None, person) -> bool:
+        """Check if an owner string matches a person by ID or owner_aliases."""
+        if not owner_str:
+            return False
+        lower = owner_str.strip().lower()
+        if lower == person.id.lower():
+            return True
+        return any(alias.lower() == lower for alias in person.owner_aliases)
+
+    def _compute_workload(self, person, workspace_id: str) -> dict:
+        """Compute ownership counts for a person across all domains."""
+        departments = self.department_registry.list()
+        caps = self.context_engine.capability_engine.registry.list()
+        ops = self.operation_store.list(workspace_id) if self.operation_store else []
+
+        owned_depts = [d for d in departments if self._owner_matches(d.owner, person)]
+        owned_caps = [c for c in caps if self._owner_matches(c.owner, person)]
+        active_ops = [
+            o for o in ops
+            if self._owner_matches(o.extra_fields.get("owner"), person)
+            and o.status in ("created", "executing")
+        ]
+        blocked_ops = []
+        if self.heartbeat_store:
+            for op in active_ops:
+                latest = get_latest(self.heartbeat_store, workspace_id, op.id)
+                if latest and latest.status == "blocked":
+                    blocked_ops.append(op)
+
+        return {
+            "owned_departments": len(owned_depts),
+            "owned_capabilities": len(owned_caps),
+            "active_operations": len(active_ops),
+            "blocked_operations": len(blocked_ops),
+            "_depts": owned_depts,
+            "_caps": owned_caps,
+            "_ops": active_ops,
+        }
+
+    def list_people(self, workspace_id: str) -> list[dict]:
+        """Return all people with computed workload metrics."""
+        self.validate_workspace(workspace_id)
+        people = self.people_registry.list()
+        result = []
+        for person in people:
+            workload = self._compute_workload(person, workspace_id)
+            d = self._serialize_person_summary(person)
+            d["owned_departments"] = workload["owned_departments"]
+            d["owned_capabilities"] = workload["owned_capabilities"]
+            d["active_operations"] = workload["active_operations"]
+            d["blocked_operations"] = workload["blocked_operations"]
+            result.append(d)
+        return result
+
+    def get_person(self, workspace_id: str, person_id: str) -> dict | None:
+        """Return full person detail with ownership breakdown."""
+        self.validate_workspace(workspace_id)
+        person = self.people_registry.get(person_id)
+        if person is None:
+            return None
+        workload = self._compute_workload(person, workspace_id)
+        d = self._serialize_person(person)
+        d["departments"] = [
+            {"id": dept.id, "name": dept.name}
+            for dept in workload["_depts"]
+        ]
+        d["capabilities"] = [
+            {"id": c.id, "name": c.name}
+            for c in workload["_caps"]
+        ]
+        d["operations"] = [
+            {"id": o.id, "request": o.request, "status": o.status}
+            for o in workload["_ops"]
+        ]
+        d["workload"] = {
+            "owned_departments": workload["owned_departments"],
+            "owned_capabilities": workload["owned_capabilities"],
+            "active_operations": workload["active_operations"],
+            "blocked_operations": workload["blocked_operations"],
+        }
+        return d
+
+    @staticmethod
+    def _serialize_person_summary(person) -> dict:
+        return {
+            "id": person.id,
+            "name": person.name,
+            "title": person.title,
+            "department_ids": person.department_ids,
+            "status": person.status,
+        }
+
+    @staticmethod
+    def _serialize_person(person) -> dict:
+        return {
+            "id": person.id,
+            "name": person.name,
+            "title": person.title,
+            "department_ids": person.department_ids,
+            "email": person.email,
+            "status": person.status,
+            "responsibilities": person.responsibilities,
+            "owner_aliases": person.owner_aliases,
         }
 
     # -- Jobs ------------------------------------------------------------------

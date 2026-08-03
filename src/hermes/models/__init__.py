@@ -24,6 +24,7 @@ from hermes.models.operation import InvalidTransitionError, Operation, transitio
 from hermes.models.operation_progress import OperationProgress
 from hermes.models.opportunity import Opportunity
 from hermes.models.organization import Organization
+from hermes.models.person import Person
 from hermes.models.plan import Plan
 from hermes.models.profile import Profile
 from hermes.models.project import Project
@@ -68,6 +69,7 @@ __all__ = [
     "OperationProgress",
     "Opportunity",
     "Organization",
+    "Person",
     "Plan",
     "Profile",
     "Project",

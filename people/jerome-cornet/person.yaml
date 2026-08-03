@@ -1,0 +1,17 @@
+id: jerome-cornet
+name: Jerome Cornet
+title: Founder & CEO
+department_ids:
+  - business
+email: jerome@avanzia.com
+status: active
+responsibilities:
+  - strategy
+  - investment
+  - architecture-review
+  - operations-oversight
+owner_aliases:
+  - Founder
+  - CEO
+  - Chief Executive Officer
+  - Owner

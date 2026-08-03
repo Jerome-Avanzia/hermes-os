@@ -520,6 +520,24 @@ async def create_heartbeat(
     return JSONResponse(status_code=201, content=result)
 
 
+@app.get("/v1/workspaces/{workspace_id}/people")
+async def list_people(workspace_id: str) -> list[dict]:
+    """List all organizational people with workload metrics."""
+    return _hermes_service.list_people(workspace_id)
+
+
+@app.get("/v1/workspaces/{workspace_id}/people/{person_id}")
+async def get_person(workspace_id: str, person_id: str) -> JSONResponse:
+    """Return full person detail with ownership breakdown."""
+    person = _hermes_service.get_person(workspace_id, person_id)
+    if person is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Person not found: {person_id}"},
+        )
+    return JSONResponse(content=person)
+
+
 @app.get("/v1/workspaces/{workspace_id}/departments")
 async def list_departments(workspace_id: str) -> list[dict]:
     """List all departments with aggregate metrics."""

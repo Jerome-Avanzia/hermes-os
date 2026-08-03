@@ -1989,6 +1989,148 @@ def test_ui_sops_has_back_button():
     assert "sop-back" in resp.text
 
 
+# -- People API (Sprint 38) ---------------------------------------------------
+
+
+def test_get_people_returns_200():
+    service = MagicMock()
+    service.list_people.return_value = [
+        {"id": "jerome-cornet", "name": "Jerome Cornet", "title": "Founder & CEO",
+         "department_ids": ["business"], "status": "active",
+         "owned_departments": 1, "owned_capabilities": 2,
+         "active_operations": 0, "blocked_operations": 0},
+    ]
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/people")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    service.list_people.assert_called_once_with(WS)
+
+
+def test_get_people_has_workload_metrics():
+    service = MagicMock()
+    service.list_people.return_value = [
+        {"id": "jerome-cornet", "name": "Jerome Cornet", "title": "CEO",
+         "department_ids": [], "status": "active",
+         "owned_departments": 1, "owned_capabilities": 2,
+         "active_operations": 3, "blocked_operations": 1},
+    ]
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/people")
+    person = resp.json()[0]
+    assert "owned_departments" in person
+    assert "owned_capabilities" in person
+    assert "active_operations" in person
+    assert "blocked_operations" in person
+
+
+def test_get_person_detail_returns_200():
+    service = MagicMock()
+    service.get_person.return_value = {
+        "id": "jerome-cornet", "name": "Jerome Cornet", "title": "Founder & CEO",
+        "department_ids": ["business"], "email": "jerome@avanzia.com",
+        "status": "active", "responsibilities": ["strategy"],
+        "owner_aliases": ["Founder", "CEO"],
+        "departments": [{"id": "business", "name": "Business"}],
+        "capabilities": [], "operations": [],
+        "workload": {"owned_departments": 1, "owned_capabilities": 0,
+                     "active_operations": 0, "blocked_operations": 0},
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/people/jerome-cornet")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "jerome-cornet"
+    assert "workload" in resp.json()
+    assert "departments" in resp.json()
+
+
+def test_get_person_not_found_returns_404():
+    service = MagicMock()
+    service.get_person.return_value = None
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/people/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_get_person_has_department_ids_list():
+    """Amendment 2: department_ids is a list, not a single string."""
+    service = MagicMock()
+    service.get_person.return_value = {
+        "id": "eng", "name": "Eng", "title": "CTO",
+        "department_ids": ["technology", "platform"],
+        "email": None, "status": "active",
+        "responsibilities": [], "owner_aliases": [],
+        "departments": [], "capabilities": [], "operations": [],
+        "workload": {"owned_departments": 0, "owned_capabilities": 0,
+                     "active_operations": 0, "blocked_operations": 0},
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/people/eng")
+    assert isinstance(resp.json()["department_ids"], list)
+    assert len(resp.json()["department_ids"]) == 2
+
+
+# -- UI: People view (Sprint 38) ----------------------------------------------
+
+
+def test_ui_people_view_exists():
+    resp = client.get("/")
+    assert 'data-view="people"' in resp.text
+    assert 'id="view-people"' in resp.text
+
+
+def test_ui_people_nav_item():
+    resp = client.get("/")
+    assert ">People</div>" in resp.text or "People" in resp.text
+
+
+def test_ui_people_renders_list():
+    resp = client.get("/")
+    assert "loadPeople" in resp.text
+    assert "renderPeopleList" in resp.text
+
+
+def test_ui_people_renders_detail():
+    resp = client.get("/")
+    assert "renderPersonDetail" in resp.text
+    assert "loadPersonDetail" in resp.text
+
+
+def test_ui_people_shows_workload():
+    resp = client.get("/")
+    assert "owned_departments" in resp.text or "workload" in resp.text
+
+
+def test_ui_people_has_back_button():
+    resp = client.get("/")
+    assert "person-back" in resp.text
+
+
+def test_ui_people_cross_navigates_to_departments():
+    resp = client.get("/")
+    assert "person-dept-link" in resp.text
+
+
+def test_ui_people_cross_navigates_to_capabilities():
+    resp = client.get("/")
+    assert "person-cap-link" in resp.text
+
+
+def test_ui_people_cross_navigates_to_operations():
+    resp = client.get("/")
+    assert "person-op-link" in resp.text
+
+
+def test_ui_people_shows_responsibilities():
+    resp = client.get("/")
+    assert "person.responsibilities" in resp.text
+
+
+def test_ui_people_shows_blocked_highlight():
+    resp = client.get("/")
+    assert "blocked_operations" in resp.text
+
+
 # -- Departments API (Sprint 33) ----------------------------------------------
 
 
