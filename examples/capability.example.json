@@ -1,0 +1,15 @@
+{
+  "id": "copywriting",
+  "name": "Copywriting",
+  "version": "1.0.0",
+  "description": "Drafts and improves marketing copy.",
+  "status": "active",
+  "provides": ["marketing copy", "website copy"],
+  "keywords": ["copywriting", "copy", "content", "homepage copy"],
+  "inputs": ["project brief", "brand guidelines", "target audience"],
+  "outputs": ["marketing copy draft", "revision notes"],
+  "sop_ref": null,
+  "skill_id": "copywriting",
+  "owner": "Marketing",
+  "depends_on": []
+}

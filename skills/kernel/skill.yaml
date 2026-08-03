@@ -1,11 +1,11 @@
 id: kernel
 name: Kernel
 version: 1.0.0
+status: active
+owner: Operations
 
 capabilities:
   - kernel
-
-keywords: []
 
 description: Default reasoning capability. Used when no specialist skill matches the task.
 
@@ -14,3 +14,10 @@ provides:
   - business analysis
   - planning
   - review
+
+inputs: []
+outputs: []
+
+keywords: []
+
+depends_on: []

@@ -1,6 +1,8 @@
 id: nextjs
 name: Next.js
 version: 1.0.0
+status: active
+owner: Technology
 
 capabilities:
   - nextjs
@@ -10,8 +12,19 @@ description: Implements Next.js and React frontend work.
 provides:
   - next.js development
   - react development
+
+inputs:
+  - design specification
+  - component requirements
+
+outputs:
+  - React components
+  - page implementations
+
 keywords:
   - nextjs
   - next.js
   - react
   - frontend
+
+depends_on: []

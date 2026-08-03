@@ -471,6 +471,54 @@ class HermesService:
             "updated_at": d.updated_at,
         }
 
+    # -- Capability Runtime (Sprint 31) -----------------------------------------
+
+    def list_capabilities(self, workspace_id: str) -> list[dict]:
+        """Return all organizational capabilities from the registry."""
+        self.validate_workspace(workspace_id)
+        registry = self.context_engine.capability_engine.registry
+        return [self._serialize_capability_summary(c) for c in registry.list()]
+
+    def get_capability(self, workspace_id: str, capability_id: str) -> dict | None:
+        """Return full detail for a single capability, or None."""
+        self.validate_workspace(workspace_id)
+        registry = self.context_engine.capability_engine.registry
+        cap = registry.get(capability_id)
+        if cap is None:
+            return None
+        return self._serialize_capability(cap)
+
+    @staticmethod
+    def _serialize_capability_summary(c) -> dict:
+        return {
+            "id": c.id,
+            "name": c.name,
+            "version": c.version,
+            "description": c.description,
+            "status": c.status,
+            "provides": c.provides,
+        }
+
+    @staticmethod
+    def _serialize_capability(c) -> dict:
+        return {
+            "id": c.id,
+            "name": c.name,
+            "version": c.version,
+            "description": c.description,
+            "status": c.status,
+            "provides": c.provides,
+            "inputs": c.inputs,
+            "outputs": c.outputs,
+            "keywords": c.keywords,
+            "sop_ref": c.sop_ref,
+            "skill_id": c.skill_id,
+            "owner": c.owner,
+            "depends_on": c.depends_on,
+        }
+
+    # -- Jobs ------------------------------------------------------------------
+
     def list_jobs(self, workspace_id: str) -> list[dict]:
         """Return all Jobs for a workspace, ordered by ID."""
         self.validate_workspace(workspace_id)

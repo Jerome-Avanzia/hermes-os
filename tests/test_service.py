@@ -761,3 +761,63 @@ def test_serialize_review_includes_lessons(tmp_path):
     assert "lessons" in serialized
     assert len(serialized["lessons"]) == 1
     assert serialized["lessons"][0]["id"] == "LES-001"
+
+
+# -- Sprint 31: Capability Runtime -------------------------------------------
+
+
+def test_list_capabilities_delegates_to_registry():
+    service, mocks = _mocked_service()
+    from hermes.kernel.capability_registry import CapabilityRegistry
+    from hermes.models import Capability
+
+    reg = MagicMock(spec=CapabilityRegistry)
+    reg.list.return_value = [
+        Capability(
+            id="python", name="Python", version="1.0.0",
+            provides=["python dev"], keywords=["python"],
+            description="Dev", status="active", skill_id="python",
+        ),
+    ]
+    mocks["context_engine"].capability_engine.registry = reg
+
+    result = service.list_capabilities("AVANZIA")
+    assert len(result) == 1
+    assert result[0]["id"] == "python"
+    assert result[0]["status"] == "active"
+    reg.list.assert_called_once()
+
+
+def test_get_capability_delegates_to_registry():
+    service, mocks = _mocked_service()
+    from hermes.kernel.capability_registry import CapabilityRegistry
+    from hermes.models import Capability
+
+    reg = MagicMock(spec=CapabilityRegistry)
+    reg.get.return_value = Capability(
+        id="copywriting", name="Copywriting", version="1.0.0",
+        provides=["marketing copy"], keywords=["copy"],
+        description="Drafts copy", status="active", skill_id="copywriting",
+        inputs=["brief"], outputs=["draft"], owner="Marketing",
+        depends_on=["brand-strategy"],
+    )
+    mocks["context_engine"].capability_engine.registry = reg
+
+    result = service.get_capability("AVANZIA", "copywriting")
+    assert result is not None
+    assert result["id"] == "copywriting"
+    assert result["inputs"] == ["brief"]
+    assert result["outputs"] == ["draft"]
+    assert result["owner"] == "Marketing"
+    assert result["depends_on"] == ["brand-strategy"]
+
+
+def test_get_capability_not_found_returns_none():
+    service, mocks = _mocked_service()
+    from hermes.kernel.capability_registry import CapabilityRegistry
+
+    reg = MagicMock(spec=CapabilityRegistry)
+    reg.get.return_value = None
+    mocks["context_engine"].capability_engine.registry = reg
+
+    assert service.get_capability("AVANZIA", "nonexistent") is None

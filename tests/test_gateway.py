@@ -1789,3 +1789,108 @@ def test_ui_fail_operation_posts_to_endpoint():
     """failOperation function posts to /operations/{id}/fail."""
     resp = client.get("/")
     assert "/fail" in resp.text
+
+
+# -- Capabilities API (Sprint 31) -------------------------------------------
+
+
+def test_get_capabilities_returns_200():
+    service = MagicMock()
+    service.list_capabilities.return_value = [
+        {"id": "python", "name": "Python", "version": "1.0.0", "description": "Dev", "status": "active", "provides": []},
+    ]
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/capabilities")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    service.list_capabilities.assert_called_once_with(WS)
+
+
+def test_get_capabilities_has_required_fields():
+    service = MagicMock()
+    service.list_capabilities.return_value = [
+        {"id": "python", "name": "Python", "version": "1.0.0", "description": "Dev", "status": "active", "provides": ["python development"]},
+    ]
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/capabilities")
+    cap = resp.json()[0]
+    assert "id" in cap
+    assert "name" in cap
+    assert "status" in cap
+
+
+def test_get_capability_detail_returns_200():
+    service = MagicMock()
+    service.get_capability.return_value = {
+        "id": "python", "name": "Python", "version": "1.0.0",
+        "description": "Dev", "status": "active", "provides": [],
+        "inputs": [], "outputs": [], "keywords": [], "sop_ref": None,
+        "skill_id": "python", "owner": "Technology", "depends_on": [],
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/capabilities/python")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "python"
+    assert resp.json()["owner"] == "Technology"
+
+
+def test_get_capability_not_found_returns_404():
+    service = MagicMock()
+    service.get_capability.return_value = None
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/capabilities/nonexistent")
+    assert resp.status_code == 404
+
+
+# -- UI: Capabilities view (Sprint 31) --------------------------------------
+
+
+def test_ui_capabilities_view_exists():
+    resp = client.get("/")
+    assert 'data-view="capabilities"' in resp.text
+    assert 'id="view-capabilities"' in resp.text
+
+
+def test_ui_capabilities_replaces_placeholder():
+    """The old Skills 'Coming soon' placeholder should be gone."""
+    resp = client.get("/")
+    # The old skills placeholder should not exist
+    assert 'id="view-skills"' not in resp.text
+
+
+def test_ui_capabilities_renders_list():
+    resp = client.get("/")
+    assert "loadCapabilities" in resp.text
+    assert "renderCapabilityList" in resp.text
+
+
+def test_ui_capabilities_renders_detail():
+    resp = client.get("/")
+    assert "renderCapabilityDetail" in resp.text
+    assert "loadCapabilityDetail" in resp.text
+
+
+def test_ui_capabilities_shows_provides_requires_outputs():
+    """UI uses Provides/Requires/Outputs labels per Founder amendment."""
+    resp = client.get("/")
+    assert "Provides" in resp.text
+    assert "Requires" in resp.text
+    assert "Outputs" in resp.text
+
+
+def test_ui_capabilities_shows_depends_on():
+    resp = client.get("/")
+    assert "Depends On" in resp.text
+
+
+def test_ui_capabilities_shows_owner():
+    resp = client.get("/")
+    assert "cap.owner" in resp.text
+
+
+def test_ui_capabilities_has_status_badges():
+    resp = client.get("/")
+    assert ".status-badge.active" in resp.text
+    assert ".status-badge.draft" in resp.text
+    assert ".status-badge.experimental" in resp.text
+    assert ".status-badge.deprecated" in resp.text

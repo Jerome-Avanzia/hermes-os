@@ -1,6 +1,8 @@
 id: python
 name: Python
 version: 1.0.0
+status: active
+owner: Technology
 
 capabilities:
   - python
@@ -9,8 +11,19 @@ description: Implements and refactors Python code.
 
 provides:
   - python development
+
+inputs:
+  - technical requirements
+  - existing codebase context
+
+outputs:
+  - Python modules
+  - test coverage
+
 keywords:
   - python
   - backend
   - script
   - pytest
+
+depends_on: []

@@ -10,6 +10,7 @@ from jsonschema import Draft202012Validator
 from hermes.models import (
     Bottleneck,
     Business,
+    Capability,
     Decision,
     ExecutiveBrief,
     Experiment,
@@ -639,3 +640,57 @@ class TestOperationBK:
         assert set(schema["required"]) == {
             "operation_id", "business_id", "title", "status", "operation_date",
         }
+
+
+# -- Capability ----------------------------------------------------------------
+
+
+class TestCapability:
+    def test_required_fields_only(self):
+        c = Capability(
+            id="python",
+            name="Python",
+            version="1.0.0",
+            provides=["python dev"],
+            keywords=["python"],
+        )
+        assert c.description == ""
+        assert c.status == "active"
+        assert c.inputs == []
+        assert c.outputs == []
+        assert c.sop_ref is None
+        assert c.owner is None
+        assert c.depends_on == []
+
+    def test_all_fields(self):
+        c = Capability(
+            id="copywriting",
+            name="Copywriting",
+            version="1.0.0",
+            provides=["marketing copy"],
+            keywords=["copy"],
+            description="Drafts copy",
+            inputs=["brief"],
+            outputs=["draft"],
+            sop_ref="sops/copy.md",
+            status="active",
+            skill_id="copywriting",
+            owner="Marketing",
+            depends_on=["brand-strategy"],
+        )
+        assert c.owner == "Marketing"
+        assert c.depends_on == ["brand-strategy"]
+
+    def test_example_validates_against_schema(self):
+        example = _load_example("capability.example.json")
+        schema = _load_schema("capability.schema.json")
+        _validate_against_schema(example, schema)
+
+    def test_schema_required_fields(self):
+        schema = _load_schema("capability.schema.json")
+        assert set(schema["required"]) == {"id", "name", "version", "status"}
+
+    def test_all_status_values_valid(self):
+        from hermes.models.capability import CAPABILITY_STATUSES
+        for status in ("draft", "active", "experimental", "deprecated"):
+            assert status in CAPABILITY_STATUSES

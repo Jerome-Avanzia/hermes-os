@@ -379,6 +379,24 @@ async def fail_operation(
     return JSONResponse(content=result)
 
 
+@app.get("/v1/workspaces/{workspace_id}/capabilities")
+async def list_capabilities(workspace_id: str) -> list[dict]:
+    """List all organizational capabilities."""
+    return _hermes_service.list_capabilities(workspace_id)
+
+
+@app.get("/v1/workspaces/{workspace_id}/capabilities/{capability_id}")
+async def get_capability(workspace_id: str, capability_id: str) -> JSONResponse:
+    """Return full detail for a single capability."""
+    cap = _hermes_service.get_capability(workspace_id, capability_id)
+    if cap is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Capability not found: {capability_id}"},
+        )
+    return JSONResponse(content=cap)
+
+
 @app.get("/v1/workspaces/{workspace_id}/jobs")
 async def list_jobs(workspace_id: str) -> list[dict]:
     """List all Jobs for the workspace."""

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-os.dev/contracts/capability.schema.json",
+  "title": "Capability",
+  "description": "Canonical Hermes OS Capability object — an organizational capability derived from a Skill manifest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "version",
+    "status"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "experimental",
+        "deprecated"
+      ]
+    },
+    "provides": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "keywords": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "inputs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "outputs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "sop_ref": {
+      "type": ["string", "null"]
+    },
+    "skill_id": {
+      "type": "string"
+    },
+    "owner": {
+      "type": ["string", "null"]
+    },
+    "depends_on": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

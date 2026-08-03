@@ -1,6 +1,8 @@
 id: copywriting
 name: Copywriting
 version: 1.0.0
+status: active
+owner: Marketing
 
 capabilities:
   - copywriting
@@ -10,8 +12,21 @@ description: Drafts and improves marketing copy.
 provides:
   - marketing copy
   - website copy
+
+inputs:
+  - project brief
+  - brand guidelines
+  - target audience
+
+outputs:
+  - marketing copy draft
+  - revision notes
+
 keywords:
   - copywriting
   - copy
   - content
   - homepage copy
+
+depends_on:
+  - brand-strategy

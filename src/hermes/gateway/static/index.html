@@ -923,6 +923,14 @@
   .status-badge.failed        { background: #2d1b1b; color: var(--red); }
   .status-badge.awaiting_escalation { background: #3a2a0a; color: #fbbf24; }
   .status-badge.rejected      { background: #2d1b1b; color: var(--red); }
+  .status-badge.active        { background: #1a2a1a; color: #86efac; }
+  .status-badge.draft         { background: var(--surface-hover); color: var(--text-muted); }
+  .status-badge.experimental  { background: #2a2a0a; color: #fbbf24; }
+  .status-badge.deprecated    { background: #2d1b1b; color: var(--red); }
+
+  .cap-tag { display: inline-block; background: var(--surface-hover); color: var(--text-muted); border-radius: 4px; padding: 2px 6px; font-size: 11px; margin: 2px; }
+  .cap-section { margin-top: 12px; }
+  .cap-section-title { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
 
   /* ── Filter bar ─────────────────────────────────── */
 
@@ -1055,7 +1063,7 @@
       <div class="nav-section-title">Knowledge</div>
       <div class="nav-item" data-view="documents">Documents</div>
       <div class="nav-item" data-view="memory">Memory</div>
-      <div class="nav-item" data-view="skills">Skills</div>
+      <div class="nav-item" data-view="capabilities">Capabilities</div>
       <div class="nav-item" data-view="mcp">MCP</div>
       <div class="nav-item" data-view="profiles">Profiles</div>
     </div>
@@ -1140,7 +1148,10 @@
         <div id="documents-detail" class="detail-view" style="display:none"></div>
       </div>
       <div id="view-memory" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Memory</div><div class="view-placeholder-sub">Coming soon</div></div></div>
-      <div id="view-skills" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Skills</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-capabilities" class="view">
+        <div id="capabilities-list" class="list-view"></div>
+        <div id="capabilities-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-mcp" class="view"><div class="view-placeholder"><div class="view-placeholder-title">MCP</div><div class="view-placeholder-sub">Coming soon</div></div></div>
       <div id="view-profiles" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Profiles</div><div class="view-placeholder-sub">Coming soon</div></div></div>
 
@@ -1199,6 +1210,7 @@
     if (name === "documents") loadDocuments();
     if (name === "operations") loadOperations();
     if (name === "jobs") loadJobs();
+    if (name === "capabilities") loadCapabilities();
   }
 
   document.querySelectorAll(".nav-item[data-view]").forEach(function (el) {
@@ -1609,6 +1621,138 @@
     overlay.appendChild(modal);
     overlay.addEventListener("click", function (e) { if (e.target === overlay) overlay.remove(); });
     document.body.appendChild(overlay);
+  }
+
+  // ── Capabilities ────────────────────────────────────
+
+  var capListEl   = document.getElementById("capabilities-list");
+  var capDetailEl = document.getElementById("capabilities-detail");
+
+  function loadCapabilities() {
+    if (!activeWorkspaceId) return;
+    capListEl.style.display = "";
+    capDetailEl.style.display = "none";
+    capListEl.innerHTML = '<div class="list-empty">Loading capabilities...</div>';
+
+    fetch(wsBase() + "/capabilities")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (caps) { renderCapabilityList(caps); })
+      .catch(function () { capListEl.innerHTML = '<div class="list-empty">Cannot load capabilities.</div>'; });
+  }
+
+  function renderCapabilityList(caps) {
+    if (caps.length === 0) {
+      capListEl.innerHTML = '<div class="list-empty">No capabilities registered.</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < caps.length; i++) {
+      var c = caps[i];
+      html += '<div class="list-item" data-cap-id="' + esc(c.id) + '" style="cursor:pointer">';
+      html += '  <div class="list-item-main">';
+      html += '    <div class="list-item-title">' + esc(c.name) + ' <span style="color:var(--text-dim);font-size:11px">v' + esc(c.version) + '</span></div>';
+      html += '    <div class="list-item-meta">' + esc(c.description || c.id) + '</div>';
+      if (c.provides && c.provides.length > 0) {
+        html += '    <div style="margin-top:4px">';
+        for (var j = 0; j < c.provides.length; j++) {
+          html += '<span class="cap-tag">' + esc(c.provides[j]) + '</span>';
+        }
+        html += '    </div>';
+      }
+      html += '  </div>';
+      html += '  <span class="status-badge ' + esc(c.status) + '">' + formatStatus(c.status) + '</span>';
+      html += '</div>';
+    }
+    capListEl.innerHTML = html;
+    capListEl.querySelectorAll("[data-cap-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadCapabilityDetail(el.dataset.capId); });
+    });
+  }
+
+  function loadCapabilityDetail(capId) {
+    capListEl.style.display = "none";
+    capDetailEl.style.display = "";
+    capDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(wsBase() + "/capabilities/" + encodeURIComponent(capId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (cap) {
+        if (!cap) { capDetailEl.innerHTML = '<div class="list-empty">Capability not found.</div>'; return; }
+        renderCapabilityDetail(cap);
+      })
+      .catch(function () { capDetailEl.innerHTML = '<div class="list-empty">Cannot load capability.</div>'; });
+  }
+
+  function renderCapabilityDetail(cap) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(cap.name) + '</div>';
+    html += '  <div class="detail-meta">' + esc(cap.id) + ' &middot; v' + esc(cap.version) + ' &middot; <span class="status-badge ' + esc(cap.status) + '">' + formatStatus(cap.status) + '</span></div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="cap-back">Back</button>';
+    html += '</div>';
+
+    if (cap.description) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Description</div>';
+      html += '  <div style="color:var(--text-main);font-size:13px">' + esc(cap.description) + '</div>';
+      html += '</div>';
+    }
+
+    // Provides
+    if (cap.provides && cap.provides.length > 0) {
+      html += '<div class="cap-section">';
+      html += '  <div class="cap-section-title">Provides</div>';
+      for (var i = 0; i < cap.provides.length; i++) {
+        html += '<span class="cap-tag">' + esc(cap.provides[i]) + '</span>';
+      }
+      html += '</div>';
+    }
+
+    // Requires (inputs)
+    if (cap.inputs && cap.inputs.length > 0) {
+      html += '<div class="cap-section">';
+      html += '  <div class="cap-section-title">Requires</div>';
+      for (var i = 0; i < cap.inputs.length; i++) {
+        html += '<span class="cap-tag">' + esc(cap.inputs[i]) + '</span>';
+      }
+      html += '</div>';
+    }
+
+    // Outputs (execution results)
+    if (cap.outputs && cap.outputs.length > 0) {
+      html += '<div class="cap-section">';
+      html += '  <div class="cap-section-title">Outputs</div>';
+      for (var i = 0; i < cap.outputs.length; i++) {
+        html += '<span class="cap-tag">' + esc(cap.outputs[i]) + '</span>';
+      }
+      html += '</div>';
+    }
+
+    // Dependencies
+    if (cap.depends_on && cap.depends_on.length > 0) {
+      html += '<div class="cap-section">';
+      html += '  <div class="cap-section-title">Depends On</div>';
+      for (var i = 0; i < cap.depends_on.length; i++) {
+        html += '<span class="cap-tag">' + esc(cap.depends_on[i]) + '</span>';
+      }
+      html += '</div>';
+    }
+
+    // Metadata
+    html += '<div class="detail-section" style="margin-top:16px">';
+    html += '  <div class="detail-section-title">Metadata</div>';
+    html += '  <div class="list-item-meta">Skill: ' + esc(cap.skill_id || "—") + '</div>';
+    if (cap.owner) html += '  <div class="list-item-meta">Owner: ' + esc(cap.owner) + '</div>';
+    if (cap.sop_ref) html += '  <div class="list-item-meta">SOP: ' + esc(cap.sop_ref) + '</div>';
+    if (cap.keywords && cap.keywords.length > 0) {
+      html += '  <div class="list-item-meta" style="margin-top:4px">Keywords: ' + cap.keywords.map(esc).join(", ") + '</div>';
+    }
+    html += '</div>';
+
+    capDetailEl.innerHTML = html;
+    document.getElementById("cap-back").addEventListener("click", function () { loadCapabilities(); });
   }
 
   // ── Business Journal ──────────────────────────────

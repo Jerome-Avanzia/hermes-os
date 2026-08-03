@@ -1,6 +1,8 @@
 id: git
 name: Git
 version: 1.0.0
+status: active
+owner: Technology
 
 capabilities:
   - git
@@ -9,8 +11,19 @@ description: Manages version control operations.
 
 provides:
   - version control
+
+inputs:
+  - repository path
+  - commit message
+
+outputs:
+  - commit reference
+  - branch status
+
 keywords:
   - git
   - commit
   - branch
   - repository
+
+depends_on: []
