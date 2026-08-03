@@ -415,7 +415,6 @@ def test_dashboard_returns_workspace_identity():
     data = resp.json()
     assert "workspace" in data
     assert "name" in data["workspace"]
-    assert "mission" in data["workspace"]
 
 
 def test_dashboard_contains_operations_section():
@@ -428,31 +427,11 @@ def test_dashboard_contains_operations_section():
     assert "total" in ops
 
 
-def test_dashboard_contains_knowledge_count():
+def test_dashboard_contains_pending_decisions():
     resp = client.get(f"{WS_PREFIX}/dashboard")
     data = resp.json()
-    assert "knowledge" in data
-    assert "count" in data["knowledge"]
-    assert data["knowledge"]["count"] > 0
-
-
-def test_dashboard_contains_repository_count():
-    resp = client.get(f"{WS_PREFIX}/dashboard")
-    data = resp.json()
-    assert "repositories" in data
-    assert "count" in data["repositories"]
-
-
-def test_dashboard_contains_kpi_summary():
-    resp = client.get(f"{WS_PREFIX}/dashboard")
-    data = resp.json()
-    assert "kpis" in data
-    kpis = data["kpis"]
-    assert "total" in kpis
-    assert "on_track" in kpis
-    assert "at_risk" in kpis
-    assert "off_track" in kpis
-    assert kpis["total"] == 8
+    assert "pending_decisions" in data
+    assert isinstance(data["pending_decisions"], int)
 
 
 def test_dashboard_contains_todays_focus():
@@ -463,32 +442,27 @@ def test_dashboard_contains_todays_focus():
     assert len(data["todays_focus"]) <= 3
 
 
-def test_dashboard_contains_risks():
+def test_dashboard_does_not_contain_removed_fields():
+    """Dashboard no longer returns KPIs, knowledge, repos, risks (Sprint 37)."""
     resp = client.get(f"{WS_PREFIX}/dashboard")
     data = resp.json()
-    assert "risks" in data
-    assert isinstance(data["risks"], list)
-
-
-def test_dashboard_knowledge_matches_knowledge_api():
-    """Dashboard knowledge count must match the Knowledge API dynamically."""
-    dashboard_resp = client.get(f"{WS_PREFIX}/dashboard")
-    knowledge_resp = client.get(f"{WS_PREFIX}/knowledge")
-    assert dashboard_resp.json()["knowledge"]["count"] == len(knowledge_resp.json())
+    assert "kpis" not in data
+    assert "knowledge" not in data
+    assert "repositories" not in data
+    assert "risks" not in data
+    assert "execution_status" not in data
+    assert "warnings" not in data
 
 
 def test_dashboard_delegates_to_service():
     service = MagicMock()
     service.get_dashboard.return_value = {
         "operations": {"active": 0, "completed_today": 0, "total": 0},
-        "knowledge": {"count": 5},
-        "repositories": {"count": 2},
-        "workspace": {"name": "Test", "mission": ""},
-        "kpis": {"total": 0, "on_track": 0, "at_risk": 0, "off_track": 0},
+        "workspace": {"name": "Test"},
         "todays_focus": [],
-        "risks": [],
-        "execution_status": "completed",
-        "warnings": [],
+        "pending_decisions": 3,
+        "heartbeat_pulse": {"blocked": 0, "stale": 0, "oldest_stale_hours": 0.0},
+        "notifications": {"unread_count": 0, "critical_count": 0, "warning_count": 0},
     }
 
     with patch("hermes.gateway.app._hermes_service", service):
@@ -496,7 +470,7 @@ def test_dashboard_delegates_to_service():
 
     assert resp.status_code == 200
     service.get_dashboard.assert_called_once_with(WS)
-    assert resp.json()["knowledge"]["count"] == 5
+    assert resp.json()["pending_decisions"] == 3
 
 
 # -- Brief endpoint -------------------------------------------------------
@@ -679,55 +653,42 @@ def test_ui_references_dashboard_endpoint():
     assert "/dashboard" in resp.text
 
 
-def test_ui_home_fetches_operations_for_counts():
+def test_ui_home_fetches_dashboard():
     resp = client.get("/")
-    # Home screen fetches operations in parallel with dashboard
-    assert "operationsPromise" in resp.text
-    assert "wsBase()" in resp.text
+    assert "/dashboard" in resp.text
+    assert "renderHome" in resp.text
 
 
-def test_ui_home_attention_items_are_clickable():
+def test_ui_home_has_four_executive_sections():
+    """Home dashboard is organized by four executive questions (Sprint 37)."""
     resp = client.get("/")
-    assert "home-notif-link" in resp.text
+    assert "What needs my attention?" in resp.text
+    assert "What changed?" in resp.text
+    assert "What decisions are waiting?" in resp.text
+    assert "What should I do next?" in resp.text
+
+
+def test_ui_home_notification_card_is_clickable():
+    resp = client.get("/")
+    assert "home-notif-card" in resp.text
     assert 'switchView("notifications")' in resp.text
 
 
-def test_ui_home_operations_widget_is_clickable():
+def test_ui_home_operations_card_is_clickable():
     resp = client.get("/")
-    assert "home-ops-widget" in resp.text
+    assert "home-ops-card" in resp.text
     assert 'switchView("operations")' in resp.text
 
 
-def test_ui_home_computes_active_operations():
+def test_ui_home_decisions_card_links_to_brief():
     resp = client.get("/")
-    assert "computeOpsStats" in resp.text
-    assert '"created"' in resp.text
-    assert '"executing"' in resp.text
+    assert "home-decisions-card" in resp.text
+    assert 'switchView("brief")' in resp.text
 
 
-def test_ui_home_computes_escalated_operations():
+def test_ui_home_has_heartbeat_pulse_card():
     resp = client.get("/")
-    assert '"awaiting_escalation"' in resp.text
-    assert "escalated.push" in resp.text
-
-
-def test_ui_home_computes_completed_today():
-    resp = client.get("/")
-    assert "completedToday" in resp.text
-
-
-def test_ui_home_handles_operations_failure():
-    """If Operations API fails, Home still renders with operations widget."""
-    resp = client.get("/")
-    assert "Unavailable" in resp.text
-    assert "home-ops-widget" in resp.text
-
-
-def test_ui_home_has_notification_counters():
-    """Home attention section shows compact notification counters (Sprint 36)."""
-    resp = client.get("/")
-    assert "critical_count" in resp.text or "unread_count" in resp.text
-    assert "View all" in resp.text
+    assert "home-pulse-card" in resp.text
 
 
 # -- UI: Brief screen ------------------------------------------------------
@@ -737,6 +698,34 @@ def test_ui_contains_brief_nav_item():
     resp = client.get("/")
     assert 'data-view="brief"' in resp.text
     assert "Brief" in resp.text
+
+
+def test_ui_brief_has_tab_bar():
+    """Brief view has Daily Brief and Decision Inbox tabs (Sprint 37)."""
+    resp = client.get("/")
+    assert "brief-tabs" in resp.text
+    assert "Daily Brief" in resp.text
+    assert "Decision Inbox" in resp.text
+
+
+def test_ui_brief_defaults_to_daily_brief():
+    resp = client.get("/")
+    assert 'briefActiveTab  = "daily-brief"' in resp.text or "briefActiveTab" in resp.text
+
+
+def test_ui_brief_has_narrative_daily_brief():
+    """Daily Brief renders as narrative prose (Sprint 37)."""
+    resp = client.get("/")
+    assert "renderDailyBrief" in resp.text
+    assert "brief-narrative" in resp.text
+    assert "Good morning" in resp.text
+
+
+def test_ui_brief_daily_has_inbox_link():
+    """Daily Brief links to Decision Inbox for pending recommendations."""
+    resp = client.get("/")
+    assert "brief-open-inbox" in resp.text
+    assert "Open Decision Inbox" in resp.text
 
 
 def test_ui_brief_references_brief_endpoint():

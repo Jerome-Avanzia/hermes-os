@@ -56,6 +56,8 @@ logger = logging.getLogger(__name__)
 
 _MAX_KNOWLEDGE_DOCS_IN_PROMPT = 3
 
+_SENTINEL = object()  # distinguishes "no review passed" from "review is None"
+
 _ACTION_TO_STATUS = {
     "approve": "approved",
     "reject": "closed",
@@ -678,14 +680,23 @@ class HermesService:
 
     # -- Executive Notifications (Sprint 36) -------------------------------------
 
-    def _generate_notifications(self, workspace_id: str) -> list:
-        """Compute notifications from current state and apply acknowledgements."""
-        ops = self.operation_store.list(workspace_id) if self.operation_store else []
-        review = None
-        try:
-            review = self._run_ceo_review(workspace_id)
-        except Exception:
-            pass  # CEO review may fail — notifications still work from operations
+    def _generate_notifications(
+        self, workspace_id: str,
+        ops: list | None = None,
+        review: object | None = _SENTINEL,
+    ) -> list:
+        """Compute notifications from current state and apply acknowledgements.
+
+        When *ops* and *review* are supplied the caller's already-loaded
+        data is reused — no duplicate CEO Loop execution.
+        """
+        if ops is None:
+            ops = self.operation_store.list(workspace_id) if self.operation_store else []
+        if review is _SENTINEL:
+            try:
+                review = self._run_ceo_review(workspace_id)
+            except Exception:
+                review = None  # notifications still work from operations
 
         from hermes.kernel.notification_runtime import generate_notifications as gen
         threshold = config.stale_threshold_hours()
@@ -977,19 +988,21 @@ class HermesService:
         return self._serialize_review(review)
 
     def get_dashboard(self, workspace_id: str) -> dict:
-        """Return the Workspace Home operating summary (amendment 1)."""
+        """Return the Workspace Home operating summary.
+
+        Every card answers one of four executive questions:
+          1. What needs my attention?   → notifications
+          2. What changed?              → operations, heartbeat_pulse
+          3. What decisions are waiting? → pending_decisions
+          4. What should I do next?     → todays_focus
+        """
         self.validate_workspace(workspace_id)
 
         ws_context = self.context_engine.workspace_engine.resolve(workspace_id)
         ws = ws_context.workspace
-        workspace_info = {
-            "name": ws.name or workspace_id,
-            "mission": ws.mission or "",
-        }
-        repositories = len(ws_context.repositories)
-        knowledge_docs = self.list_knowledge(workspace_id)
 
         # Live operation stats
+        ops: list = []
         ops_active = 0
         ops_completed_today = 0
         ops_total = 0
@@ -1003,23 +1016,17 @@ class HermesService:
                 if op.status == "completed" and op.updated_at.strftime("%Y-%m-%d") == today:
                     ops_completed_today += 1
 
-        # CEO Review — generated once, reused for dashboard (amendment 2)
+        # CEO Review — run once, propagated explicitly (Amendment 1)
         review = self._run_ceo_review(workspace_id)
         brief = review.brief
 
-        # KPI summary from business data
-        kpis = review.data.kpis
-        kpi_summary = {
-            "total": len(kpis),
-            "on_track": sum(1 for k in kpis if k.status == "on_track"),
-            "at_risk": sum(1 for k in kpis if k.status == "at_risk"),
-            "off_track": sum(1 for k in kpis if k.status == "off_track"),
-        }
-
-        # Top 3 priorities — "Today's Focus" (amendment 4)
+        # Top 3 priorities — "What should I do next?"
         todays_focus = brief.priorities[:3]
 
-        # Heartbeat pulse — blocked + stale counts (Sprint 35)
+        # Pending decisions — "What decisions are waiting?"
+        pending_decisions = len(review.engine_result.recommendations)
+
+        # Heartbeat pulse — "What changed?" (blocked + stale)
         heartbeat_pulse = {"blocked": 0, "stale": 0, "oldest_stale_hours": 0.0}
         if self.heartbeat_store and self.operation_store:
             threshold = config.stale_threshold_hours()
@@ -1031,7 +1038,6 @@ class HermesService:
                 heartbeat_pulse["oldest_stale_hours"] = max(
                     s.elapsed_hours for s in stale_ops
                 )
-            # Count blocked: active ops whose latest heartbeat is "blocked"
             for op in ops:
                 if op.status in ("created", "executing", "awaiting_escalation"):
                     latest = get_latest(self.heartbeat_store, workspace_id, op.id)
@@ -1039,39 +1045,27 @@ class HermesService:
                         heartbeat_pulse["blocked"] += 1
 
         return {
-            "workspace": workspace_info,
+            "workspace": {"name": ws.name or workspace_id},
             "operations": {
                 "active": ops_active,
                 "completed_today": ops_completed_today,
                 "total": ops_total,
             },
-            "knowledge": {
-                "count": len(knowledge_docs),
-            },
-            "repositories": {
-                "count": repositories,
-            },
-            "kpis": kpi_summary,
             "todays_focus": todays_focus,
-            "risks": brief.risks,
-            "execution_status": review.execution_status,
-            "warnings": review.all_warnings,
+            "pending_decisions": pending_decisions,
             "heartbeat_pulse": heartbeat_pulse,
-            "notifications": self._compute_notification_summary(workspace_id, ops, review),
+            "notifications": self._compute_notification_summary(
+                workspace_id, ops, review,
+            ),
         }
 
     def _compute_notification_summary(
         self, workspace_id: str, ops: list, review: object,
     ) -> dict:
-        """Compute compact notification counters for the dashboard."""
-        threshold = config.stale_threshold_hours()
-        notifications = generate_notifications(
-            ops, self.heartbeat_store, review, workspace_id, threshold,
+        """Compact notification counters — reuses caller's review (no extra CEO Loop)."""
+        notifications = self._generate_notifications(
+            workspace_id, ops=ops, review=review,
         )
-        if self.acknowledgement_store:
-            acked = self.acknowledgement_store.load(workspace_id)
-            apply_acknowledgements(notifications, acked)
-
         unread = [n for n in notifications if not n.acknowledged]
         critical = sum(1 for n in unread if n.severity == "critical")
         warning = sum(1 for n in unread if n.severity == "warning")

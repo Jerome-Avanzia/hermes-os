@@ -619,6 +619,124 @@
     font-style: italic;
   }
 
+  /* ── Dashboard sections (Sprint 37) ───────────── */
+
+  .dash-section-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin: 20px 0 8px;
+  }
+
+  .dash-section-title:first-child { margin-top: 0; }
+
+  .dash-cards {
+    display: flex;
+    gap: 16px;
+  }
+
+  .dash-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    flex: 1;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+
+  .dash-card:hover { border-color: var(--accent); }
+
+  /* ── Brief tabs (Sprint 37) ───────────────────── */
+
+  .brief-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+
+  .brief-tab {
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .brief-tab:hover { color: var(--text); }
+
+  .brief-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  /* ── Daily Brief narrative (Sprint 37) ─────────── */
+
+  .brief-narrative {
+    max-width: 720px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+
+  .brief-narrative h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 28px 0 12px;
+  }
+
+  .brief-narrative h2:first-child { margin-top: 0; }
+
+  .brief-narrative p {
+    margin: 0 0 16px;
+    color: var(--text-muted);
+  }
+
+  .brief-narrative ul {
+    margin: 0 0 16px;
+    padding-left: 20px;
+  }
+
+  .brief-narrative li {
+    margin-bottom: 6px;
+    color: var(--text-muted);
+  }
+
+  .brief-narrative .callout {
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin: 0 0 16px;
+    font-size: 13px;
+  }
+
+  .brief-narrative .callout.critical {
+    border-color: #7f1d1d;
+    background: rgba(127, 29, 29, 0.15);
+  }
+
+  .brief-narrative .callout.warning {
+    border-color: #78350f;
+    background: rgba(120, 53, 15, 0.15);
+  }
+
+  .brief-narrative .inbox-link {
+    display: inline-block;
+    margin-top: 8px;
+    color: var(--accent);
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  .brief-narrative .inbox-link:hover { text-decoration: underline; }
+
   .model-name {
     font-size: 24px;
     font-weight: 600;
@@ -1109,9 +1227,7 @@
       <!-- Home view (Workspace Home) -->
       <div id="view-home" class="view active">
         <div id="home-header"></div>
-        <div id="home-attention"></div>
-        <div id="home-focus"></div>
-        <div class="widget-row" id="home-widgets"></div>
+        <div id="home-dashboard"></div>
       </div>
 
       <!-- Notifications view -->
@@ -1121,6 +1237,10 @@
 
       <!-- Brief view (Executive Brief) -->
       <div id="view-brief" class="view">
+        <div class="brief-tabs" id="brief-tabs">
+          <div class="brief-tab active" data-tab="daily-brief">Daily Brief</div>
+          <div class="brief-tab" data-tab="decision-inbox">Decision Inbox</div>
+        </div>
         <div id="brief-content"></div>
       </div>
 
@@ -1187,11 +1307,11 @@
   var profileSel   = document.getElementById("profile-select");
   var workspaceSel = document.getElementById("workspace-select");
   var sessionsList = document.getElementById("sessions-list");
-  var homeHeader    = document.getElementById("home-header");
-  var homeAttention = document.getElementById("home-attention");
-  var homeFocus     = document.getElementById("home-focus");
-  var homeWidgets   = document.getElementById("home-widgets");
-  var briefContent  = document.getElementById("brief-content");
+  var homeHeader      = document.getElementById("home-header");
+  var homeDashboard   = document.getElementById("home-dashboard");
+  var briefContent    = document.getElementById("brief-content");
+  var briefTabs       = document.getElementById("brief-tabs");
+  var briefActiveTab  = "daily-brief";
   var journalContent = document.getElementById("journal-content");
 
   var history = [];
@@ -1286,178 +1406,134 @@
 
   function loadHome() {
     if (!activeWorkspaceId) return;
-    // Fetch dashboard (includes CEO Review), operations, and brief in parallel
-    var dashboardPromise = fetch(wsBase() + "/dashboard")
+    fetch(wsBase() + "/dashboard")
       .then(function (r) { return r.ok ? r.json() : null; })
-      .catch(function () { return null; });
-
-    var operationsPromise = fetch(wsBase() + "/operations")
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .catch(function () { return null; });
-
-    Promise.all([dashboardPromise, operationsPromise]).then(function (results) {
-      var data = results[0];
-      var opsList = results[1];
-      if (!data) return;
-      renderHome(data, opsList);
-    });
+      .catch(function () { return null; })
+      .then(function (data) {
+        if (!data) return;
+        renderHome(data);
+      });
   }
 
-  function computeOpsStats(opsList) {
-    var today = new Date().toISOString().slice(0, 10);
-    var active = 0;
-    var completedToday = 0;
-    var escalated = [];
-
-    for (var i = 0; i < opsList.length; i++) {
-      var op = opsList[i];
-      if (op.status === "created" || op.status === "executing") active++;
-      if (op.status === "completed" && op.updated_at && op.updated_at.slice(0, 10) === today) completedToday++;
-      if (op.status === "awaiting_escalation") escalated.push(op);
-    }
-
-    return { active: active, completedToday: completedToday, total: opsList.length, escalated: escalated };
-  }
-
-  function renderHome(data, opsList) {
+  function renderHome(data) {
     var ws = data.workspace || {};
-    var knowledge = data.knowledge || {};
-    var repositories = data.repositories || {};
-    var kpis = data.kpis || {};
+    var ops = data.operations || {};
     var focus = data.todays_focus || [];
-    var opsAvailable = opsList !== null;
-    var opsStats = opsAvailable ? computeOpsStats(opsList) : null;
+    var notifs = data.notifications || {};
+    var pulse = data.heartbeat_pulse || {};
+    var pending = data.pending_decisions || 0;
 
     // Header
     homeHeader.textContent = ws.name || "Hermes";
 
-    // Attention section — compact notification counters (Sprint 36)
-    var notifs = data.notifications || {};
+    var html = "";
+
+    // ── What needs my attention? ──────────────────────
+    html += '<div class="dash-section-title">What needs my attention?</div>';
+    html += '<div class="dash-cards">';
+
     var unread = notifs.unread_count || 0;
     var critical = notifs.critical_count || 0;
     var warning = notifs.warning_count || 0;
 
+    html += '<div class="dash-card" id="home-notif-card">';
+    html += '<div class="widget-title">Notifications</div>';
     if (unread > 0) {
-      var ahtml = '<div id="home-notif-link" style="cursor:pointer;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:6px;display:flex;align-items:center;gap:12px">';
-      if (critical > 0) {
-        ahtml += '<span style="background:#fca5a5;color:#1a1a2e;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600">' + critical + ' critical</span>';
-      }
-      if (warning > 0) {
-        ahtml += '<span style="background:#fcd34d;color:#1a1a2e;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600">' + warning + ' warning</span>';
-      }
-      if (unread - critical - warning > 0) {
-        ahtml += '<span style="color:var(--text-muted);font-size:12px">' + (unread - critical - warning) + ' info</span>';
-      }
-      ahtml += '<span style="color:var(--text-dim);font-size:12px;margin-left:auto">View all &rarr;</span>';
-      ahtml += '</div>';
-      homeAttention.innerHTML = ahtml;
-      document.getElementById("home-notif-link").addEventListener("click", function () {
-        switchView("notifications");
-      });
+      html += '<div class="widget-value">' + unread + '</div>';
+      html += '<div class="widget-sub">unread</div>';
+      var parts = [];
+      if (critical > 0) parts.push('<span style="color:#fca5a5">' + critical + ' critical</span>');
+      if (warning > 0) parts.push('<span style="color:#fcd34d">' + warning + ' warning</span>');
+      var info = unread - critical - warning;
+      if (info > 0) parts.push(info + ' info');
+      html += '<div class="widget-sub">' + parts.join(' &middot; ') + '</div>';
     } else {
-      homeAttention.textContent = "No items need your attention.";
-    }
-
-    // Today's Focus — Top 3 priorities (amendment 4)
-    if (focus.length > 0) {
-      var fhtml = '<div class="focus-title">Today\'s Focus</div>';
-      for (var fi = 0; fi < focus.length; fi++) {
-        var raw = focus[fi];
-        var action = "monitor";
-        if (raw.indexOf("(decide)") !== -1) action = "decide";
-        else if (raw.indexOf("(experiment)") !== -1) action = "experiment";
-        fhtml += '<div class="focus-item">';
-        fhtml += '<span class="focus-action ' + action + '">' + esc(action) + '</span>';
-        fhtml += '<span>' + esc(raw.replace(/\s*\((decide|experiment|monitor)\)\s*$/, "")) + '</span>';
-        fhtml += '</div>';
-      }
-      homeFocus.innerHTML = fhtml;
-    } else {
-      homeFocus.innerHTML = '<div class="focus-title">Today\'s Focus</div><div style="font-size:13px;color:var(--text-dim)">No priorities available.</div>';
-    }
-
-    // Operating state widgets
-    var html = "";
-
-    html += '<div class="widget" id="home-ops-widget" style="cursor:pointer">';
-    html += '  <div class="widget-title">Operations</div>';
-    if (opsAvailable) {
-      html += '  <div class="widget-value">' + opsStats.active + '</div>';
-      html += '  <div class="widget-sub">active</div>';
-      html += '  <div class="widget-sub">' + opsStats.completedToday + ' completed today &middot; ' + opsStats.total + ' total</div>';
-    } else {
-      html += '  <div class="widget-coming-soon">Unavailable</div>';
+      html += '<div class="widget-value" style="color:#6ee7b7">0</div>';
+      html += '<div class="widget-sub">All clear</div>';
     }
     html += '</div>';
+    html += '</div>';
 
-    // Heartbeat Pulse widget (Sprint 35)
-    var pulse = data.heartbeat_pulse || {};
-    html += '<div class="widget" id="home-pulse-widget" style="cursor:pointer">';
-    html += '  <div class="widget-title">Heartbeat Pulse</div>';
+    // ── What changed? ─────────────────────────────────
+    html += '<div class="dash-section-title">What changed?</div>';
+    html += '<div class="dash-cards">';
+
+    html += '<div class="dash-card" id="home-ops-card">';
+    html += '<div class="widget-title">Operations</div>';
+    html += '<div class="widget-value">' + (ops.active || 0) + '</div>';
+    html += '<div class="widget-sub">active</div>';
+    html += '<div class="widget-sub">' + (ops.completed_today || 0) + ' completed today &middot; ' + (ops.total || 0) + ' total</div>';
+    html += '</div>';
+
+    html += '<div class="dash-card" id="home-pulse-card">';
+    html += '<div class="widget-title">Heartbeat Pulse</div>';
     if (pulse.blocked > 0) {
-      html += '  <div class="widget-value" style="color:#fca5a5">' + pulse.blocked + '</div>';
-      html += '  <div class="widget-sub" style="color:#fca5a5">blocked</div>';
+      html += '<div class="widget-value" style="color:#fca5a5">' + pulse.blocked + '</div>';
+      html += '<div class="widget-sub" style="color:#fca5a5">blocked</div>';
     } else {
-      html += '  <div class="widget-value" style="color:#6ee7b7">0</div>';
-      html += '  <div class="widget-sub">blocked</div>';
+      html += '<div class="widget-value" style="color:#6ee7b7">0</div>';
+      html += '<div class="widget-sub">blocked</div>';
     }
     var staleSub = pulse.stale + ' stale';
     if (pulse.oldest_stale_hours > 0) {
       staleSub += ' &middot; oldest ' + Math.round(pulse.oldest_stale_hours) + 'h';
     }
-    html += '  <div class="widget-sub">' + staleSub + '</div>';
+    html += '<div class="widget-sub">' + staleSub + '</div>';
     html += '</div>';
 
-    html += '<div class="widget">';
-    html += '  <div class="widget-title">KPIs</div>';
-    html += '  <div class="widget-value">' + (kpis.total || 0) + '</div>';
-    html += '  <div class="widget-sub">';
-    html += '    <span style="color:#6ee7b7">' + (kpis.on_track || 0) + ' on track</span>';
-    html += '    <span style="margin:0 4px">&middot;</span>';
-    html += '    <span style="color:#fcd34d">' + (kpis.at_risk || 0) + ' at risk</span>';
-    if (kpis.off_track) {
-      html += '    <span style="margin:0 4px">&middot;</span>';
-      html += '    <span style="color:#fca5a5">' + kpis.off_track + ' off track</span>';
+    html += '</div>';
+
+    // ── What decisions are waiting? ───────────────────
+    html += '<div class="dash-section-title">What decisions are waiting?</div>';
+    html += '<div class="dash-cards">';
+
+    html += '<div class="dash-card" id="home-decisions-card">';
+    html += '<div class="widget-title">Pending Decisions</div>';
+    if (pending > 0) {
+      html += '<div class="widget-value" style="color:#fcd34d">' + pending + '</div>';
+      html += '<div class="widget-sub">recommendations awaiting review</div>';
+    } else {
+      html += '<div class="widget-value" style="color:#6ee7b7">0</div>';
+      html += '<div class="widget-sub">No pending decisions</div>';
     }
-    html += '  </div>';
     html += '</div>';
 
-    html += '<div class="widget">';
-    html += '  <div class="widget-title">Knowledge</div>';
-    html += '  <div class="widget-value">' + (knowledge.count || 0) + '</div>';
-    html += '  <div class="widget-sub">documents</div>';
     html += '</div>';
 
-    html += '<div class="widget">';
-    html += '  <div class="widget-title">Repositories</div>';
-    html += '  <div class="widget-value">' + (repositories.count || 0) + '</div>';
-    html += '  <div class="widget-sub">connected</div>';
-    html += '</div>';
+    // ── What should I do next? ────────────────────────
+    html += '<div class="dash-section-title">What should I do next?</div>';
 
-    if (ws.mission) {
-      html += '<div class="widget">';
-      html += '  <div class="widget-title">Mission</div>';
-      html += '  <div style="font-size:13px;color:var(--text-muted);line-height:1.5">' + esc(ws.mission) + '</div>';
+    if (focus.length > 0) {
+      html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px 20px">';
+      for (var fi = 0; fi < focus.length; fi++) {
+        var raw = focus[fi];
+        var action = "monitor";
+        if (raw.indexOf("(decide)") !== -1) action = "decide";
+        else if (raw.indexOf("(experiment)") !== -1) action = "experiment";
+        html += '<div class="focus-item">';
+        html += '<span class="focus-action ' + action + '">' + esc(action) + '</span>';
+        html += '<span>' + esc(raw.replace(/\s*\((decide|experiment|monitor)\)\s*$/, "")) + '</span>';
+        html += '</div>';
+      }
       html += '</div>';
+    } else {
+      html += '<div style="font-size:13px;color:var(--text-dim);padding:12px 0">No priorities available.</div>';
     }
 
-    homeWidgets.innerHTML = html;
+    homeDashboard.innerHTML = html;
 
-    // Operations widget click-through
-    var opsWidget = document.getElementById("home-ops-widget");
-    if (opsWidget) {
-      opsWidget.addEventListener("click", function () {
-        switchView("operations");
-      });
-    }
+    // Click-through bindings
+    var notifCard = document.getElementById("home-notif-card");
+    if (notifCard) notifCard.addEventListener("click", function () { switchView("notifications"); });
 
-    // Pulse widget click-through
-    var pulseWidget = document.getElementById("home-pulse-widget");
-    if (pulseWidget) {
-      pulseWidget.addEventListener("click", function () {
-        switchView("operations");
-      });
-    }
+    var opsCard = document.getElementById("home-ops-card");
+    if (opsCard) opsCard.addEventListener("click", function () { switchView("operations"); });
+
+    var pulseCard = document.getElementById("home-pulse-card");
+    if (pulseCard) pulseCard.addEventListener("click", function () { switchView("operations"); });
+
+    var decisionsCard = document.getElementById("home-decisions-card");
+    if (decisionsCard) decisionsCard.addEventListener("click", function () { switchView("brief"); });
   }
 
   // ── Executive Brief ───────────────────────────────
@@ -1476,25 +1552,202 @@
   function loadBrief() {
     if (!activeWorkspaceId) return;
     briefContent.innerHTML = '<div style="color:var(--text-dim);padding:20px">Loading Executive Brief...</div>';
+    updateBriefTabs();
     fetchBrief(function (data) {
       if (!data) { briefContent.innerHTML = '<div style="color:var(--text-dim);padding:20px">Unable to load Executive Brief.</div>'; return; }
-      renderBrief(data);
+      if (briefActiveTab === "daily-brief") {
+        renderDailyBrief(data);
+      } else {
+        renderDecisionInbox(data);
+      }
     });
   }
 
-  function renderBrief(data) {
+  function updateBriefTabs() {
+    var tabs = briefTabs.querySelectorAll(".brief-tab");
+    for (var i = 0; i < tabs.length; i++) {
+      if (tabs[i].dataset.tab === briefActiveTab) {
+        tabs[i].classList.add("active");
+      } else {
+        tabs[i].classList.remove("active");
+      }
+    }
+  }
+
+  // Tab click handlers
+  briefTabs.addEventListener("click", function (e) {
+    var tab = e.target.closest(".brief-tab");
+    if (!tab) return;
+    briefActiveTab = tab.dataset.tab;
+    updateBriefTabs();
+    fetchBrief(function (data) {
+      if (!data) return;
+      if (briefActiveTab === "daily-brief") {
+        renderDailyBrief(data);
+      } else {
+        renderDecisionInbox(data);
+      }
+    });
+  });
+
+  // ── Daily Brief — narrative-first executive morning briefing ──
+
+  function renderDailyBrief(data) {
+    var brief = data.brief || {};
+    var kpis = data.kpis || [];
+    var goals = data.goals || [];
+    var bottlenecks = data.bottlenecks || [];
+    var recs = data.recommendations || [];
+
+    var html = '<div class="brief-narrative">';
+
+    // Greeting + executive summary as opening prose
+    html += '<h2>Good morning</h2>';
+    if (brief.summary) {
+      html += '<p>' + esc(brief.summary) + '</p>';
+    }
+
+    // Priorities as narrative
+    if (brief.priorities && brief.priorities.length > 0) {
+      html += '<h2>Here is what matters today</h2>';
+      html += '<ul>';
+      for (var pi = 0; pi < brief.priorities.length; pi++) {
+        var p = brief.priorities[pi];
+        var pAction = "monitor";
+        if (p.indexOf("(decide)") !== -1) pAction = "decide";
+        else if (p.indexOf("(experiment)") !== -1) pAction = "experiment";
+        var pText = p.replace(/\s*\((decide|experiment|monitor)\)\s*$/, "");
+        html += '<li><span class="focus-action ' + pAction + '">' + esc(pAction) + '</span> ' + esc(pText) + '</li>';
+      }
+      html += '</ul>';
+    }
+
+    // KPI status inline
+    if (kpis.length > 0) {
+      var offTrack = [];
+      var atRisk = [];
+      for (var ki = 0; ki < kpis.length; ki++) {
+        if (kpis[ki].status === "off_track") offTrack.push(kpis[ki]);
+        else if (kpis[ki].status === "at_risk") atRisk.push(kpis[ki]);
+      }
+
+      html += '<h2>Key performance indicators</h2>';
+
+      if (offTrack.length > 0) {
+        html += '<div class="callout critical">';
+        html += '<strong>' + offTrack.length + ' KPI' + (offTrack.length > 1 ? 's' : '') + ' off track:</strong> ';
+        var offNames = [];
+        for (var oi = 0; oi < offTrack.length; oi++) {
+          offNames.push(offTrack[oi].name + ' (' + offTrack[oi].current + '/' + offTrack[oi].target + ')');
+        }
+        html += esc(offNames.join(', '));
+        html += '</div>';
+      }
+
+      if (atRisk.length > 0) {
+        html += '<div class="callout warning">';
+        html += '<strong>' + atRisk.length + ' KPI' + (atRisk.length > 1 ? 's' : '') + ' at risk:</strong> ';
+        var riskNames = [];
+        for (var ai = 0; ai < atRisk.length; ai++) {
+          riskNames.push(atRisk[ai].name + ' (' + atRisk[ai].current + '/' + atRisk[ai].target + ')');
+        }
+        html += esc(riskNames.join(', '));
+        html += '</div>';
+      }
+
+      // Full KPI table
+      html += '<table class="kpi-table">';
+      html += '<tr><th>KPI</th><th>Current</th><th>Target</th><th>Unit</th><th>Status</th></tr>';
+      for (var kt = 0; kt < kpis.length; kt++) {
+        var k = kpis[kt];
+        html += '<tr>';
+        html += '<td>' + esc(k.name) + '</td>';
+        html += '<td>' + k.current + '</td>';
+        html += '<td>' + k.target + '</td>';
+        html += '<td>' + esc(k.unit) + '</td>';
+        html += '<td><span class="kpi-status ' + esc(k.status) + '">' + esc(k.status.replace("_", " ")) + '</span></td>';
+        html += '</tr>';
+      }
+      html += '</table>';
+    }
+
+    // Risks as watchlist
+    if (brief.risks && brief.risks.length > 0) {
+      html += '<h2>Risks to watch</h2>';
+      html += '<ul>';
+      for (var ri = 0; ri < brief.risks.length; ri++) {
+        html += '<li>' + esc(brief.risks[ri]) + '</li>';
+      }
+      html += '</ul>';
+    }
+
+    // Active bottlenecks
+    var activeBottlenecks = [];
+    for (var bi = 0; bi < bottlenecks.length; bi++) {
+      if (bottlenecks[bi].status === "active") activeBottlenecks.push(bottlenecks[bi]);
+    }
+    if (activeBottlenecks.length > 0) {
+      html += '<h2>Active bottlenecks</h2>';
+      for (var ab = 0; ab < activeBottlenecks.length; ab++) {
+        html += '<div class="callout warning">';
+        html += '<strong>' + esc(activeBottlenecks[ab].title) + '</strong>';
+        if (activeBottlenecks[ab].impact) html += ' — Impact: ' + esc(activeBottlenecks[ab].impact);
+        html += '</div>';
+      }
+    }
+
+    // Strategic goals
+    if (goals.length > 0) {
+      html += '<h2>Strategic goals</h2>';
+      html += '<ul>';
+      for (var gi = 0; gi < goals.length; gi++) {
+        var g = goals[gi];
+        html += '<li><strong>' + esc(g.title) + '</strong> — ' + esc(g.status.replace("_", " "));
+        if (g.target_date) html += ', due ' + esc(g.target_date);
+        html += '</li>';
+      }
+      html += '</ul>';
+    }
+
+    // Decision inbox link
+    if (recs.length > 0) {
+      html += '<h2>Decisions awaiting your review</h2>';
+      html += '<p>' + recs.length + ' recommendation' + (recs.length > 1 ? 's' : '') + ' require your attention.</p>';
+      html += '<span class="inbox-link" id="brief-open-inbox">Open Decision Inbox &rarr;</span>';
+    }
+
+    html += '</div>';
+
+    briefContent.innerHTML = html;
+
+    // Bind inbox link
+    var inboxLink = document.getElementById("brief-open-inbox");
+    if (inboxLink) {
+      inboxLink.addEventListener("click", function () {
+        briefActiveTab = "decision-inbox";
+        updateBriefTabs();
+        fetchBrief(function (d) { if (d) renderDecisionInbox(d); });
+      });
+    }
+  }
+
+  // ── Decision Inbox — interactive recommendation processing ──
+
+  function renderDecisionInbox(data) {
     var brief = data.brief || {};
     var recs = data.recommendations || [];
     var kpis = data.kpis || [];
     var goals = data.goals || [];
-    var bottlenecks = data.bottlenecks || [];
+
     var html = "";
 
-    // Summary
-    html += '<div class="brief-section">';
-    html += '  <div class="brief-section-title">Executive Summary</div>';
-    html += '  <div class="brief-summary">' + esc(brief.summary || "") + '</div>';
-    html += '</div>';
+    // Executive Summary
+    if (brief.summary) {
+      html += '<div class="brief-section">';
+      html += '  <div class="brief-section-title">Executive Summary</div>';
+      html += '  <div class="brief-summary">' + esc(brief.summary) + '</div>';
+      html += '</div>';
+    }
 
     // Priorities
     if (brief.priorities && brief.priorities.length > 0) {
@@ -1627,7 +1880,7 @@
         var dec = result.decision || {};
         decisionActions[recId] = { status: dec.status, decision_id: dec.id };
         cachedBrief = null; // Invalidate so Journal picks up new decision
-        renderBrief(briefData);
+        renderDecisionInbox(briefData);
       })
       .catch(function () {});
   }
