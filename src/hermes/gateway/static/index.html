@@ -1175,6 +1175,7 @@
       <div class="nav-item" data-view="chat">Chat</div>
       <div class="nav-item" data-view="operations">Operations</div>
       <div class="nav-item" data-view="infrastructure">Infrastructure</div>
+      <div class="nav-item" data-view="automation">Automation</div>
       <div class="nav-item" data-view="journal">Journal</div>
       <div class="nav-item" data-view="jobs">Jobs</div>
     </div>
@@ -1275,6 +1276,10 @@
         <div id="infrastructure-list" class="list-view"></div>
         <div id="infrastructure-detail" class="detail-view" style="display:none"></div>
       </div>
+      <div id="view-automation" class="view">
+        <div id="automation-list" class="list-view"></div>
+        <div id="automation-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-jobs" class="view">
         <div id="jobs-list" class="list-view"></div>
         <div id="jobs-detail" class="detail-view" style="display:none"></div>
@@ -1373,6 +1378,7 @@
     if (name === "sops") loadSOPs();
     if (name === "repositories") loadRepositories();
     if (name === "infrastructure") loadInfrastructure();
+    if (name === "automation") loadAutomation();
     if (name === "notifications") loadNotifications();
   }
 
@@ -1447,6 +1453,8 @@
     var pulse = data.heartbeat_pulse || {};
     var pending = data.pending_decisions || 0;
     var infra = data.infrastructure || {};
+    var auto = data.automation || {};
+    var runtimeHealth = data.runtime_health || {};
 
     // Header
     homeHeader.textContent = ws.name || "Hermes";
@@ -1493,6 +1501,24 @@
         html += '<div class="widget-value" style="color:#6ee7b7">' + infra.healthy + '</div>';
         html += '<div class="widget-sub">healthy services</div>';
         html += '<div class="widget-sub">' + infra.total + ' total</div>';
+      }
+      html += '</div>';
+    }
+
+    if (auto.configured) {
+      html += '<div class="dash-card" id="home-auto-card">';
+      html += '<div class="widget-title">Automation</div>';
+      if (auto.attention_critical > 0) {
+        html += '<div class="widget-value" style="color:#fca5a5">' + auto.attention_critical + '</div>';
+        html += '<div class="widget-sub" style="color:#fca5a5">failing</div>';
+        var aparts = [];
+        aparts.push(auto.active + ' active');
+        aparts.push(auto.total + ' total');
+        html += '<div class="widget-sub">' + aparts.join(' &middot; ') + '</div>';
+      } else {
+        html += '<div class="widget-value" style="color:#6ee7b7">' + auto.active + '</div>';
+        html += '<div class="widget-sub">active workflows</div>';
+        html += '<div class="widget-sub">' + auto.total + ' total</div>';
       }
       html += '</div>';
     }
@@ -1582,6 +1608,9 @@
 
     var infraCard = document.getElementById("home-infra-card");
     if (infraCard) infraCard.addEventListener("click", function () { switchView("infrastructure"); });
+
+    var autoCard = document.getElementById("home-auto-card");
+    if (autoCard) autoCard.addEventListener("click", function () { switchView("automation"); });
   }
 
   // ── Executive Brief ───────────────────────────────
@@ -2169,6 +2198,7 @@
       { key: "kpis", label: "Related KPIs", idField: "id", nameField: "name", type: "kpis", navFn: null },
       { key: "repositories", label: "Related Repositories", idField: "id", nameField: "name", type: "repositories", navFn: "loadRepositoryDetail" },
       { key: "services", label: "Related Services", idField: "id", nameField: "name", type: "services", navFn: "loadServiceDetail" },
+      { key: "workflows", label: "Related Workflows", idField: "id", nameField: "name", type: "workflows", navFn: "loadWorkflowDetail" },
       { key: "sops", label: "Related SOPs", idField: "id", nameField: "title", type: "sops", navFn: null },
       { key: "heartbeats", label: "Related Heartbeats", idField: "id", nameField: "summary", type: "heartbeats", navFn: null },
       { key: "notifications", label: "Related Notifications", idField: "id", nameField: "title", type: "notifications", navFn: null },
@@ -2218,6 +2248,7 @@
         else if (nav === "operations") { switchView("operations"); loadOperationDetail(id); }
         else if (nav === "repositories") { switchView("repositories"); loadRepositoryDetail(id); }
         else if (nav === "services") { switchView("infrastructure"); loadServiceDetail(id); }
+        else if (nav === "workflows") { switchView("automation"); loadWorkflowDetail(id); }
       });
     });
   }
@@ -3039,6 +3070,134 @@
     if (activeWorkspaceId) {
       var ctxEl = document.getElementById("service-context");
       loadContext("service", svc.id, ctxEl);
+    }
+  }
+
+  // ── Automation ─────────────────────────────────────
+
+  var autoListEl = document.getElementById("automation-list");
+  var autoDetailEl = document.getElementById("automation-detail");
+
+  function loadAutomation() {
+    autoListEl.style.display = "";
+    autoDetailEl.style.display = "none";
+    autoListEl.innerHTML = '<div class="list-empty">Loading workflows...</div>';
+
+    fetch(GATEWAY + "/v1/workflows")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (workflows) { renderAutomationList(workflows); })
+      .catch(function () { autoListEl.innerHTML = '<div class="list-empty">Cannot load workflows.</div>'; });
+  }
+
+  function attentionBadge(state) {
+    if (state === "critical") return '<span class="status-badge" style="background:#991b1b;color:#fca5a5;font-size:10px">critical</span>';
+    if (state === "warning") return '<span class="status-badge" style="background:#78350f;color:#fcd34d;font-size:10px">warning</span>';
+    return "";
+  }
+
+  function renderAutomationList(workflows) {
+    if (workflows.length === 0) {
+      autoListEl.innerHTML = '<div class="list-empty">No workflows discovered. Configure HERMES_N8N_URL and HERMES_N8N_API_KEY.</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < workflows.length; i++) {
+      var w = workflows[i];
+      html += '<div class="list-item" data-workflow-id="' + esc(w.id) + '" style="cursor:pointer">';
+      html += '  <div class="list-item-main">';
+      html += '    <div class="list-item-title">' + esc(w.name) + '</div>';
+      html += '    <div class="list-item-meta">';
+      html += '      <span style="color:' + (w.active ? "var(--accent)" : "var(--text-dim)") + '">' + (w.active ? "active" : "inactive") + '</span>';
+      if (w.trigger_types && w.trigger_types.length > 0) html += ' &middot; ' + esc(w.trigger_types.join(", "));
+      html += ' &middot; ' + w.node_count + ' nodes';
+      if (w.tags && w.tags.length > 0) html += ' &middot; ' + esc(w.tags.join(", "));
+      html += '    </div>';
+      html += '  </div>';
+      html += '  <div>';
+      html += attentionBadge(w.attention_state);
+      html += '  <span class="status-badge ' + (w.active ? "active" : "completed") + '">' + esc(w.status) + '</span>';
+      html += '  </div>';
+      html += '</div>';
+    }
+    autoListEl.innerHTML = html;
+    autoListEl.querySelectorAll("[data-workflow-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadWorkflowDetail(el.dataset.workflowId); });
+    });
+  }
+
+  function loadWorkflowDetail(workflowId) {
+    autoListEl.style.display = "none";
+    autoDetailEl.style.display = "";
+    autoDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(GATEWAY + "/v1/workflows/" + encodeURIComponent(workflowId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (wf) {
+        if (!wf) { autoDetailEl.innerHTML = '<div class="list-empty">Workflow not found.</div>'; return; }
+        renderWorkflowDetail(wf);
+      })
+      .catch(function () { autoDetailEl.innerHTML = '<div class="list-empty">Cannot load workflow.</div>'; });
+  }
+
+  function renderWorkflowDetail(wf) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(wf.name) + '</div>';
+    html += '  <div class="detail-meta">';
+    html += '    <span style="color:' + (wf.active ? "var(--accent)" : "var(--text-dim)") + '">' + (wf.active ? "active" : "inactive") + '</span>';
+    html += '    &middot; ' + esc(wf.status);
+    if (wf.attention_state !== "ok") html += ' &middot; ' + attentionBadge(wf.attention_state);
+    html += '  </div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="auto-back">Back</button>';
+    html += '</div>';
+
+    // Metadata
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Metadata</div>';
+    html += '  <div class="list-item-meta">Hermes ID: ' + esc(wf.id) + '</div>';
+    html += '  <div class="list-item-meta">Provider ID: ' + esc(wf.provider_id || "—") + '</div>';
+    if (wf.created_at) html += '  <div class="list-item-meta">Created: ' + esc(wf.created_at) + '</div>';
+    if (wf.updated_at) html += '  <div class="list-item-meta">Updated: ' + esc(wf.updated_at) + '</div>';
+    html += '</div>';
+
+    // Triggers & Nodes
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Triggers &amp; Nodes</div>';
+    html += '  <div class="list-item-meta">Triggers: ' + (wf.trigger_types && wf.trigger_types.length > 0 ? esc(wf.trigger_types.join(", ")) : "none") + '</div>';
+    html += '  <div class="list-item-meta">Node count: ' + wf.node_count + '</div>';
+    html += '</div>';
+
+    // Executions
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Executions</div>';
+    html += '  <div class="list-item-meta">Total executions: ' + wf.execution_count + '</div>';
+    if (wf.last_execution) html += '  <div class="list-item-meta">Last execution: ' + esc(wf.last_execution) + '</div>';
+    if (wf.last_success) html += '  <div class="list-item-meta">Last success: ' + esc(wf.last_success) + '</div>';
+    if (wf.last_failure) html += '  <div class="list-item-meta">Last failure: <span style="color:#fca5a5">' + esc(wf.last_failure) + '</span></div>';
+    html += '</div>';
+
+    // Tags
+    if (wf.tags && wf.tags.length > 0) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Tags</div>';
+      html += '  <div class="list-item-meta">' + esc(wf.tags.join(", ")) + '</div>';
+      html += '</div>';
+    }
+
+    // Context panel
+    if (activeWorkspaceId) {
+      html += '<div id="workflow-context" style="margin-top:16px"></div>';
+    }
+
+    autoDetailEl.innerHTML = html;
+    document.getElementById("auto-back").addEventListener("click", function () { loadAutomation(); });
+
+    // Load context
+    if (activeWorkspaceId) {
+      var ctxEl = document.getElementById("workflow-context");
+      loadContext("workflow", wf.id, ctxEl);
     }
   }
 

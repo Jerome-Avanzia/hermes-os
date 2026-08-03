@@ -53,3 +53,11 @@ def docker_host() -> str:
 
 def traefik_url() -> str:
     return os.environ.get("HERMES_TRAEFIK_URL", "")
+
+
+def n8n_url() -> str:
+    return os.environ.get("HERMES_N8N_URL", "")
+
+
+def n8n_api_key() -> str:
+    return os.environ.get("HERMES_N8N_API_KEY", "")

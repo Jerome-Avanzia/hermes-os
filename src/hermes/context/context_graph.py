@@ -53,6 +53,7 @@ class GraphData:
     heartbeat_store: Any = None
     repositories: list = field(default_factory=list)
     services: list = field(default_factory=list)
+    workflows: list = field(default_factory=list)
 
 
 # -- Internal resolution context -----------------------------------------------
@@ -82,6 +83,8 @@ class _Ctx:
     repo_index: dict
     services: list
     service_index: dict
+    workflows: list
+    workflow_index: dict
 
 
 # -- Serializers ---------------------------------------------------------------
@@ -143,6 +146,11 @@ def _ser_service(s) -> dict:
             "resource_state": s.resource_state}
 
 
+def _ser_workflow(w) -> dict:
+    return {"id": w.id, "name": w.name, "active": w.active,
+            "status": w.status, "attention_state": w.attention_state}
+
+
 # -- Object finders ------------------------------------------------------------
 
 
@@ -157,6 +165,7 @@ _FINDERS: dict[str, Callable] = {
     "kpi":        lambda ctx, oid: next((k for k in ctx.kpis if k.kpi_id == oid), None),
     "repository": lambda ctx, oid: ctx.repo_index.get(oid),
     "service":    lambda ctx, oid: ctx.service_index.get(oid),
+    "workflow":   lambda ctx, oid: ctx.workflow_index.get(oid),
 }
 
 _SUMMARIZERS: dict[str, Callable] = {
@@ -170,6 +179,7 @@ _SUMMARIZERS: dict[str, Callable] = {
     "kpi":        _ser_kpi,
     "repository": _ser_repo,
     "service":    _ser_service,
+    "workflow":   _ser_workflow,
 }
 
 
@@ -659,6 +669,129 @@ def _repo_services(repo, ctx):
             if s.repository_ref == repo.id]
 
 
+# -- Edge resolvers: Workflow (Sprint 43) ----------------------------------------
+
+
+def _workflow_capabilities(wf, ctx):
+    return [_ser_cap(c) for c in ctx.all_capabilities
+            if wf.id in c.workflow_refs]
+
+
+def _workflow_operations(wf, ctx):
+    return [_ser_op(o) for o in ctx.operations
+            if o.extra_fields.get("workflow_id") == wf.id]
+
+
+def _workflow_repositories(wf, ctx):
+    """Workflow→Repository via capabilities that reference this workflow."""
+    caps = [c for c in ctx.all_capabilities if wf.id in c.workflow_refs]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_repo(ctx.repo_index[r]) for r in repo_ids
+            if r in ctx.repo_index]
+
+
+def _workflow_services(wf, ctx):
+    """Workflow→Service via capabilities → repository_refs → service.repository_ref."""
+    caps = [c for c in ctx.all_capabilities if wf.id in c.workflow_refs]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_service(s) for s in ctx.services
+            if s.repository_ref and s.repository_ref in repo_ids]
+
+
+def _workflow_people(wf, ctx):
+    caps = [c for c in ctx.all_capabilities if wf.id in c.workflow_refs]
+    seen: set[str] = set()
+    result = []
+    for cap in caps:
+        for p in ctx.all_people:
+            if p.id not in seen and _owner_matches(cap.owner, p):
+                seen.add(p.id)
+                result.append(_ser_person(p))
+    return result
+
+
+def _workflow_departments(wf, ctx):
+    caps = [c for c in ctx.all_capabilities if wf.id in c.workflow_refs]
+    dept_ids = {c.department_id for c in caps if c.department_id}
+    return [_ser_dept(ctx.dept_index[d]) for d in dept_ids
+            if d in ctx.dept_index]
+
+
+def _workflow_goals(wf, ctx):
+    caps = [c for c in ctx.all_capabilities if wf.id in c.workflow_refs]
+    if not caps:
+        return []
+    cap_owners = {c.owner.strip().lower() for c in caps if c.owner}
+    return [_ser_goal(g) for g in ctx.all_goals
+            if g.owner and g.owner.strip().lower() in cap_owners]
+
+
+def _workflow_notifications(wf, ctx):
+    return _notifs_for_ids([wf.id], ctx)
+
+
+# -- Workflow edges on existing types (Sprint 43) --------------------------------
+
+
+def _find_workflows_by_cap_refs(cap_list, ctx):
+    """Find workflows referenced by any capability in the list."""
+    wf_ids: set[str] = set()
+    for c in cap_list:
+        wf_ids.update(c.workflow_refs)
+    return [_ser_workflow(ctx.workflow_index[w]) for w in wf_ids
+            if w in ctx.workflow_index]
+
+
+def _goal_workflows(goal, ctx):
+    goal_caps = [c for c in ctx.all_capabilities
+                 if c.owner and goal.owner
+                 and c.owner.strip().lower() == goal.owner.strip().lower()]
+    return _find_workflows_by_cap_refs(goal_caps, ctx)
+
+
+def _person_workflows(person, ctx):
+    caps = [c for c in ctx.all_capabilities if _owner_matches(c.owner, person)]
+    return _find_workflows_by_cap_refs(caps, ctx)
+
+
+def _dept_workflows(dept, ctx):
+    caps = [c for c in ctx.all_capabilities if c.department_id == dept.id]
+    return _find_workflows_by_cap_refs(caps, ctx)
+
+
+def _cap_workflows(cap, ctx):
+    return [_ser_workflow(ctx.workflow_index[w]) for w in cap.workflow_refs
+            if w in ctx.workflow_index]
+
+
+def _repo_workflows(repo, ctx):
+    """Repository→Workflow via shared capabilities."""
+    caps = [c for c in ctx.all_capabilities if repo.id in c.repository_refs]
+    return _find_workflows_by_cap_refs(caps, ctx)
+
+
+def _service_workflows(svc, ctx):
+    """Service→Workflow via capability chain."""
+    if not svc.repository_ref:
+        return []
+    caps = [c for c in ctx.all_capabilities
+            if svc.repository_ref in c.repository_refs]
+    return _find_workflows_by_cap_refs(caps, ctx)
+
+
+def _op_workflows(op, ctx):
+    """Operation→Workflow via extra_fields['workflow_id']."""
+    wf_id = op.extra_fields.get("workflow_id")
+    if not wf_id:
+        return []
+    wf = ctx.workflow_index.get(wf_id)
+    return [_ser_workflow(wf)] if wf else []
+
+
 # -- Declarative edge registry (Amendment 2) -----------------------------------
 
 
@@ -669,6 +802,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "capabilities": _goal_capabilities,
         "repositories": _goal_repositories,
         "services": _goal_services,
+        "workflows": _goal_workflows,
         "kpis": _goal_kpis,
         "decisions": _goal_decisions,
         "operations": _goal_operations,
@@ -680,6 +814,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "capabilities": _person_capabilities,
         "repositories": _person_repositories,
         "services": _person_services,
+        "workflows": _person_workflows,
         "goals": _person_goals,
         "operations": _person_operations,
         "heartbeats": _person_heartbeats,
@@ -690,6 +825,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "capabilities": _dept_capabilities,
         "repositories": _dept_repositories,
         "services": _dept_services,
+        "workflows": _dept_workflows,
         "goals": _dept_goals,
         "operations": _dept_operations,
         "sops": _dept_sops,
@@ -699,6 +835,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "people": _cap_people,
         "repositories": _cap_repositories,
         "services": _cap_services,
+        "workflows": _cap_workflows,
         "sops": _cap_sops,
         "goals": _cap_goals,
         "operations": _cap_operations,
@@ -710,6 +847,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "departments": _op_departments,
         "people": _op_people,
         "sops": _op_sops,
+        "workflows": _op_workflows,
         "heartbeats": _op_heartbeats,
         "notifications": _op_notifications,
     },
@@ -735,6 +873,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "departments": _repo_departments,
         "goals": _repo_goals,
         "services": _repo_services,
+        "workflows": _repo_workflows,
     },
     "service": {
         "repositories": _service_repositories,
@@ -743,14 +882,25 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "departments": _service_departments,
         "goals": _service_goals,
         "operations": _service_operations,
+        "workflows": _service_workflows,
         "notifications": _service_notifications,
+    },
+    "workflow": {
+        "capabilities": _workflow_capabilities,
+        "operations": _workflow_operations,
+        "repositories": _workflow_repositories,
+        "services": _workflow_services,
+        "people": _workflow_people,
+        "departments": _workflow_departments,
+        "goals": _workflow_goals,
+        "notifications": _workflow_notifications,
     },
 }
 
 ALL_RELATION_KEYS = frozenset({
     "goals", "people", "departments", "capabilities",
-    "repositories", "services", "operations", "decisions", "kpis", "sops",
-    "heartbeats", "notifications",
+    "repositories", "services", "workflows", "operations", "decisions",
+    "kpis", "sops", "heartbeats", "notifications",
 })
 
 SUPPORTED_TYPES = frozenset(_EDGES.keys())
@@ -868,6 +1018,7 @@ class ContextGraph:
             heartbeat_store=data.heartbeat_store,
             repositories=data.repositories,
             services=data.services,
+            workflows=data.workflows,
             goal_index={g.goal_id: g for g in all_goals},
             person_index={p.id: p for p in all_people},
             dept_index={d.id: d for d in all_departments},
@@ -875,4 +1026,5 @@ class ContextGraph:
             sop_index={s.id: s for s in all_sops},
             repo_index={r.id: r for r in data.repositories},
             service_index={s.id: s for s in data.services},
+            workflow_index={w.id: w for w in data.workflows},
         )

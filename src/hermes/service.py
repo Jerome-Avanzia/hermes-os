@@ -59,6 +59,8 @@ from hermes.runtime.github_provider import GitHubProvider
 from hermes.runtime.github_runtime import GitHubRuntime
 from hermes.runtime.host_provider import HostProvider
 from hermes.runtime.infrastructure_runtime import InfrastructureRuntime
+from hermes.runtime.n8n_provider import N8nProvider
+from hermes.runtime.n8n_runtime import N8nRuntime
 from hermes.runtime.traefik_provider import TraefikProvider
 
 logger = logging.getLogger(__name__)
@@ -119,6 +121,7 @@ class HermesService:
         self._context_graph: ContextGraph | None = None
         self._github_runtime: GitHubRuntime | None = None
         self._infrastructure_runtime: InfrastructureRuntime | None = None
+        self._n8n_runtime: N8nRuntime | None = None
 
     # -- Workspace validation --------------------------------------------------
 
@@ -1299,6 +1302,68 @@ class HermesService:
             "urls": s.urls,
         }
 
+    # -- n8n Runtime (Sprint 43) -------------------------------------------------
+
+    def _get_n8n_runtime(self) -> N8nRuntime:
+        """Lazily build the N8nRuntime from config."""
+        if self._n8n_runtime is None:
+            provider = N8nProvider(
+                api_url=config.n8n_url(),
+                api_key=config.n8n_api_key(),
+            )
+            self._n8n_runtime = N8nRuntime(provider)
+        return self._n8n_runtime
+
+    def n8n_health(self) -> dict:
+        """Return n8n integration health status."""
+        runtime = self._get_n8n_runtime()
+        h = runtime.health()
+        return {
+            "configured": h.configured,
+            "authenticated": h.authenticated,
+            "reachable": h.reachable,
+            "api_version": h.api_version,
+            "workflow_count": h.workflow_count,
+            "active_count": h.active_count,
+            "failed_recently": h.failed_recently,
+            "last_sync": h.last_sync,
+            "refresh_duration_ms": h.refresh_duration_ms,
+        }
+
+    def list_workflows(self) -> list[dict]:
+        """Return all n8n workflows as serialized dicts."""
+        runtime = self._get_n8n_runtime()
+        workflows = runtime.list_workflows()
+        return [self._serialize_workflow(w) for w in workflows]
+
+    def get_workflow(self, workflow_id: str) -> dict | None:
+        """Return a single workflow by Hermes ID, or None."""
+        runtime = self._get_n8n_runtime()
+        wf = runtime.get_workflow(workflow_id)
+        if wf is None:
+            return None
+        return self._serialize_workflow(wf)
+
+    @staticmethod
+    def _serialize_workflow(w) -> dict:
+        return {
+            "id": w.id,
+            "name": w.name,
+            "provider_id": w.provider_id,
+            "active": w.active,
+            "tags": w.tags,
+            "trigger_types": w.trigger_types,
+            "node_count": w.node_count,
+            "execution_count": w.execution_count,
+            "last_execution": w.last_execution,
+            "last_success": w.last_success,
+            "last_failure": w.last_failure,
+            "status": w.status,
+            "attention_state": w.attention_state,
+            "created_at": w.created_at,
+            "updated_at": w.updated_at,
+        }
+
     # -- Context Graph (Sprint 40) ---------------------------------------------
 
     def _get_context_graph(self) -> ContextGraph:
@@ -1347,6 +1412,10 @@ class HermesService:
         infra_runtime = self._get_infrastructure_runtime()
         services = infra_runtime.list_services() if infra_runtime.configured else []
 
+        # Fetch workflows for context graph (Sprint 43)
+        n8n_runtime = self._get_n8n_runtime()
+        workflows = n8n_runtime.list_workflows() if n8n_runtime.configured else []
+
         data = GraphData(
             workspace_id=workspace_id,
             operations=ops,
@@ -1356,6 +1425,7 @@ class HermesService:
             heartbeat_store=self.heartbeat_store,
             repositories=repos,
             services=services,
+            workflows=workflows,
         )
 
         return self._get_context_graph().resolve(object_type, object_id, data)
@@ -1497,19 +1567,8 @@ class HermesService:
                     if latest and latest.status == "blocked":
                         heartbeat_pulse["blocked"] += 1
 
-        # Infrastructure summary — "Is production healthy?" (Amendment 4)
-        infra_runtime = self._get_infrastructure_runtime()
-        infra_summary = {"configured": False, "total": 0, "healthy": 0, "unhealthy": 0, "resource_critical": 0}
-        if infra_runtime.configured:
-            try:
-                services = infra_runtime.list_services()
-                infra_summary["configured"] = True
-                infra_summary["total"] = len(services)
-                infra_summary["healthy"] = sum(1 for s in services if s.health == "healthy")
-                infra_summary["unhealthy"] = sum(1 for s in services if s.health == "unhealthy")
-                infra_summary["resource_critical"] = sum(1 for s in services if s.resource_state == "critical")
-            except Exception:
-                pass
+        # Amendment 4: Extensible runtime health summaries
+        runtime_health = self._compute_runtime_health()
 
         return {
             "workspace": {"name": ws.name or workspace_id},
@@ -1524,8 +1583,62 @@ class HermesService:
             "notifications": self._compute_notification_summary(
                 workspace_id, ops, review,
             ),
-            "infrastructure": infra_summary,
+            "infrastructure": runtime_health.get("infrastructure", {}),
+            "automation": runtime_health.get("automation", {}),
+            "runtime_health": runtime_health,
         }
+
+    def _compute_runtime_health(self) -> dict:
+        """Compute extensible runtime health summaries (Amendment 4).
+
+        Returns a dict of runtime name → summary. New runtimes plug in
+        by adding a block here — no UI changes needed.
+        """
+        result: dict[str, dict] = {}
+
+        # GitHub
+        gh_runtime = self._get_github_runtime()
+        gh_summary: dict = {"configured": gh_runtime.configured, "name": "GitHub"}
+        if gh_runtime.configured:
+            try:
+                h = gh_runtime.health()
+                gh_summary["reachable"] = h.reachable
+                gh_summary["authenticated"] = h.authenticated
+            except Exception:
+                pass
+        result["github"] = gh_summary
+
+        # Infrastructure
+        infra_runtime = self._get_infrastructure_runtime()
+        infra_summary: dict = {"configured": False, "name": "Infrastructure", "total": 0, "healthy": 0, "unhealthy": 0, "resource_critical": 0}
+        if infra_runtime.configured:
+            try:
+                services = infra_runtime.list_services()
+                infra_summary["configured"] = True
+                infra_summary["total"] = len(services)
+                infra_summary["healthy"] = sum(1 for s in services if s.health == "healthy")
+                infra_summary["unhealthy"] = sum(1 for s in services if s.health == "unhealthy")
+                infra_summary["resource_critical"] = sum(1 for s in services if s.resource_state == "critical")
+            except Exception:
+                pass
+        result["infrastructure"] = infra_summary
+
+        # n8n / Automation
+        n8n_runtime = self._get_n8n_runtime()
+        auto_summary: dict = {"configured": False, "name": "Automation", "total": 0, "active": 0, "failing": 0, "attention_critical": 0}
+        if n8n_runtime.configured:
+            try:
+                workflows = n8n_runtime.list_workflows()
+                auto_summary["configured"] = True
+                auto_summary["total"] = len(workflows)
+                auto_summary["active"] = sum(1 for w in workflows if w.active)
+                auto_summary["failing"] = sum(1 for w in workflows if w.status == "error")
+                auto_summary["attention_critical"] = sum(1 for w in workflows if w.attention_state == "critical")
+            except Exception:
+                pass
+        result["automation"] = auto_summary
+
+        return result
 
     def _compute_notification_summary(
         self, workspace_id: str, ops: list, review: object,

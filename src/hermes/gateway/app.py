@@ -739,6 +739,24 @@ async def get_service(service_id: str) -> JSONResponse:
     return JSONResponse(content=svc)
 
 
+@app.get("/v1/workflows")
+async def list_workflows() -> list[dict]:
+    """List all automation workflows."""
+    return _hermes_service.list_workflows()
+
+
+@app.get("/v1/workflows/{workflow_id}")
+async def get_workflow(workflow_id: str) -> JSONResponse:
+    """Return a single workflow by Hermes ID."""
+    wf = _hermes_service.get_workflow(workflow_id)
+    if wf is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Workflow not found: {workflow_id}"},
+        )
+    return JSONResponse(content=wf)
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -754,6 +772,12 @@ async def github_health() -> dict:
 async def infrastructure_health() -> dict:
     """Infrastructure runtime health check (Sprint 42)."""
     return _hermes_service.infrastructure_health()
+
+
+@app.get("/health/n8n")
+async def n8n_health() -> dict:
+    """n8n runtime health check (Sprint 43)."""
+    return _hermes_service.n8n_health()
 
 
 # -- Static UI (must be mounted last so API routes take precedence) ---------
