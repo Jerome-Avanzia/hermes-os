@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-os.dev/contracts/heartbeat.schema.json",
+  "title": "Heartbeat",
+  "description": "Immutable execution status update for an active Operation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "operation_id",
+    "workspace_id",
+    "timestamp",
+    "status",
+    "summary"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "operation_id": {
+      "type": "string"
+    },
+    "workspace_id": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "blocked",
+        "waiting"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "author": {
+      "type": "string"
+    },
+    "details": {
+      "type": "string"
+    },
+    "blocker": {
+      "type": "string"
+    },
+    "next_action": {
+      "type": "string"
+    }
+  }
+}

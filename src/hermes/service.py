@@ -5,11 +5,20 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import datetime, timezone
 
+from hermes import config
 from hermes.conductor import Conductor
 from hermes.kernel.ceo_loop import CEOLoop
 from hermes.kernel.decision_id import generate_decision_id
 from hermes.kernel.decision_writer import DecisionWriter
 from hermes.kernel.department_registry import DepartmentRegistry
+from hermes.kernel.heartbeat_runtime import (
+    InvalidHeartbeatStatusError,
+    append_heartbeat,
+    find_stale_operations,
+    get_latest,
+    list_heartbeats,
+)
+from hermes.kernel.heartbeat_store import HeartbeatStore
 from hermes.kernel.operation_id_bk import generate_bk_operation_id
 from hermes.kernel.operation_runtime import (
     StepNotActionableError,
@@ -69,6 +78,7 @@ class HermesService:
         job_store: JobStore | None = None,
         sop_registry: SOPRegistry | None = None,
         department_registry: DepartmentRegistry | None = None,
+        heartbeat_store: HeartbeatStore | None = None,
     ) -> None:
         self.context_engine = context_engine or ContextEngine()
         self.planner = planner or Planner()
@@ -82,6 +92,7 @@ class HermesService:
         self.job_store = job_store
         self.sop_registry = sop_registry or SOPRegistry()
         self.department_registry = department_registry or DepartmentRegistry()
+        self.heartbeat_store = heartbeat_store
 
     # -- Workspace validation --------------------------------------------------
 
@@ -559,6 +570,104 @@ class HermesService:
             ],
         }
 
+    # -- Operation Heartbeats (Sprint 35) ----------------------------------------
+
+    def list_operation_heartbeats(
+        self, workspace_id: str, operation_id: str,
+    ) -> list[dict]:
+        """Return all Heartbeats for an Operation, newest first."""
+        self.validate_workspace(workspace_id)
+        if not self.heartbeat_store:
+            return []
+        # Verify operation exists
+        if self.operation_store:
+            self.operation_store.load(workspace_id, operation_id)
+        return [
+            self._serialize_heartbeat(hb)
+            for hb in list_heartbeats(self.heartbeat_store, workspace_id, operation_id)
+        ]
+
+    def create_heartbeat(
+        self,
+        workspace_id: str,
+        operation_id: str,
+        status: str,
+        summary: str,
+        author: str = "",
+        details: str = "",
+        blocker: str = "",
+        next_action: str = "",
+    ) -> dict:
+        """Append an immutable Heartbeat to an Operation."""
+        self.validate_workspace(workspace_id)
+        if not self.heartbeat_store:
+            raise RuntimeError("HeartbeatStore is required")
+        # Verify operation exists
+        if self.operation_store:
+            self.operation_store.load(workspace_id, operation_id)
+        hb = append_heartbeat(
+            self.heartbeat_store,
+            operation_id=operation_id,
+            workspace_id=workspace_id,
+            status=status,
+            summary=summary,
+            author=author,
+            details=details,
+            blocker=blocker,
+            next_action=next_action,
+        )
+        return self._serialize_heartbeat(hb)
+
+    def list_stale_operations(
+        self, workspace_id: str, threshold_hours: float | None = None,
+    ) -> list[dict]:
+        """Return active Operations whose latest heartbeat exceeds the freshness threshold."""
+        self.validate_workspace(workspace_id)
+        if not self.operation_store or not self.heartbeat_store:
+            return []
+        if threshold_hours is None:
+            threshold_hours = config.stale_threshold_hours()
+        ops = self.operation_store.list(workspace_id)
+        stale = find_stale_operations(
+            ops, self.heartbeat_store, workspace_id, threshold_hours,
+        )
+        return [self._serialize_stale_operation(s) for s in stale]
+
+    @staticmethod
+    def _serialize_heartbeat(hb) -> dict:
+        return {
+            "id": hb.id,
+            "operation_id": hb.operation_id,
+            "workspace_id": hb.workspace_id,
+            "timestamp": hb.timestamp.isoformat(),
+            "status": hb.status,
+            "summary": hb.summary,
+            "author": hb.author,
+            "details": hb.details,
+            "blocker": hb.blocker,
+            "next_action": hb.next_action,
+        }
+
+    @staticmethod
+    def _serialize_stale_operation(s) -> dict:
+        data = {
+            "operation_id": s.operation_id,
+            "workspace_id": s.workspace_id,
+            "request": s.request,
+            "status": s.status,
+            "elapsed_hours": s.elapsed_hours,
+        }
+        if s.latest_heartbeat is not None:
+            data["latest_heartbeat"] = {
+                "id": s.latest_heartbeat.id,
+                "timestamp": s.latest_heartbeat.timestamp.isoformat(),
+                "status": s.latest_heartbeat.status,
+                "summary": s.latest_heartbeat.summary,
+            }
+        else:
+            data["latest_heartbeat"] = None
+        return data
+
     # -- Capability Runtime (Sprint 31) -----------------------------------------
 
     def list_capabilities(self, workspace_id: str) -> list[dict]:
@@ -835,6 +944,25 @@ class HermesService:
         # Top 3 priorities — "Today's Focus" (amendment 4)
         todays_focus = brief.priorities[:3]
 
+        # Heartbeat pulse — blocked + stale counts (Sprint 35)
+        heartbeat_pulse = {"blocked": 0, "stale": 0, "oldest_stale_hours": 0.0}
+        if self.heartbeat_store and self.operation_store:
+            threshold = config.stale_threshold_hours()
+            stale_ops = find_stale_operations(
+                ops, self.heartbeat_store, workspace_id, threshold,
+            )
+            heartbeat_pulse["stale"] = len(stale_ops)
+            if stale_ops:
+                heartbeat_pulse["oldest_stale_hours"] = max(
+                    s.elapsed_hours for s in stale_ops
+                )
+            # Count blocked: active ops whose latest heartbeat is "blocked"
+            for op in ops:
+                if op.status in ("created", "executing", "awaiting_escalation"):
+                    latest = get_latest(self.heartbeat_store, workspace_id, op.id)
+                    if latest and latest.status == "blocked":
+                        heartbeat_pulse["blocked"] += 1
+
         return {
             "workspace": workspace_info,
             "operations": {
@@ -853,6 +981,7 @@ class HermesService:
             "risks": brief.risks,
             "execution_status": review.execution_status,
             "warnings": review.all_warnings,
+            "heartbeat_pulse": heartbeat_pulse,
         }
 
     @staticmethod

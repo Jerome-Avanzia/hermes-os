@@ -1,4 +1,5 @@
 from hermes.models.bottleneck import Bottleneck
+from hermes.models.heartbeat import Heartbeat
 from hermes.models.business import Business
 from hermes.models.capability import Capability
 from hermes.models.context import Context
@@ -29,6 +30,7 @@ from hermes.models.repository import Repository
 from hermes.models.result import Result
 from hermes.models.sop import SOP
 from hermes.models.sop_step import SOPStep
+from hermes.models.stale_operation import StaleOperation
 from hermes.models.strategy import Strategy
 from hermes.models.task import Task
 from hermes.models.transition_record import TransitionRecord
@@ -52,6 +54,7 @@ __all__ = [
     "Experiment",
     "FileContent",
     "Goal",
+    "Heartbeat",
     "InvalidTransitionError",
     "Job",
     "KPI",
@@ -70,6 +73,7 @@ __all__ = [
     "Result",
     "SOP",
     "SOPStep",
+    "StaleOperation",
     "Strategy",
     "Task",
     "TransitionRecord",

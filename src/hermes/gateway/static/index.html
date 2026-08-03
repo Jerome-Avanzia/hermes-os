@@ -1288,11 +1288,16 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .catch(function () { return null; });
 
-    Promise.all([dashboardPromise, operationsPromise]).then(function (results) {
+    var stalePromise = fetch(wsBase() + "/operations/stale")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+
+    Promise.all([dashboardPromise, operationsPromise, stalePromise]).then(function (results) {
       var data = results[0];
       var opsList = results[1];
+      var staleOps = results[2];
       if (!data) return;
-      renderHome(data, opsList);
+      renderHome(data, opsList, staleOps);
     });
   }
 
@@ -1312,7 +1317,7 @@
     return { active: active, completedToday: completedToday, total: opsList.length, escalated: escalated };
   }
 
-  function renderHome(data, opsList) {
+  function renderHome(data, opsList, staleOps) {
     var ws = data.workspace || {};
     var knowledge = data.knowledge || {};
     var repositories = data.repositories || {};
@@ -1324,7 +1329,7 @@
     // Header
     homeHeader.textContent = ws.name || "Hermes";
 
-    // Attention section
+    // Attention section — escalated + blocked operations
     if (!opsAvailable) {
       homeAttention.innerHTML = '<div style="color:var(--text-dim)">Unable to load Operations.</div>';
     } else if (opsStats.escalated.length > 0) {
@@ -1352,6 +1357,34 @@
       });
     } else {
       homeAttention.textContent = "No items need your attention.";
+    }
+
+    // Blocked operations from heartbeats (Sprint 35)
+    if (staleOps && staleOps.length > 0) {
+      var blockedOps = staleOps.filter(function (s) {
+        return s.latest_heartbeat && s.latest_heartbeat.status === "blocked";
+      });
+      if (blockedOps.length > 0) {
+        var bhtml = homeAttention.innerHTML || "";
+        if (bhtml === "No items need your attention.") bhtml = "";
+        for (var bi = 0; bi < blockedOps.length; bi++) {
+          var bop = blockedOps[bi];
+          bhtml += '<div class="home-attention-item" data-op-id="' + esc(bop.operation_id) + '" style="margin-bottom:6px;cursor:pointer;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px">';
+          bhtml += '<span class="status-badge blocked" style="margin-right:8px;background:#fca5a5;color:#1a1a2e">Blocked</span>';
+          bhtml += '<span>' + esc(bop.request) + '</span>';
+          if (bop.latest_heartbeat && bop.latest_heartbeat.summary) {
+            bhtml += '<div style="font-size:11px;color:var(--text-dim);margin-top:4px">' + esc(bop.latest_heartbeat.summary) + '</div>';
+          }
+          bhtml += '</div>';
+        }
+        homeAttention.innerHTML = bhtml;
+        homeAttention.querySelectorAll(".home-attention-item[data-op-id]").forEach(function (el) {
+          el.addEventListener("click", function () {
+            switchView("operations");
+            openOperation(el.dataset.opId);
+          });
+        });
+      }
     }
 
     // Today's Focus — Top 3 priorities (amendment 4)
@@ -1384,6 +1417,24 @@
     } else {
       html += '  <div class="widget-coming-soon">Unavailable</div>';
     }
+    html += '</div>';
+
+    // Heartbeat Pulse widget (Sprint 35)
+    var pulse = data.heartbeat_pulse || {};
+    html += '<div class="widget" id="home-pulse-widget" style="cursor:pointer">';
+    html += '  <div class="widget-title">Heartbeat Pulse</div>';
+    if (pulse.blocked > 0) {
+      html += '  <div class="widget-value" style="color:#fca5a5">' + pulse.blocked + '</div>';
+      html += '  <div class="widget-sub" style="color:#fca5a5">blocked</div>';
+    } else {
+      html += '  <div class="widget-value" style="color:#6ee7b7">0</div>';
+      html += '  <div class="widget-sub">blocked</div>';
+    }
+    var staleSub = pulse.stale + ' stale';
+    if (pulse.oldest_stale_hours > 0) {
+      staleSub += ' &middot; oldest ' + Math.round(pulse.oldest_stale_hours) + 'h';
+    }
+    html += '  <div class="widget-sub">' + staleSub + '</div>';
     html += '</div>';
 
     html += '<div class="widget">';
@@ -1425,6 +1476,14 @@
     var opsWidget = document.getElementById("home-ops-widget");
     if (opsWidget) {
       opsWidget.addEventListener("click", function () {
+        switchView("operations");
+      });
+    }
+
+    // Pulse widget click-through
+    var pulseWidget = document.getElementById("home-pulse-widget");
+    if (pulseWidget) {
+      pulseWidget.addEventListener("click", function () {
         switchView("operations");
       });
     }
@@ -2366,6 +2425,28 @@
       html += '</div>';
     }
 
+    // Heartbeat Timeline (Sprint 35)
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Heartbeats</div>';
+    if (op.status === "created" || op.status === "executing" || op.status === "awaiting_escalation") {
+      html += '  <div style="margin-bottom:12px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:6px">';
+      html += '    <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">';
+      html += '      <select id="hb-status" style="background:var(--bg-card);color:var(--text-main);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px">';
+      html += '        <option value="active">Active</option>';
+      html += '        <option value="blocked">Blocked</option>';
+      html += '        <option value="waiting">Waiting</option>';
+      html += '      </select>';
+      html += '      <input id="hb-author" placeholder="Author" style="flex:0 0 120px;background:var(--bg-card);color:var(--text-main);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px" />';
+      html += '    </div>';
+      html += '    <textarea id="hb-summary" placeholder="What changed? What is happening?" style="width:100%;min-height:40px;background:var(--bg-card);color:var(--text-main);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:13px;resize:vertical;margin-bottom:8px"></textarea>';
+      html += '    <input id="hb-blocker" placeholder="Blocker (optional)" style="width:100%;background:var(--bg-card);color:var(--text-main);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;margin-bottom:6px" />';
+      html += '    <input id="hb-next" placeholder="Next action (optional)" style="width:100%;background:var(--bg-card);color:var(--text-main);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px;margin-bottom:8px" />';
+      html += '    <button class="detail-btn accent" id="hb-send">Send Heartbeat</button>';
+      html += '  </div>';
+    }
+    html += '  <div id="op-heartbeats-list"><div class="list-empty">Loading heartbeats...</div></div>';
+    html += '</div>';
+
     // Timestamps
     html += '<div class="detail-section">';
     html += '  <div class="detail-section-title">Timeline</div>';
@@ -2452,8 +2533,81 @@
       });
     }
 
+    // Load heartbeats
+    loadOperationHeartbeats(op.id);
+
+    // Send heartbeat handler
+    var hbSendBtn = document.getElementById("hb-send");
+    if (hbSendBtn) {
+      hbSendBtn.addEventListener("click", function () {
+        var summary = document.getElementById("hb-summary").value.trim();
+        if (!summary) return;
+        var body = {
+          status: document.getElementById("hb-status").value,
+          summary: summary,
+          author: (document.getElementById("hb-author").value || "").trim(),
+          blocker: (document.getElementById("hb-blocker").value || "").trim(),
+          next_action: (document.getElementById("hb-next").value || "").trim(),
+        };
+        fetch(wsBase() + "/operations/" + encodeURIComponent(op.id) + "/heartbeats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (hb) {
+            if (hb) {
+              document.getElementById("hb-summary").value = "";
+              document.getElementById("hb-blocker").value = "";
+              document.getElementById("hb-next").value = "";
+              loadOperationHeartbeats(op.id);
+            }
+          })
+          .catch(function () {});
+      });
+    }
+
     // Load jobs for this operation (client-side filter)
     loadOperationJobs(op.id);
+  }
+
+  function loadOperationHeartbeats(operationId) {
+    var el = document.getElementById("op-heartbeats-list");
+    if (!el) return;
+    fetch(wsBase() + "/operations/" + encodeURIComponent(operationId) + "/heartbeats")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (heartbeats) {
+        if (heartbeats.length === 0) {
+          el.innerHTML = '<div class="list-empty">No heartbeats yet.</div>';
+          return;
+        }
+        var html = "";
+        for (var i = 0; i < heartbeats.length; i++) {
+          var hb = heartbeats[i];
+          var statusColor = hb.status === "blocked" ? "#fca5a5" : (hb.status === "waiting" ? "#fcd34d" : "#6ee7b7");
+          html += '<div style="padding:8px 0;border-bottom:1px solid var(--border)">';
+          html += '  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">';
+          html += '    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + statusColor + '"></span>';
+          html += '    <span style="font-size:12px;color:' + statusColor + ';font-weight:600;text-transform:uppercase">' + esc(hb.status) + '</span>';
+          html += '    <span style="font-size:11px;color:var(--text-dim);margin-left:auto">' + formatDate(hb.timestamp) + '</span>';
+          html += '  </div>';
+          html += '  <div style="color:var(--text-main);font-size:13px;margin-left:16px">' + esc(hb.summary) + '</div>';
+          if (hb.blocker) {
+            html += '  <div style="color:#fca5a5;font-size:12px;margin-left:16px;margin-top:2px">Blocker: ' + esc(hb.blocker) + '</div>';
+          }
+          if (hb.next_action) {
+            html += '  <div style="color:var(--text-muted);font-size:12px;margin-left:16px;margin-top:2px">Next: ' + esc(hb.next_action) + '</div>';
+          }
+          if (hb.author) {
+            html += '  <div style="color:var(--text-dim);font-size:11px;margin-left:16px;margin-top:2px">— ' + esc(hb.author) + '</div>';
+          }
+          html += '</div>';
+        }
+        el.innerHTML = html;
+      })
+      .catch(function () {
+        el.innerHTML = '<div class="list-empty">Cannot load heartbeats.</div>';
+      });
   }
 
   function loadSOPProgress(operationId) {

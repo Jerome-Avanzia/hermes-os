@@ -25,6 +25,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from hermes.conductor import Conductor
+from hermes.kernel.heartbeat_runtime import InvalidHeartbeatStatusError
+from hermes.kernel.heartbeat_store import HeartbeatStore
 from hermes.kernel.job_store import JobStore
 from hermes.kernel.operation_store import OperationNotFoundError, OperationStore
 from hermes.kernel.profile_loader import ProfileLoader
@@ -74,6 +76,15 @@ class CompleteStepRequest(BaseModel):
     step_id: str
 
 
+class CreateHeartbeatRequest(BaseModel):
+    status: str
+    summary: str
+    author: str = ""
+    details: str = ""
+    blocker: str = ""
+    next_action: str = ""
+
+
 class CreateDecisionRequest(BaseModel):
     recommendation_id: str
     action: str
@@ -95,6 +106,7 @@ _workspace_engine = WorkspaceEngine()
 
 _operation_store = OperationStore()
 _job_store = JobStore()
+_heartbeat_store = HeartbeatStore()
 
 
 def _build_hermes_service(model: str | None = None) -> HermesService:
@@ -109,6 +121,7 @@ def _build_hermes_service(model: str | None = None) -> HermesService:
         conductor=conductor,
         operation_store=_operation_store,
         job_store=_job_store,
+        heartbeat_store=_heartbeat_store,
     )
 
 
@@ -296,6 +309,14 @@ async def create_operation(workspace_id: str, body: CreateOperationRequest) -> J
     return JSONResponse(status_code=201, content=result)
 
 
+@app.get("/v1/workspaces/{workspace_id}/operations/stale")
+async def list_stale_operations(
+    workspace_id: str, threshold_hours: float | None = None
+) -> list[dict]:
+    """Return active Operations whose latest heartbeat exceeds the freshness threshold."""
+    return _hermes_service.list_stale_operations(workspace_id, threshold_hours)
+
+
 @app.get("/v1/workspaces/{workspace_id}/operations/{operation_id}")
 async def get_operation(workspace_id: str, operation_id: str) -> JSONResponse:
     """Return a single Operation."""
@@ -453,6 +474,47 @@ async def link_sop_to_operation(
             content={"error": str(exc)},
         )
     return JSONResponse(content=result)
+
+
+@app.get("/v1/workspaces/{workspace_id}/operations/{operation_id}/heartbeats")
+async def list_heartbeats(workspace_id: str, operation_id: str) -> JSONResponse:
+    """List all Heartbeats for an Operation, newest first."""
+    try:
+        result = _hermes_service.list_operation_heartbeats(workspace_id, operation_id)
+    except OperationNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Operation not found: {operation_id}"},
+        )
+    return JSONResponse(content=result)
+
+
+@app.post("/v1/workspaces/{workspace_id}/operations/{operation_id}/heartbeats")
+async def create_heartbeat(
+    workspace_id: str, operation_id: str, body: CreateHeartbeatRequest
+) -> JSONResponse:
+    """Append an immutable Heartbeat to an Operation."""
+    try:
+        result = _hermes_service.create_heartbeat(
+            workspace_id, operation_id,
+            status=body.status,
+            summary=body.summary,
+            author=body.author,
+            details=body.details,
+            blocker=body.blocker,
+            next_action=body.next_action,
+        )
+    except OperationNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Operation not found: {operation_id}"},
+        )
+    except InvalidHeartbeatStatusError as exc:
+        return JSONResponse(
+            status_code=422,
+            content={"error": str(exc)},
+        )
+    return JSONResponse(status_code=201, content=result)
 
 
 @app.get("/v1/workspaces/{workspace_id}/departments")

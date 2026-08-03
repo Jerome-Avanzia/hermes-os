@@ -1,0 +1,12 @@
+{
+  "id": "HB-001",
+  "operation_id": "OP-20260803-001",
+  "workspace_id": "AVANZIA",
+  "timestamp": "2026-08-03T14:30:00Z",
+  "status": "active",
+  "summary": "Landing page wireframes approved, moving to visual design",
+  "author": "Founder",
+  "details": "Client approved all three wireframe variants. Selected option B with minor nav adjustments.",
+  "blocker": "",
+  "next_action": "Complete visual design by end of week"
+}
