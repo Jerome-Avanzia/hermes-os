@@ -3,6 +3,7 @@ name: Brand Strategy
 version: 1.0.0
 status: active
 owner: Marketing
+department_id: marketing
 
 capabilities:
   - brand-strategy

@@ -1,0 +1,13 @@
+id: technology
+name: Technology
+status: active
+owner: Chief Technology Officer
+
+description: Software development, frontend, backend, and version control.
+mission: Deliver reliable, maintainable software across the AVANZIA ecosystem.
+
+tags:
+  - development
+  - frontend
+  - backend
+  - infrastructure

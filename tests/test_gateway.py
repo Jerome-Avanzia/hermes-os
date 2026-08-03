@@ -1999,3 +1999,115 @@ def test_ui_sops_shows_content():
 def test_ui_sops_has_back_button():
     resp = client.get("/")
     assert "sop-back" in resp.text
+
+
+# -- Departments API (Sprint 33) ----------------------------------------------
+
+
+def test_get_departments_returns_200():
+    service = MagicMock()
+    service.list_departments.return_value = [
+        {"id": "marketing", "name": "Marketing", "description": "Brand.",
+         "owner": "CMO", "status": "active", "capability_count": 2,
+         "active_capability_count": 2, "sop_count": 1},
+    ]
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/departments")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    service.list_departments.assert_called_once_with(WS)
+
+
+def test_get_departments_has_aggregate_metrics():
+    service = MagicMock()
+    service.list_departments.return_value = [
+        {"id": "marketing", "name": "Marketing", "description": "Brand.",
+         "owner": "CMO", "status": "active", "capability_count": 2,
+         "active_capability_count": 2, "sop_count": 1},
+    ]
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/departments")
+    dept = resp.json()[0]
+    assert "capability_count" in dept
+    assert "active_capability_count" in dept
+    assert "sop_count" in dept
+
+
+def test_get_department_detail_returns_200():
+    service = MagicMock()
+    service.get_department.return_value = {
+        "id": "marketing", "name": "Marketing", "description": "Brand.",
+        "mission": "Build the brand.", "owner": "CMO", "status": "active",
+        "tags": ["brand"], "capabilities": [{"id": "copywriting", "name": "Copywriting", "status": "active"}],
+        "capability_count": 1, "active_capability_count": 1, "sop_count": 1,
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/departments/marketing")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "marketing"
+    assert len(resp.json()["capabilities"]) == 1
+
+
+def test_get_department_not_found_returns_404():
+    service = MagicMock()
+    service.get_department.return_value = None
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/departments/nonexistent")
+    assert resp.status_code == 404
+
+
+# -- UI: Departments view (Sprint 33) -----------------------------------------
+
+
+def test_ui_departments_view_exists():
+    resp = client.get("/")
+    assert 'data-view="departments"' in resp.text
+    assert 'id="view-departments"' in resp.text
+
+
+def test_ui_departments_nav_item():
+    resp = client.get("/")
+    assert ">Departments</div>" in resp.text or "Departments" in resp.text
+
+
+def test_ui_departments_renders_list():
+    resp = client.get("/")
+    assert "loadDepartments" in resp.text
+    assert "renderDepartmentList" in resp.text
+
+
+def test_ui_departments_renders_detail():
+    resp = client.get("/")
+    assert "renderDepartmentDetail" in resp.text
+    assert "loadDepartmentDetail" in resp.text
+
+
+def test_ui_departments_shows_capabilities():
+    resp = client.get("/")
+    assert "dept.capabilities" in resp.text or "dept-cap-link" in resp.text
+
+
+def test_ui_departments_shows_mission():
+    resp = client.get("/")
+    assert "dept.mission" in resp.text
+
+
+def test_ui_departments_has_back_button():
+    resp = client.get("/")
+    assert "dept-back" in resp.text
+
+
+def test_ui_capability_detail_shows_department_link():
+    """Capability detail shows clickable department link."""
+    resp = client.get("/")
+    assert "dept-link" in resp.text
+    assert "cap.department_id" in resp.text
+
+
+def test_ui_capability_detail_shows_both_department_and_owner():
+    """Both Department and Owner are displayed in capability metadata."""
+    resp = client.get("/")
+    # Department line
+    assert "Department:" in resp.text
+    # Owner line preserved
+    assert "Owner:" in resp.text

@@ -1,0 +1,13 @@
+id: business
+name: Business
+status: active
+owner: Chief Executive Officer
+
+description: Strategy, operations, and business development.
+mission: Drive sustainable growth and strategic direction for AVANZIA.
+
+tags:
+  - strategy
+  - operations
+  - growth
+  - planning

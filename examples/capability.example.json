@@ -12,5 +12,6 @@
   "sop_refs": ["copywriting/content-review"],
   "skill_id": "copywriting",
   "owner": "Marketing",
+  "department_id": "marketing",
   "depends_on": []
 }

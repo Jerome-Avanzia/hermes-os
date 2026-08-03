@@ -1063,6 +1063,7 @@
       <div class="nav-section-title">Knowledge</div>
       <div class="nav-item" data-view="documents">Documents</div>
       <div class="nav-item" data-view="memory">Memory</div>
+      <div class="nav-item" data-view="departments">Departments</div>
       <div class="nav-item" data-view="capabilities">Capabilities</div>
       <div class="nav-item" data-view="sops">SOPs</div>
       <div class="nav-item" data-view="mcp">MCP</div>
@@ -1149,6 +1150,10 @@
         <div id="documents-detail" class="detail-view" style="display:none"></div>
       </div>
       <div id="view-memory" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Memory</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-departments" class="view">
+        <div id="departments-list" class="list-view"></div>
+        <div id="departments-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-capabilities" class="view">
         <div id="capabilities-list" class="list-view"></div>
         <div id="capabilities-detail" class="detail-view" style="display:none"></div>
@@ -1215,6 +1220,7 @@
     if (name === "documents") loadDocuments();
     if (name === "operations") loadOperations();
     if (name === "jobs") loadJobs();
+    if (name === "departments") loadDepartments();
     if (name === "capabilities") loadCapabilities();
     if (name === "sops") loadSOPs();
   }
@@ -1760,6 +1766,7 @@
     html += '<div class="detail-section" style="margin-top:16px">';
     html += '  <div class="detail-section-title">Metadata</div>';
     html += '  <div class="list-item-meta">Skill: ' + esc(cap.skill_id || "—") + '</div>';
+    if (cap.department_id) html += '  <div class="list-item-meta">Department: <a class="dept-link" data-dept-id="' + esc(cap.department_id) + '" href="#" style="color:var(--accent);text-decoration:underline;cursor:pointer">' + esc(cap.department_id) + '</a></div>';
     if (cap.owner) html += '  <div class="list-item-meta">Owner: ' + esc(cap.owner) + '</div>';
     if (cap.keywords && cap.keywords.length > 0) {
       html += '  <div class="list-item-meta" style="margin-top:4px">Keywords: ' + cap.keywords.map(esc).join(", ") + '</div>';
@@ -1768,11 +1775,139 @@
 
     capDetailEl.innerHTML = html;
     document.getElementById("cap-back").addEventListener("click", function () { loadCapabilities(); });
+    capDetailEl.querySelectorAll(".dept-link").forEach(function (el) {
+      el.addEventListener("click", function (e) {
+        e.preventDefault();
+        switchView("departments");
+        loadDepartmentDetail(el.dataset.deptId);
+      });
+    });
     capDetailEl.querySelectorAll(".sop-link").forEach(function (el) {
       el.addEventListener("click", function (e) {
         e.preventDefault();
         switchView("sops");
         loadSOPDetail(el.dataset.sopId);
+      });
+    });
+  }
+
+  // ── Departments ──────────────────────────────────────
+
+  var deptListEl   = document.getElementById("departments-list");
+  var deptDetailEl = document.getElementById("departments-detail");
+
+  function loadDepartments() {
+    if (!activeWorkspaceId) return;
+    deptListEl.style.display = "";
+    deptDetailEl.style.display = "none";
+    deptListEl.innerHTML = '<div class="list-empty">Loading departments...</div>';
+
+    fetch(wsBase() + "/departments")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (depts) { renderDepartmentList(depts); })
+      .catch(function () { deptListEl.innerHTML = '<div class="list-empty">Cannot load departments.</div>'; });
+  }
+
+  function renderDepartmentList(depts) {
+    if (depts.length === 0) {
+      deptListEl.innerHTML = '<div class="list-empty">No departments registered.</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < depts.length; i++) {
+      var d = depts[i];
+      html += '<div class="list-item" data-dept-id="' + esc(d.id) + '" style="cursor:pointer">';
+      html += '  <div class="list-item-main">';
+      html += '    <div class="list-item-title">' + esc(d.name) + '</div>';
+      html += '    <div class="list-item-meta">' + esc(d.description || d.id) + '</div>';
+      html += '    <div class="list-item-meta" style="margin-top:2px">';
+      if (d.owner) html += esc(d.owner) + ' &middot; ';
+      html += d.capability_count + ' capabilities';
+      if (d.sop_count > 0) html += ' &middot; ' + d.sop_count + ' SOPs';
+      html += '</div>';
+      html += '  </div>';
+      html += '  <span class="status-badge ' + esc(d.status) + '">' + formatStatus(d.status) + '</span>';
+      html += '</div>';
+    }
+    deptListEl.innerHTML = html;
+    deptListEl.querySelectorAll("[data-dept-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadDepartmentDetail(el.dataset.deptId); });
+    });
+  }
+
+  function loadDepartmentDetail(deptId) {
+    deptListEl.style.display = "none";
+    deptDetailEl.style.display = "";
+    deptDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(wsBase() + "/departments/" + encodeURIComponent(deptId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (dept) {
+        if (!dept) { deptDetailEl.innerHTML = '<div class="list-empty">Department not found.</div>'; return; }
+        renderDepartmentDetail(dept);
+      })
+      .catch(function () { deptDetailEl.innerHTML = '<div class="list-empty">Cannot load department.</div>'; });
+  }
+
+  function renderDepartmentDetail(dept) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(dept.name) + '</div>';
+    html += '  <div class="detail-meta">' + esc(dept.id) + ' &middot; <span class="status-badge ' + esc(dept.status) + '">' + formatStatus(dept.status) + '</span></div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="dept-back">Back</button>';
+    html += '</div>';
+
+    if (dept.description) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Description</div>';
+      html += '  <div style="color:var(--text-main);font-size:13px">' + esc(dept.description) + '</div>';
+      html += '</div>';
+    }
+
+    if (dept.mission) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Mission</div>';
+      html += '  <div style="color:var(--text-main);font-size:13px">' + esc(dept.mission) + '</div>';
+      html += '</div>';
+    }
+
+    // Owner
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Metadata</div>';
+    if (dept.owner) html += '  <div class="list-item-meta">Owner: ' + esc(dept.owner) + '</div>';
+    html += '  <div class="list-item-meta">' + dept.capability_count + ' capabilities (' + dept.active_capability_count + ' active) &middot; ' + dept.sop_count + ' SOPs</div>';
+    html += '</div>';
+
+    // Tags
+    if (dept.tags && dept.tags.length > 0) {
+      html += '<div class="cap-section">';
+      html += '  <div class="cap-section-title">Tags</div>';
+      for (var i = 0; i < dept.tags.length; i++) {
+        html += '<span class="cap-tag">' + esc(dept.tags[i]) + '</span>';
+      }
+      html += '</div>';
+    }
+
+    // Capabilities
+    if (dept.capabilities && dept.capabilities.length > 0) {
+      html += '<div class="cap-section">';
+      html += '  <div class="cap-section-title">Capabilities</div>';
+      for (var i = 0; i < dept.capabilities.length; i++) {
+        var c = dept.capabilities[i];
+        html += '<a class="cap-tag dept-cap-link" data-cap-id="' + esc(c.id) + '" href="#" style="cursor:pointer;text-decoration:underline;color:var(--accent)">' + esc(c.name) + ' <span class="status-badge ' + esc(c.status) + '" style="font-size:9px;padding:1px 4px">' + formatStatus(c.status) + '</span></a>';
+      }
+      html += '</div>';
+    }
+
+    deptDetailEl.innerHTML = html;
+    document.getElementById("dept-back").addEventListener("click", function () { loadDepartments(); });
+    deptDetailEl.querySelectorAll(".dept-cap-link").forEach(function (el) {
+      el.addEventListener("click", function (e) {
+        e.preventDefault();
+        switchView("capabilities");
+        loadCapabilityDetail(el.dataset.capId);
       });
     });
   }

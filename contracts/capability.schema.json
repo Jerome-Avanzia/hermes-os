@@ -64,6 +64,10 @@
     "owner": {
       "type": ["string", "null"]
     },
+    "department_id": {
+      "type": "string",
+      "description": "ID of the owning department."
+    },
     "depends_on": {
       "type": "array",
       "items": { "type": "string" }

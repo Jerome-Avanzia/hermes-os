@@ -2,6 +2,7 @@ from hermes.models.bottleneck import Bottleneck
 from hermes.models.business import Business
 from hermes.models.capability import Capability
 from hermes.models.context import Context
+from hermes.models.department import Department
 from hermes.models.decision import Decision
 from hermes.models.diagnostics_report import DiagnosticsReport
 from hermes.models.execution_plan import ExecutionPlan
@@ -39,6 +40,7 @@ __all__ = [
     "Business",
     "Capability",
     "Context",
+    "Department",
     "Decision",
     "DiagnosticsReport",
     "ExecutionPlan",

@@ -661,6 +661,7 @@ class TestCapability:
         assert c.sop_ref is None
         assert c.sop_refs == []
         assert c.owner is None
+        assert c.department_id == ""
         assert c.depends_on == []
 
     def test_all_fields(self):
@@ -678,9 +679,11 @@ class TestCapability:
             status="active",
             skill_id="copywriting",
             owner="Marketing",
+            department_id="marketing",
             depends_on=["brand-strategy"],
         )
         assert c.owner == "Marketing"
+        assert c.department_id == "marketing"
         assert c.depends_on == ["brand-strategy"]
         assert c.sop_refs == ["copywriting/content-review"]
 
@@ -755,3 +758,46 @@ class TestSOP:
         from hermes.models.sop import SOP_CATEGORIES
         for cat in ("Operational", "Technical", "Business", "Marketing", "Sales"):
             assert cat in SOP_CATEGORIES
+
+
+# -- Department ----------------------------------------------------------------
+
+
+class TestDepartment:
+    def test_required_fields_only(self):
+        from hermes.models.department import Department
+        d = Department(id="marketing", name="Marketing")
+        assert d.description == ""
+        assert d.mission == ""
+        assert d.owner is None
+        assert d.status == "active"
+        assert d.tags == []
+
+    def test_all_fields(self):
+        from hermes.models.department import Department
+        d = Department(
+            id="marketing",
+            name="Marketing",
+            description="Brand and content.",
+            mission="Build the brand.",
+            owner="CMO",
+            status="active",
+            tags=["brand", "content"],
+        )
+        assert d.owner == "CMO"
+        assert d.mission == "Build the brand."
+        assert len(d.tags) == 2
+
+    def test_example_validates_against_schema(self):
+        example = _load_example("department.example.json")
+        schema = _load_schema("department.schema.json")
+        _validate_against_schema(example, schema)
+
+    def test_schema_required_fields(self):
+        schema = _load_schema("department.schema.json")
+        assert set(schema["required"]) == {"id", "name", "status"}
+
+    def test_all_status_values_valid(self):
+        from hermes.models.department import DEPARTMENT_STATUSES
+        for status in ("active", "inactive"):
+            assert status in DEPARTMENT_STATUSES

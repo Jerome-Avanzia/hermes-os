@@ -898,8 +898,120 @@ def test_capability_serialization_includes_sop_refs():
         provides=["marketing copy"], keywords=["copy"],
         description="Drafts copy", status="active", skill_id="copywriting",
         sop_refs=["copywriting/content-review"],
+        department_id="marketing",
     )
     mocks["context_engine"].capability_engine.registry = reg
 
     result = service.get_capability("AVANZIA", "copywriting")
     assert result["sop_refs"] == ["copywriting/content-review"]
+    assert result["department_id"] == "marketing"
+
+
+# -- Sprint 33: Department Runtime ---------------------------------------------
+
+
+def test_list_departments_delegates_to_registry():
+    service, mocks = _mocked_service()
+    from hermes.kernel.department_registry import DepartmentRegistry
+    from hermes.kernel.capability_registry import CapabilityRegistry
+    from hermes.models.department import Department
+    from hermes.models import Capability
+
+    dept_reg = MagicMock(spec=DepartmentRegistry)
+    dept_reg.list.return_value = [
+        Department(id="marketing", name="Marketing", description="Brand.",
+                   owner="CMO", status="active"),
+    ]
+    service.department_registry = dept_reg
+
+    cap_reg = MagicMock(spec=CapabilityRegistry)
+    cap_reg.list.return_value = [
+        Capability(id="copywriting", name="Copywriting", version="1.0.0",
+                   provides=["copy"], keywords=["copy"], status="active",
+                   department_id="marketing", sop_refs=["copywriting/content-review"]),
+        Capability(id="brand-strategy", name="Brand Strategy", version="1.0.0",
+                   provides=["brand"], keywords=["brand"], status="active",
+                   department_id="marketing", sop_refs=["brand-strategy/brand-audit"]),
+    ]
+    mocks["context_engine"].capability_engine.registry = cap_reg
+
+    result = service.list_departments("AVANZIA")
+    assert len(result) == 1
+    assert result[0]["id"] == "marketing"
+    assert result[0]["capability_count"] == 2
+    assert result[0]["active_capability_count"] == 2
+    assert result[0]["sop_count"] == 2
+
+
+def test_get_department_returns_detail_with_capabilities():
+    service, mocks = _mocked_service()
+    from hermes.kernel.department_registry import DepartmentRegistry
+    from hermes.kernel.capability_registry import CapabilityRegistry
+    from hermes.models.department import Department
+    from hermes.models import Capability
+
+    dept_reg = MagicMock(spec=DepartmentRegistry)
+    dept_reg.get.return_value = Department(
+        id="marketing", name="Marketing", description="Brand.",
+        mission="Build the brand.", owner="CMO", status="active",
+        tags=["brand"],
+    )
+    service.department_registry = dept_reg
+
+    cap_reg = MagicMock(spec=CapabilityRegistry)
+    cap_reg.list.return_value = [
+        Capability(id="copywriting", name="Copywriting", version="1.0.0",
+                   provides=["copy"], keywords=["copy"], status="active",
+                   department_id="marketing", sop_refs=["copywriting/content-review"]),
+    ]
+    mocks["context_engine"].capability_engine.registry = cap_reg
+
+    result = service.get_department("AVANZIA", "marketing")
+    assert result is not None
+    assert result["id"] == "marketing"
+    assert result["mission"] == "Build the brand."
+    assert result["tags"] == ["brand"]
+    assert len(result["capabilities"]) == 1
+    assert result["capabilities"][0]["id"] == "copywriting"
+    assert result["capability_count"] == 1
+    assert result["sop_count"] == 1
+
+
+def test_get_department_not_found_returns_none():
+    service, mocks = _mocked_service()
+    from hermes.kernel.department_registry import DepartmentRegistry
+
+    dept_reg = MagicMock(spec=DepartmentRegistry)
+    dept_reg.get.return_value = None
+    service.department_registry = dept_reg
+
+    assert service.get_department("AVANZIA", "nonexistent") is None
+
+
+def test_department_list_includes_active_capability_count():
+    service, mocks = _mocked_service()
+    from hermes.kernel.department_registry import DepartmentRegistry
+    from hermes.kernel.capability_registry import CapabilityRegistry
+    from hermes.models.department import Department
+    from hermes.models import Capability
+
+    dept_reg = MagicMock(spec=DepartmentRegistry)
+    dept_reg.list.return_value = [
+        Department(id="tech", name="Technology", status="active"),
+    ]
+    service.department_registry = dept_reg
+
+    cap_reg = MagicMock(spec=CapabilityRegistry)
+    cap_reg.list.return_value = [
+        Capability(id="python", name="Python", version="1.0.0",
+                   provides=["dev"], keywords=["python"], status="active",
+                   department_id="tech"),
+        Capability(id="legacy", name="Legacy", version="0.1.0",
+                   provides=["old"], keywords=["old"], status="deprecated",
+                   department_id="tech"),
+    ]
+    mocks["context_engine"].capability_engine.registry = cap_reg
+
+    result = service.list_departments("AVANZIA")
+    assert result[0]["capability_count"] == 2
+    assert result[0]["active_capability_count"] == 1

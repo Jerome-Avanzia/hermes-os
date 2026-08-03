@@ -379,6 +379,24 @@ async def fail_operation(
     return JSONResponse(content=result)
 
 
+@app.get("/v1/workspaces/{workspace_id}/departments")
+async def list_departments(workspace_id: str) -> list[dict]:
+    """List all departments with aggregate metrics."""
+    return _hermes_service.list_departments(workspace_id)
+
+
+@app.get("/v1/workspaces/{workspace_id}/departments/{department_id}")
+async def get_department(workspace_id: str, department_id: str) -> JSONResponse:
+    """Return department detail with capabilities and SOP count."""
+    dept = _hermes_service.get_department(workspace_id, department_id)
+    if dept is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Department not found: {department_id}"},
+        )
+    return JSONResponse(content=dept)
+
+
 @app.get("/v1/workspaces/{workspace_id}/capabilities")
 async def list_capabilities(workspace_id: str) -> list[dict]:
     """List all organizational capabilities."""

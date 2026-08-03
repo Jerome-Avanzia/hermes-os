@@ -1,0 +1,13 @@
+id: platform
+name: Platform
+status: active
+owner: Platform Lead
+
+description: Hermes OS infrastructure, kernel, and runtime services.
+mission: Maintain and evolve the Hermes operating system that powers all AVANZIA capabilities.
+
+tags:
+  - hermes
+  - kernel
+  - runtime
+  - platform

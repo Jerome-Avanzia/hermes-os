@@ -2,7 +2,8 @@ id: kernel
 name: Kernel
 version: 1.0.0
 status: active
-owner: Operations
+owner: Platform
+department_id: platform
 
 capabilities:
   - kernel

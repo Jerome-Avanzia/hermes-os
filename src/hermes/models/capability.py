@@ -22,4 +22,5 @@ class Capability:
     status: str = "active"
     skill_id: str = ""
     owner: str | None = None
+    department_id: str = ""
     depends_on: list[str] = field(default_factory=list)

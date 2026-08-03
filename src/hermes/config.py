@@ -18,6 +18,10 @@ def profiles_root() -> Path:
     return Path(os.environ.get("HERMES_PROFILES", "profiles"))
 
 
+def departments_root() -> Path:
+    return Path(os.environ.get("HERMES_DEPARTMENTS", "departments"))
+
+
 def businesses_root() -> Path:
     return Path(os.environ.get("HERMES_BUSINESSES", "businesses"))
 

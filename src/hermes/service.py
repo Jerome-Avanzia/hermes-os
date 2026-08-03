@@ -9,6 +9,7 @@ from hermes.conductor import Conductor
 from hermes.kernel.ceo_loop import CEOLoop
 from hermes.kernel.decision_id import generate_decision_id
 from hermes.kernel.decision_writer import DecisionWriter
+from hermes.kernel.department_registry import DepartmentRegistry
 from hermes.kernel.operation_id_bk import generate_bk_operation_id
 from hermes.kernel.operation_writer import OperationWriter
 from hermes.kernel.sop_registry import SOPRegistry
@@ -61,6 +62,7 @@ class HermesService:
         operation_store: OperationStore | None = None,
         job_store: JobStore | None = None,
         sop_registry: SOPRegistry | None = None,
+        department_registry: DepartmentRegistry | None = None,
     ) -> None:
         self.context_engine = context_engine or ContextEngine()
         self.planner = planner or Planner()
@@ -73,6 +75,7 @@ class HermesService:
         self.operation_store = operation_store
         self.job_store = job_store
         self.sop_registry = sop_registry or SOPRegistry()
+        self.department_registry = department_registry or DepartmentRegistry()
 
     # -- Workspace validation --------------------------------------------------
 
@@ -500,6 +503,7 @@ class HermesService:
             "description": c.description,
             "status": c.status,
             "provides": c.provides,
+            "department_id": c.department_id,
         }
 
     @staticmethod
@@ -518,6 +522,7 @@ class HermesService:
             "sop_refs": c.sop_refs,
             "skill_id": c.skill_id,
             "owner": c.owner,
+            "department_id": c.department_id,
             "depends_on": c.depends_on,
         }
 
@@ -561,6 +566,68 @@ class HermesService:
             "status": s.status,
             "owner": s.owner,
             "category": s.category,
+        }
+
+    # -- Department Runtime (Sprint 33) -----------------------------------------
+
+    def list_departments(self, workspace_id: str) -> list[dict]:
+        """Return all departments with aggregate metrics."""
+        self.validate_workspace(workspace_id)
+        cap_registry = self.context_engine.capability_engine.registry
+        all_caps = cap_registry.list()
+        departments = self.department_registry.list()
+        result = []
+        for dept in departments:
+            caps = [c for c in all_caps if c.department_id == dept.id]
+            active_caps = [c for c in caps if c.status == "active"]
+            sop_count = sum(len(c.sop_refs) for c in caps)
+            d = self._serialize_department_summary(dept)
+            d["capability_count"] = len(caps)
+            d["active_capability_count"] = len(active_caps)
+            d["sop_count"] = sop_count
+            result.append(d)
+        return result
+
+    def get_department(self, workspace_id: str, department_id: str) -> dict | None:
+        """Return department detail with capabilities and SOP count."""
+        self.validate_workspace(workspace_id)
+        dept = self.department_registry.get(department_id)
+        if dept is None:
+            return None
+        cap_registry = self.context_engine.capability_engine.registry
+        caps = [c for c in cap_registry.list() if c.department_id == dept.id]
+        active_caps = [c for c in caps if c.status == "active"]
+        sop_count = sum(len(c.sop_refs) for c in caps)
+        d = self._serialize_department(dept)
+        d["capabilities"] = [
+            {"id": c.id, "name": c.name, "status": c.status}
+            for c in caps
+        ]
+        d["capability_count"] = len(caps)
+        d["active_capability_count"] = len(active_caps)
+        d["sop_count"] = sop_count
+        return d
+
+    @staticmethod
+    def _serialize_department_summary(dept) -> dict:
+        return {
+            "id": dept.id,
+            "name": dept.name,
+            "description": dept.description,
+            "owner": dept.owner,
+            "status": dept.status,
+        }
+
+    @staticmethod
+    def _serialize_department(dept) -> dict:
+        return {
+            "id": dept.id,
+            "name": dept.name,
+            "description": dept.description,
+            "mission": dept.mission,
+            "owner": dept.owner,
+            "status": dept.status,
+            "tags": dept.tags,
         }
 
     # -- Jobs ------------------------------------------------------------------

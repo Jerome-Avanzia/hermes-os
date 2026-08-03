@@ -150,6 +150,7 @@ class CapabilityRegistry:
             status=manifest.get("status", "active"),
             skill_id=skill_id,
             owner=manifest.get("owner"),
+            department_id=manifest.get("department_id", ""),
             depends_on=manifest.get("depends_on", []),
         )
 

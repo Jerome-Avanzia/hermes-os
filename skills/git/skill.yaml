@@ -3,6 +3,7 @@ name: Git
 version: 1.0.0
 status: active
 owner: Technology
+department_id: technology
 
 capabilities:
   - git

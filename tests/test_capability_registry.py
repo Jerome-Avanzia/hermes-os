@@ -122,6 +122,7 @@ def test_registry_enriched_fields():
     assert "project brief" in cap.inputs
     assert "marketing copy draft" in cap.outputs
     assert cap.owner == "Marketing"
+    assert cap.department_id == "marketing"
     assert "brand-strategy" in cap.depends_on
     assert "copywriting/content-review" in cap.sop_refs
 
@@ -130,7 +131,8 @@ def test_registry_kernel_has_enriched_fields():
     reg = CapabilityRegistry(skills_root=_SKILLS_ROOT)
     cap = reg.get("kernel")
     assert cap.status == "active"
-    assert cap.owner == "Operations"
+    assert cap.owner == "Platform"
+    assert cap.department_id == "platform"
     assert cap.depends_on == []
 
 
@@ -159,6 +161,7 @@ def test_registry_defaults_for_missing_fields(tmp_path):
     assert cap.sop_ref is None
     assert cap.sop_refs == []
     assert cap.owner is None
+    assert cap.department_id == ""
     assert cap.depends_on == []
 
 
