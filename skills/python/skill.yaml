@@ -28,3 +28,6 @@ keywords:
   - pytest
 
 depends_on: []
+
+repository_refs:
+  - hermes-os

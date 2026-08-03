@@ -703,9 +703,33 @@ async def acknowledge_notification(workspace_id: str, notification_id: str) -> J
     return JSONResponse(content=result)
 
 
+@app.get("/v1/repositories")
+async def list_repositories() -> list[dict]:
+    """List all code repositories from configured provider."""
+    return _hermes_service.list_repositories()
+
+
+@app.get("/v1/repositories/{repo_id}")
+async def get_repository(repo_id: str) -> JSONResponse:
+    """Return a single repository by slug."""
+    repo = _hermes_service.get_repository(repo_id)
+    if repo is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Repository not found: {repo_id}"},
+        )
+    return JSONResponse(content=repo)
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/health/github")
+async def github_health() -> dict:
+    """GitHub integration health check (Amendment 6)."""
+    return _hermes_service.github_health()
 
 
 # -- Static UI (must be mounted last so API routes take precedence) ---------

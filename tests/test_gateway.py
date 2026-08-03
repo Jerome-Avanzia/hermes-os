@@ -2190,14 +2190,15 @@ def test_get_context_response_has_all_relation_keys():
         "object_summary": {"id": "GOAL-001"},
         "attention": {"critical": 0, "warning": 0, "blocked": 0},
         "goals": [], "people": [], "departments": [],
-        "capabilities": [], "operations": [], "decisions": [],
+        "capabilities": [], "repositories": [],
+        "operations": [], "decisions": [],
         "kpis": [], "sops": [], "heartbeats": [], "notifications": [],
     }
     with patch("hermes.gateway.app._hermes_service", service):
         resp = client.get(f"{WS_PREFIX}/context/goal/GOAL-001")
     data = resp.json()
     for key in ["goals", "people", "departments", "capabilities",
-                "operations", "decisions", "kpis", "sops",
+                "repositories", "operations", "decisions", "kpis", "sops",
                 "heartbeats", "notifications"]:
         assert key in data, f"Missing relation key: {key}"
 
@@ -2541,3 +2542,155 @@ def test_ui_capability_detail_shows_both_department_and_owner():
     assert "Department:" in resp.text
     # Owner line preserved
     assert "Owner:" in resp.text
+
+
+# -- Repository endpoints (Sprint 41) -----------------------------------------
+
+
+def test_list_repositories_returns_200():
+    service = MagicMock()
+    service.list_repositories.return_value = [
+        {"id": "hermes-os", "name": "avanzia/hermes-os", "provider": "github",
+         "language": "Python", "visibility": "private"},
+    ]
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/repositories")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["id"] == "hermes-os"
+
+
+def test_list_repositories_empty():
+    service = MagicMock()
+    service.list_repositories.return_value = []
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/repositories")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_get_repository_returns_200():
+    service = MagicMock()
+    service.get_repository.return_value = {
+        "id": "hermes-os", "name": "avanzia/hermes-os", "provider": "github",
+        "url": "https://github.com/avanzia/hermes-os",
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/repositories/hermes-os")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "hermes-os"
+    service.get_repository.assert_called_once_with("hermes-os")
+
+
+def test_get_repository_not_found_returns_404():
+    service = MagicMock()
+    service.get_repository.return_value = None
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/v1/repositories/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_github_health_endpoint():
+    service = MagicMock()
+    service.github_health.return_value = {
+        "configured": True, "authenticated": True, "reachable": True,
+        "org": "avanzia",
+        "rate_limit": {"limit": 5000, "remaining": 4999, "reset": 1234567890},
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/health/github")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["configured"] is True
+    assert data["org"] == "avanzia"
+
+
+def test_github_health_unconfigured():
+    service = MagicMock()
+    service.github_health.return_value = {
+        "configured": False, "authenticated": False, "reachable": False,
+        "org": "",
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get("/health/github")
+    assert resp.status_code == 200
+    assert resp.json()["configured"] is False
+
+
+# -- Repository UI tests (Sprint 41) ------------------------------------------
+
+
+def test_ui_has_repositories_nav():
+    resp = client.get("/")
+    assert 'data-view="repositories"' in resp.text
+
+
+def test_ui_has_repositories_view_div():
+    resp = client.get("/")
+    assert 'id="view-repositories"' in resp.text
+
+
+def test_ui_has_load_repositories_function():
+    resp = client.get("/")
+    assert "function loadRepositories" in resp.text
+
+
+def test_ui_has_load_repository_detail_function():
+    resp = client.get("/")
+    assert "function loadRepositoryDetail" in resp.text
+
+
+def test_ui_repository_detail_loads_context():
+    resp = client.get("/")
+    assert 'loadContext("repository"' in resp.text
+
+
+def test_ui_context_has_repositories_section():
+    resp = client.get("/")
+    assert "Related Repositories" in resp.text
+
+
+def test_ui_context_nav_handles_repositories():
+    resp = client.get("/")
+    assert 'nav === "repositories"' in resp.text
+
+
+# -- Context graph includes repositories key (Sprint 41) -----------------------
+
+
+def test_get_context_response_has_repositories_key():
+    service = MagicMock()
+    service.get_context.return_value = {
+        "object_type": "goal", "object_id": "GOAL-001",
+        "object_summary": {"id": "GOAL-001"},
+        "attention": {"critical": 0, "warning": 0, "blocked": 0},
+        "goals": [], "people": [], "departments": [],
+        "capabilities": [], "repositories": [],
+        "operations": [], "decisions": [],
+        "kpis": [], "sops": [], "heartbeats": [], "notifications": [],
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/context/goal/GOAL-001")
+    assert resp.status_code == 200
+    assert "repositories" in resp.json()
+
+
+def test_get_context_repository_type_returns_200():
+    service = MagicMock()
+    service.get_context.return_value = {
+        "object_type": "repository", "object_id": "hermes-os",
+        "object_summary": {"id": "hermes-os", "name": "avanzia/hermes-os", "provider": "github"},
+        "attention": {"critical": 0, "warning": 0, "blocked": 0},
+        "goals": [], "people": [], "departments": [],
+        "capabilities": [{"id": "python", "name": "Python", "status": "active"}],
+        "repositories": [],
+        "operations": [], "decisions": [],
+        "kpis": [], "sops": [], "heartbeats": [], "notifications": [],
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/context/repository/hermes-os")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["object_type"] == "repository"
+    assert len(data["capabilities"]) == 1

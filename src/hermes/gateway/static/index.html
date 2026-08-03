@@ -1187,6 +1187,7 @@
       <div class="nav-item" data-view="departments">Departments</div>
       <div class="nav-item" data-view="capabilities">Capabilities</div>
       <div class="nav-item" data-view="sops">SOPs</div>
+      <div class="nav-item" data-view="repositories">Repositories</div>
       <div class="nav-item" data-view="mcp">MCP</div>
       <div class="nav-item" data-view="profiles">Profiles</div>
     </div>
@@ -1298,6 +1299,10 @@
         <div id="sops-list" class="list-view"></div>
         <div id="sops-detail" class="detail-view" style="display:none"></div>
       </div>
+      <div id="view-repositories" class="view">
+        <div id="repositories-list" class="list-view"></div>
+        <div id="repositories-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-mcp" class="view"><div class="view-placeholder"><div class="view-placeholder-title">MCP</div><div class="view-placeholder-sub">Coming soon</div></div></div>
       <div id="view-profiles" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Profiles</div><div class="view-placeholder-sub">Coming soon</div></div></div>
 
@@ -1361,6 +1366,7 @@
     if (name === "departments") loadDepartments();
     if (name === "capabilities") loadCapabilities();
     if (name === "sops") loadSOPs();
+    if (name === "repositories") loadRepositories();
     if (name === "notifications") loadNotifications();
   }
 
@@ -2131,6 +2137,7 @@
       { key: "operations", label: "Related Operations", idField: "id", nameField: "request", type: "operations", navFn: "loadOperationDetail" },
       { key: "decisions", label: "Related Decisions", idField: "id", nameField: "title", type: "decisions", navFn: null },
       { key: "kpis", label: "Related KPIs", idField: "id", nameField: "name", type: "kpis", navFn: null },
+      { key: "repositories", label: "Related Repositories", idField: "id", nameField: "name", type: "repositories", navFn: "loadRepositoryDetail" },
       { key: "sops", label: "Related SOPs", idField: "id", nameField: "title", type: "sops", navFn: null },
       { key: "heartbeats", label: "Related Heartbeats", idField: "id", nameField: "summary", type: "heartbeats", navFn: null },
       { key: "notifications", label: "Related Notifications", idField: "id", nameField: "title", type: "notifications", navFn: null },
@@ -2178,6 +2185,7 @@
         else if (nav === "departments") { switchView("departments"); loadDepartmentDetail(id); }
         else if (nav === "capabilities") { switchView("capabilities"); loadCapabilityDetail(id); }
         else if (nav === "operations") { switchView("operations"); loadOperationDetail(id); }
+        else if (nav === "repositories") { switchView("repositories"); loadRepositoryDetail(id); }
       });
     });
   }
@@ -2756,6 +2764,98 @@
 
     sopDetailEl.innerHTML = html;
     document.getElementById("sop-back").addEventListener("click", function () { loadSOPs(); });
+  }
+
+  // ── Repositories ──────────────────────────────────
+
+  var repoListEl   = document.getElementById("repositories-list");
+  var repoDetailEl = document.getElementById("repositories-detail");
+
+  function loadRepositories() {
+    repoListEl.style.display = "";
+    repoDetailEl.style.display = "none";
+    repoListEl.innerHTML = '<div class="list-empty">Loading repositories...</div>';
+
+    fetch(GATEWAY + "/v1/repositories")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (repos) { renderRepoList(repos); })
+      .catch(function () { repoListEl.innerHTML = '<div class="list-empty">Cannot load repositories.</div>'; });
+  }
+
+  function renderRepoList(repos) {
+    if (repos.length === 0) {
+      repoListEl.innerHTML = '<div class="list-empty">No repositories. Configure HERMES_GITHUB_ORG and HERMES_GITHUB_TOKEN.</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < repos.length; i++) {
+      var r = repos[i];
+      html += '<div class="list-item" data-repo-id="' + esc(r.id) + '" style="cursor:pointer">';
+      html += '  <div class="list-item-main">';
+      html += '    <div class="list-item-title">' + esc(r.id) + '</div>';
+      html += '    <div class="list-item-meta">' + esc(r.language || "—") + ' &middot; ' + esc(r.visibility) + (r.archived ? ' &middot; archived' : '') + '</div>';
+      if (r.description) {
+        html += '    <div class="list-item-meta" style="margin-top:2px">' + esc(r.description) + '</div>';
+      }
+      html += '  </div>';
+      html += '  <span class="status-badge active">' + esc(r.provider) + '</span>';
+      html += '</div>';
+    }
+    repoListEl.innerHTML = html;
+    repoListEl.querySelectorAll("[data-repo-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadRepositoryDetail(el.dataset.repoId); });
+    });
+  }
+
+  function loadRepositoryDetail(repoId) {
+    repoListEl.style.display = "none";
+    repoDetailEl.style.display = "";
+    repoDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(GATEWAY + "/v1/repositories/" + encodeURIComponent(repoId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (repo) {
+        if (!repo) { repoDetailEl.innerHTML = '<div class="list-empty">Repository not found.</div>'; return; }
+        renderRepoDetail(repo);
+      })
+      .catch(function () { repoDetailEl.innerHTML = '<div class="list-empty">Cannot load repository.</div>'; });
+  }
+
+  function renderRepoDetail(repo) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(repo.id) + '</div>';
+    html += '  <div class="detail-meta">' + esc(repo.name) + ' &middot; ' + esc(repo.provider) + ' &middot; ' + esc(repo.visibility) + '</div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="repo-back">Back</button>';
+    if (repo.url) html += '  <a class="detail-btn" href="' + esc(repo.url) + '" target="_blank" rel="noopener" style="text-decoration:none">Open on GitHub</a>';
+    html += '</div>';
+
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Details</div>';
+    if (repo.description) html += '  <div class="list-item-meta">Description: ' + esc(repo.description) + '</div>';
+    html += '  <div class="list-item-meta">Default branch: ' + esc(repo.default_branch) + '</div>';
+    html += '  <div class="list-item-meta">Language: ' + esc(repo.language || "—") + '</div>';
+    html += '  <div class="list-item-meta">Open issues: ' + repo.open_issues_count + '</div>';
+    if (repo.archived) html += '  <div class="list-item-meta" style="color:var(--red)">Archived</div>';
+    if (repo.last_push_at) html += '  <div class="list-item-meta">Last push: ' + esc(repo.last_push_at) + '</div>';
+    if (repo.topics && repo.topics.length > 0) html += '  <div class="list-item-meta">Topics: ' + esc(repo.topics.join(", ")) + '</div>';
+    html += '</div>';
+
+    // Context panel
+    if (activeWorkspaceId) {
+      html += '<div id="repo-context" style="margin-top:16px"></div>';
+    }
+
+    repoDetailEl.innerHTML = html;
+    document.getElementById("repo-back").addEventListener("click", function () { loadRepositories(); });
+
+    // Load context
+    if (activeWorkspaceId) {
+      var ctxEl = document.getElementById("repo-context");
+      loadContext("repository", repo.id, ctxEl);
+    }
   }
 
   // ── Business Journal ──────────────────────────────

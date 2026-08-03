@@ -2,6 +2,7 @@ from hermes.models.bottleneck import Bottleneck
 from hermes.models.heartbeat import Heartbeat
 from hermes.models.business import Business
 from hermes.models.capability import Capability
+from hermes.models.code_repository import CodeRepository
 from hermes.models.context import Context
 from hermes.models.department import Department
 from hermes.models.decision import Decision
@@ -45,6 +46,7 @@ __all__ = [
     "Bottleneck",
     "Business",
     "Capability",
+    "CodeRepository",
     "Context",
     "Department",
     "Decision",

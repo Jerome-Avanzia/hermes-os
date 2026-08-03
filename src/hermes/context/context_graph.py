@@ -51,6 +51,7 @@ class GraphData:
     decisions: list = field(default_factory=list)
     notifications: list = field(default_factory=list)
     heartbeat_store: Any = None
+    repositories: list = field(default_factory=list)
 
 
 # -- Internal resolution context -----------------------------------------------
@@ -71,11 +72,13 @@ class _Ctx:
     decisions: list
     notifications: list
     heartbeat_store: Any
+    repositories: list
     goal_index: dict
     person_index: dict
     dept_index: dict
     cap_index: dict
     sop_index: dict
+    repo_index: dict
 
 
 # -- Serializers ---------------------------------------------------------------
@@ -126,6 +129,11 @@ def _ser_notif(n) -> dict:
             "category": n.category, "summary": n.summary}
 
 
+def _ser_repo(r) -> dict:
+    return {"id": r.id, "name": r.name, "provider": r.provider,
+            "language": r.language, "url": r.url, "visibility": r.visibility}
+
+
 # -- Object finders ------------------------------------------------------------
 
 
@@ -138,6 +146,7 @@ _FINDERS: dict[str, Callable] = {
     "operation":  lambda ctx, oid: next((o for o in ctx.operations if o.id == oid), None),
     "decision":   lambda ctx, oid: next((d for d in ctx.decisions if d.decision_id == oid), None),
     "kpi":        lambda ctx, oid: next((k for k in ctx.kpis if k.kpi_id == oid), None),
+    "repository": lambda ctx, oid: ctx.repo_index.get(oid),
 }
 
 _SUMMARIZERS: dict[str, Callable] = {
@@ -149,6 +158,7 @@ _SUMMARIZERS: dict[str, Callable] = {
     "operation":  _ser_op,
     "decision":   _ser_decision,
     "kpi":        _ser_kpi,
+    "repository": _ser_repo,
 }
 
 
@@ -448,6 +458,82 @@ def _sop_operations(sop, ctx):
     return [_ser_op(o) for o in ctx.operations if o.sop_id == sop.id]
 
 
+# -- Edge resolvers: Repository ------------------------------------------------
+
+
+def _repo_capabilities(repo, ctx):
+    return [_ser_cap(c) for c in ctx.all_capabilities
+            if repo.id in c.repository_refs]
+
+
+def _repo_people(repo, ctx):
+    """People resolved through capabilities (Amendment 7)."""
+    caps = [c for c in ctx.all_capabilities if repo.id in c.repository_refs]
+    seen: set[str] = set()
+    result = []
+    for cap in caps:
+        for p in ctx.all_people:
+            if p.id not in seen and _owner_matches(cap.owner, p):
+                seen.add(p.id)
+                result.append(_ser_person(p))
+    return result
+
+
+def _repo_departments(repo, ctx):
+    caps = [c for c in ctx.all_capabilities if repo.id in c.repository_refs]
+    dept_ids = {c.department_id for c in caps if c.department_id}
+    return [_ser_dept(ctx.dept_index[d]) for d in dept_ids
+            if d in ctx.dept_index]
+
+
+def _repo_goals(repo, ctx):
+    """Goal→Repository via explicit Capability links only (Amendment 4, 8)."""
+    caps = [c for c in ctx.all_capabilities if repo.id in c.repository_refs]
+    if not caps:
+        return []
+    cap_owners = {c.owner.strip().lower() for c in caps if c.owner}
+    return [_ser_goal(g) for g in ctx.all_goals
+            if g.owner and g.owner.strip().lower() in cap_owners]
+
+
+# -- Repository edges on existing types ----------------------------------------
+
+
+def _goal_repositories(goal, ctx):
+    """Goal→Repository via capabilities only (Amendment 4 — no owner inference)."""
+    goal_caps = [c for c in ctx.all_capabilities
+                 if c.owner and goal.owner
+                 and c.owner.strip().lower() == goal.owner.strip().lower()]
+    repo_ids: set[str] = set()
+    for c in goal_caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_repo(ctx.repo_index[r]) for r in repo_ids
+            if r in ctx.repo_index]
+
+
+def _person_repositories(person, ctx):
+    caps = [c for c in ctx.all_capabilities if _owner_matches(c.owner, person)]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_repo(ctx.repo_index[r]) for r in repo_ids
+            if r in ctx.repo_index]
+
+
+def _dept_repositories(dept, ctx):
+    caps = [c for c in ctx.all_capabilities if c.department_id == dept.id]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_repo(ctx.repo_index[r]) for r in repo_ids
+            if r in ctx.repo_index]
+
+
+def _cap_repositories(cap, ctx):
+    return [_ser_repo(ctx.repo_index[r]) for r in cap.repository_refs
+            if r in ctx.repo_index]
+
+
 # -- Declarative edge registry (Amendment 2) -----------------------------------
 
 
@@ -456,6 +542,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "people": _goal_people,
         "departments": _goal_departments,
         "capabilities": _goal_capabilities,
+        "repositories": _goal_repositories,
         "kpis": _goal_kpis,
         "decisions": _goal_decisions,
         "operations": _goal_operations,
@@ -465,6 +552,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
     "person": {
         "departments": _person_departments,
         "capabilities": _person_capabilities,
+        "repositories": _person_repositories,
         "goals": _person_goals,
         "operations": _person_operations,
         "heartbeats": _person_heartbeats,
@@ -473,6 +561,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
     "department": {
         "people": _dept_people,
         "capabilities": _dept_capabilities,
+        "repositories": _dept_repositories,
         "goals": _dept_goals,
         "operations": _dept_operations,
         "sops": _dept_sops,
@@ -480,6 +569,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
     "capability": {
         "departments": _cap_departments,
         "people": _cap_people,
+        "repositories": _cap_repositories,
         "sops": _cap_sops,
         "goals": _cap_goals,
         "operations": _cap_operations,
@@ -510,11 +600,17 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "departments": _sop_departments,
         "operations": _sop_operations,
     },
+    "repository": {
+        "capabilities": _repo_capabilities,
+        "people": _repo_people,
+        "departments": _repo_departments,
+        "goals": _repo_goals,
+    },
 }
 
 ALL_RELATION_KEYS = frozenset({
     "goals", "people", "departments", "capabilities",
-    "operations", "decisions", "kpis", "sops",
+    "repositories", "operations", "decisions", "kpis", "sops",
     "heartbeats", "notifications",
 })
 
@@ -631,9 +727,11 @@ class ContextGraph:
             decisions=data.decisions,
             notifications=data.notifications,
             heartbeat_store=data.heartbeat_store,
+            repositories=data.repositories,
             goal_index={g.goal_id: g for g in all_goals},
             person_index={p.id: p for p in all_people},
             dept_index={d.id: d for d in all_departments},
             cap_index={c.id: c for c in all_capabilities},
             sop_index={s.id: s for s in all_sops},
+            repo_index={r.id: r for r in data.repositories},
         )

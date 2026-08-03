@@ -29,3 +29,6 @@ keywords:
   - frontend
 
 depends_on: []
+
+repository_refs:
+  - avanzia-website

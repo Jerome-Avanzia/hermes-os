@@ -405,7 +405,100 @@ def test_response_has_attention(graph, empty_data):
 # -- Supported types -----------------------------------------------------------
 
 
-def test_supported_types_includes_all_eight():
+def test_supported_types_includes_all_nine():
     expected = {"goal", "person", "department", "capability",
-                "operation", "decision", "kpi", "sop"}
+                "operation", "decision", "kpi", "sop", "repository"}
     assert SUPPORTED_TYPES == expected
+
+
+# -- Repository context --------------------------------------------------------
+
+
+@dataclass
+class _MockRepo:
+    id: str
+    name: str = "test-repo"
+    provider: str = "github"
+    url: str = ""
+    language: str = "Python"
+    visibility: str = "private"
+
+
+def test_resolve_repository(graph):
+    repo = _MockRepo(id="hermes-os", name="avanzia/hermes-os")
+    data = GraphData(workspace_id="AVANZIA", repositories=[repo])
+    result = graph.resolve("repository", "hermes-os", data)
+    assert result is not None
+    assert result["object_type"] == "repository"
+    assert result["object_id"] == "hermes-os"
+    assert result["object_summary"]["provider"] == "github"
+
+
+def test_resolve_repository_not_found(graph):
+    data = GraphData(workspace_id="AVANZIA", repositories=[])
+    result = graph.resolve("repository", "nonexistent", data)
+    assert result is None
+
+
+def test_repository_resolves_capabilities(graph):
+    """Capabilities with repository_refs pointing to this repo."""
+    repo = _MockRepo(id="hermes-os")
+    data = GraphData(workspace_id="AVANZIA", repositories=[repo])
+    result = graph.resolve("repository", "hermes-os", data)
+    # python and git skills have repository_refs: [hermes-os]
+    cap_ids = [c["id"] for c in result["capabilities"]]
+    assert "python" in cap_ids
+    assert "git" in cap_ids
+
+
+def test_repository_resolves_people_through_capabilities(graph):
+    """People resolved through capability owners (Amendment 7)."""
+    repo = _MockRepo(id="hermes-os")
+    data = GraphData(workspace_id="AVANZIA", repositories=[repo])
+    result = graph.resolve("repository", "hermes-os", data)
+    # python and git owned by "Technology" → engineering-lead
+    people_ids = [p["id"] for p in result["people"]]
+    assert len(people_ids) >= 1
+
+
+def test_repository_resolves_departments(graph):
+    repo = _MockRepo(id="hermes-os")
+    data = GraphData(workspace_id="AVANZIA", repositories=[repo])
+    result = graph.resolve("repository", "hermes-os", data)
+    # python and git have department_id: technology
+    dept_ids = [d["id"] for d in result["departments"]]
+    assert "technology" in dept_ids
+
+
+def test_goal_resolves_repositories_through_capabilities(graph):
+    """Goal→Repository via capabilities only (Amendment 4)."""
+    repo = _MockRepo(id="hermes-os")
+    data = GraphData(workspace_id="AVANZIA", repositories=[repo])
+    # Goals owned by "Technology" should see repos via capabilities
+    result = graph.resolve("goal", "GOAL-001", data)
+    # Whether repos appear depends on whether goal owner matches cap owner
+    assert "repositories" in result
+
+
+def test_capability_resolves_repositories(graph):
+    """Capability with repository_refs sees matching repos."""
+    repo = _MockRepo(id="hermes-os")
+    data = GraphData(workspace_id="AVANZIA", repositories=[repo])
+    result = graph.resolve("capability", "python", data)
+    assert result is not None
+    repo_ids = [r["id"] for r in result["repositories"]]
+    assert "hermes-os" in repo_ids
+
+
+def test_capability_without_repos_has_empty_list(graph):
+    repo = _MockRepo(id="hermes-os")
+    data = GraphData(workspace_id="AVANZIA", repositories=[repo])
+    result = graph.resolve("capability", "brand-strategy", data)
+    assert result is not None
+    assert result["repositories"] == []
+
+
+def test_response_contains_repositories_key(graph, empty_data):
+    result = graph.resolve("goal", "GOAL-001", empty_data)
+    assert "repositories" in result
+    assert isinstance(result["repositories"], list)

@@ -54,6 +54,8 @@ from hermes.providers.ai_provider import AIProvider
 from hermes.providers.ollama_provider import ChatMessage
 from hermes.kernel.workspace_engine import WorkspaceNotFoundError  # noqa: F401 — re-exported for Gateway
 from hermes.runtime.context_engine import ContextEngine
+from hermes.runtime.github_provider import GitHubProvider
+from hermes.runtime.github_runtime import GitHubRuntime
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,7 @@ class HermesService:
         self.people_registry = people_registry or PeopleRegistry()
         self.goal_registry = goal_registry or GoalRegistry()
         self._context_graph: ContextGraph | None = None
+        self._github_runtime: GitHubRuntime | None = None
 
     # -- Workspace validation --------------------------------------------------
 
@@ -1161,6 +1164,68 @@ class HermesService:
             "strategy_id": goal.strategy_id,
         }
 
+    # -- GitHub Runtime (Sprint 41) -----------------------------------------------
+
+    def _get_github_runtime(self) -> GitHubRuntime:
+        """Lazily build the GitHubRuntime from config."""
+        if self._github_runtime is None:
+            provider = GitHubProvider(
+                org=config.github_org(),
+                token=config.github_token(),
+            )
+            self._github_runtime = GitHubRuntime(provider)
+        return self._github_runtime
+
+    def github_health(self) -> dict:
+        """Return GitHub integration health status (Amendment 1, 6)."""
+        runtime = self._get_github_runtime()
+        h = runtime.health()
+        result: dict = {
+            "configured": h.configured,
+            "authenticated": h.authenticated,
+            "reachable": h.reachable,
+            "org": h.org,
+        }
+        if h.rate_limit:
+            result["rate_limit"] = {
+                "limit": h.rate_limit.limit,
+                "remaining": h.rate_limit.remaining,
+                "reset": h.rate_limit.reset,
+            }
+        return result
+
+    def list_repositories(self) -> list[dict]:
+        """Return all org repositories as serialized dicts."""
+        runtime = self._get_github_runtime()
+        repos = runtime.list_repositories()
+        return [self._serialize_repo(r) for r in repos]
+
+    def get_repository(self, repo_id: str) -> dict | None:
+        """Return a single repository by slug, or None."""
+        runtime = self._get_github_runtime()
+        repo = runtime.get_repository(repo_id)
+        if repo is None:
+            return None
+        return self._serialize_repo(repo)
+
+    @staticmethod
+    def _serialize_repo(r) -> dict:
+        return {
+            "id": r.id,
+            "name": r.name,
+            "provider": r.provider,
+            "url": r.url,
+            "description": r.description,
+            "default_branch": r.default_branch,
+            "language": r.language,
+            "visibility": r.visibility,
+            "archived": r.archived,
+            "open_issues_count": r.open_issues_count,
+            "open_prs_count": r.open_prs_count,
+            "last_push_at": r.last_push_at,
+            "topics": r.topics,
+        }
+
     # -- Context Graph (Sprint 40) ---------------------------------------------
 
     def _get_context_graph(self) -> ContextGraph:
@@ -1201,6 +1266,10 @@ class HermesService:
             workspace_id, ops=ops, review=review,
         )
 
+        # Fetch repositories for context graph
+        runtime = self._get_github_runtime()
+        repos = runtime.list_repositories() if runtime.configured else []
+
         data = GraphData(
             workspace_id=workspace_id,
             operations=ops,
@@ -1208,6 +1277,7 @@ class HermesService:
             decisions=decisions,
             notifications=notifications,
             heartbeat_store=self.heartbeat_store,
+            repositories=repos,
         )
 
         return self._get_context_graph().resolve(object_type, object_id, data)

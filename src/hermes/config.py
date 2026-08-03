@@ -37,3 +37,11 @@ def stale_threshold_hours() -> float:
 def logs_dir() -> Path | None:
     value = os.environ.get("HERMES_LOGS")
     return Path(value) if value else None
+
+
+def github_org() -> str:
+    return os.environ.get("HERMES_GITHUB_ORG", "")
+
+
+def github_token() -> str:
+    return os.environ.get("HERMES_GITHUB_TOKEN", "")
