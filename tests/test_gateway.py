@@ -2131,6 +2131,141 @@ def test_ui_people_shows_blocked_highlight():
     assert "blocked_operations" in resp.text
 
 
+# -- Context Graph API (Sprint 40) ---------------------------------------------
+
+
+def test_get_context_returns_200():
+    service = MagicMock()
+    service.get_context.return_value = {
+        "object_type": "goal", "object_id": "GOAL-001",
+        "object_summary": {"id": "GOAL-001", "title": "Build", "status": "active"},
+        "attention": {"critical": 0, "warning": 1, "blocked": 0},
+        "goals": [], "people": [{"id": "jerome-cornet", "name": "Jerome"}],
+        "departments": [], "capabilities": [], "operations": [],
+        "decisions": [], "kpis": [], "sops": [],
+        "heartbeats": [], "notifications": [],
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/context/goal/GOAL-001")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["object_type"] == "goal"
+    assert "attention" in data
+    service.get_context.assert_called_once_with(WS, "goal", "GOAL-001")
+
+
+def test_get_context_person_returns_200():
+    service = MagicMock()
+    service.get_context.return_value = {
+        "object_type": "person", "object_id": "jerome-cornet",
+        "object_summary": {"id": "jerome-cornet", "name": "Jerome"},
+        "attention": {"critical": 0, "warning": 0, "blocked": 0},
+        "goals": [], "people": [], "departments": [],
+        "capabilities": [], "operations": [], "decisions": [],
+        "kpis": [], "sops": [], "heartbeats": [], "notifications": [],
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/context/person/jerome-cornet")
+    assert resp.status_code == 200
+
+
+def test_get_context_unknown_type_returns_422():
+    resp = client.get(f"{WS_PREFIX}/context/spaceship/id-1")
+    assert resp.status_code == 422
+    assert "Unknown object type" in resp.json()["error"]
+
+
+def test_get_context_not_found_returns_404():
+    service = MagicMock()
+    service.get_context.return_value = None
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/context/goal/NONEXISTENT")
+    assert resp.status_code == 404
+
+
+def test_get_context_response_has_all_relation_keys():
+    service = MagicMock()
+    service.get_context.return_value = {
+        "object_type": "goal", "object_id": "GOAL-001",
+        "object_summary": {"id": "GOAL-001"},
+        "attention": {"critical": 0, "warning": 0, "blocked": 0},
+        "goals": [], "people": [], "departments": [],
+        "capabilities": [], "operations": [], "decisions": [],
+        "kpis": [], "sops": [], "heartbeats": [], "notifications": [],
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/context/goal/GOAL-001")
+    data = resp.json()
+    for key in ["goals", "people", "departments", "capabilities",
+                "operations", "decisions", "kpis", "sops",
+                "heartbeats", "notifications"]:
+        assert key in data, f"Missing relation key: {key}"
+
+
+def test_get_context_has_attention_summary():
+    """Amendment 3: Every response includes attention summary."""
+    service = MagicMock()
+    service.get_context.return_value = {
+        "object_type": "goal", "object_id": "G1",
+        "object_summary": {},
+        "attention": {"critical": 2, "warning": 1, "blocked": 3},
+        "goals": [], "people": [], "departments": [],
+        "capabilities": [], "operations": [], "decisions": [],
+        "kpis": [], "sops": [], "heartbeats": [], "notifications": [],
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/context/goal/G1")
+    att = resp.json()["attention"]
+    assert att["critical"] == 2
+    assert att["warning"] == 1
+    assert att["blocked"] == 3
+
+
+# -- UI: Context Graph (Sprint 40) --------------------------------------------
+
+
+def test_ui_context_load_function_exists():
+    resp = client.get("/")
+    assert "loadContext" in resp.text
+    assert "renderContext" in resp.text
+
+
+def test_ui_goal_detail_loads_context():
+    resp = client.get("/")
+    assert 'loadContext("goal"' in resp.text
+
+
+def test_ui_person_detail_loads_context():
+    resp = client.get("/")
+    assert 'loadContext("person"' in resp.text
+
+
+def test_ui_department_detail_loads_context():
+    resp = client.get("/")
+    assert 'loadContext("department"' in resp.text
+
+
+def test_ui_capability_detail_loads_context():
+    resp = client.get("/")
+    assert 'loadContext("capability"' in resp.text
+
+
+def test_ui_operation_detail_loads_context():
+    resp = client.get("/")
+    assert 'loadContext("operation"' in resp.text
+
+
+def test_ui_context_has_cross_navigation():
+    resp = client.get("/")
+    assert "context-link" in resp.text
+
+
+def test_ui_context_has_attention_display():
+    """Amendment 3: Attention summary shown in UI."""
+    resp = client.get("/")
+    assert "context-attention" in resp.text
+
+
 # -- Goals API (Sprint 39) -----------------------------------------------------
 
 

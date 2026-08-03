@@ -538,6 +538,30 @@ async def get_person(workspace_id: str, person_id: str) -> JSONResponse:
     return JSONResponse(content=person)
 
 
+@app.get("/v1/workspaces/{workspace_id}/context/{object_type}/{object_id}")
+async def get_context(workspace_id: str, object_type: str, object_id: str) -> JSONResponse:
+    """Return the context graph for a business object."""
+    from hermes.context.context_graph import SUPPORTED_TYPES
+
+    if object_type not in SUPPORTED_TYPES:
+        return JSONResponse(
+            status_code=422,
+            content={"error": f"Unknown object type: {object_type}. Supported: {', '.join(sorted(SUPPORTED_TYPES))}"},
+        )
+
+    try:
+        result = _hermes_service.get_context(workspace_id, object_type, object_id)
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"error": str(exc)})
+
+    if result is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"{object_type} not found: {object_id}"},
+        )
+    return JSONResponse(content=result)
+
+
 @app.get("/v1/workspaces/{workspace_id}/goals")
 async def list_goals(workspace_id: str) -> list[dict]:
     """List all strategic goals with cross-reference counts."""

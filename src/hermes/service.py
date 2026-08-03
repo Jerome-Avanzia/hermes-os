@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from hermes import config
 from hermes.conductor import Conductor
+from hermes.context.context_graph import ContextGraph, GraphData, SUPPORTED_TYPES
 from hermes.kernel.ceo_loop import CEOLoop
 from hermes.kernel.decision_id import generate_decision_id
 from hermes.kernel.decision_writer import DecisionWriter
@@ -109,6 +110,7 @@ class HermesService:
         self.acknowledgement_store = acknowledgement_store
         self.people_registry = people_registry or PeopleRegistry()
         self.goal_registry = goal_registry or GoalRegistry()
+        self._context_graph: ContextGraph | None = None
 
     # -- Workspace validation --------------------------------------------------
 
@@ -1158,6 +1160,57 @@ class HermesService:
             "status": goal.status,
             "strategy_id": goal.strategy_id,
         }
+
+    # -- Context Graph (Sprint 40) ---------------------------------------------
+
+    def _get_context_graph(self) -> ContextGraph:
+        """Lazily build the ContextGraph from existing registries."""
+        if self._context_graph is None:
+            self._context_graph = ContextGraph(
+                goal_registry=self.goal_registry,
+                people_registry=self.people_registry,
+                department_registry=self.department_registry,
+                capability_registry=self.context_engine.capability_engine.registry,
+                sop_registry=self.sop_registry,
+            )
+        return self._context_graph
+
+    def get_context(
+        self, workspace_id: str, object_type: str, object_id: str,
+    ) -> dict | None:
+        """Resolve the context graph for a business object.
+
+        Returns None if the object is not found.
+        Raises ValueError for unsupported object_type.
+        """
+        self.validate_workspace(workspace_id)
+
+        # Assemble per-request data
+        ops = self.operation_store.list(workspace_id) if self.operation_store else []
+
+        try:
+            review = self._run_ceo_review(workspace_id)
+            kpis = review.data.kpis
+            decisions = review.data.decisions
+        except Exception:
+            kpis = []
+            decisions = []
+            review = None
+
+        notifications = self._generate_notifications(
+            workspace_id, ops=ops, review=review,
+        )
+
+        data = GraphData(
+            workspace_id=workspace_id,
+            operations=ops,
+            kpis=kpis,
+            decisions=decisions,
+            notifications=notifications,
+            heartbeat_store=self.heartbeat_store,
+        )
+
+        return self._get_context_graph().resolve(object_type, object_id, data)
 
     # -- Jobs ------------------------------------------------------------------
 

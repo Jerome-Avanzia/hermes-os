@@ -2084,9 +2084,103 @@
         loadSOPDetail(el.dataset.sopId);
       });
     });
+
+    // Context panel
+    loadContext("capability", cap.id, capDetailEl);
   }
 
   // ── People (Sprint 38) ────────────────────────────────
+
+  // ── Context Graph (shared) ──────────────────────────
+
+  function loadContext(objectType, objectId, containerEl) {
+    if (!activeWorkspaceId) return;
+    var contextDiv = document.createElement("div");
+    contextDiv.className = "context-panel";
+    contextDiv.innerHTML = '<div class="list-empty" style="font-size:12px">Loading context...</div>';
+    containerEl.appendChild(contextDiv);
+
+    fetch(wsBase() + "/context/" + encodeURIComponent(objectType) + "/" + encodeURIComponent(objectId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (ctx) {
+        if (!ctx) { contextDiv.innerHTML = ""; return; }
+        renderContext(ctx, contextDiv);
+      })
+      .catch(function () { contextDiv.innerHTML = ""; });
+  }
+
+  function renderContext(ctx, containerEl) {
+    var html = '<div class="detail-section" style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">';
+    html += '<div class="detail-section-title" style="font-size:14px;opacity:0.7">Context</div>';
+
+    // Attention summary
+    var att = ctx.attention || {};
+    if (att.critical > 0 || att.warning > 0 || att.blocked > 0) {
+      html += '<div class="list-item-meta context-attention" style="margin-bottom:8px">';
+      if (att.critical > 0) html += '<span style="color:#fca5a5;font-weight:600">' + att.critical + ' critical</span> ';
+      if (att.warning > 0) html += '<span style="color:#fcd34d">' + att.warning + ' warning</span> ';
+      if (att.blocked > 0) html += '<span style="color:#fca5a5">' + att.blocked + ' blocked</span>';
+      html += '</div>';
+    }
+
+    var sections = [
+      { key: "goals", label: "Related Goals", idField: "id", nameField: "title", type: "goals", navFn: "loadGoalDetail" },
+      { key: "people", label: "Related People", idField: "id", nameField: "name", type: "people", navFn: "loadPersonDetail" },
+      { key: "departments", label: "Related Departments", idField: "id", nameField: "name", type: "departments", navFn: "loadDepartmentDetail" },
+      { key: "capabilities", label: "Related Capabilities", idField: "id", nameField: "name", type: "capabilities", navFn: "loadCapabilityDetail" },
+      { key: "operations", label: "Related Operations", idField: "id", nameField: "request", type: "operations", navFn: "loadOperationDetail" },
+      { key: "decisions", label: "Related Decisions", idField: "id", nameField: "title", type: "decisions", navFn: null },
+      { key: "kpis", label: "Related KPIs", idField: "id", nameField: "name", type: "kpis", navFn: null },
+      { key: "sops", label: "Related SOPs", idField: "id", nameField: "title", type: "sops", navFn: null },
+      { key: "heartbeats", label: "Related Heartbeats", idField: "id", nameField: "summary", type: "heartbeats", navFn: null },
+      { key: "notifications", label: "Related Notifications", idField: "id", nameField: "title", type: "notifications", navFn: null },
+    ];
+
+    var hasContent = false;
+    for (var si = 0; si < sections.length; si++) {
+      var sec = sections[si];
+      var items = ctx[sec.key] || [];
+      if (items.length === 0) continue;
+      hasContent = true;
+      html += '<div style="margin-top:8px">';
+      html += '<div class="list-item-meta" style="font-weight:600;margin-bottom:4px">' + sec.label + '</div>';
+      for (var ii = 0; ii < items.length; ii++) {
+        var item = items[ii];
+        var itemName = item[sec.nameField] || item[sec.idField] || "";
+        var statusBadge = item.status ? ' <span class="status-badge ' + esc(item.status) + '" style="font-size:10px">' + formatStatus(item.status) + '</span>' : "";
+        if (sec.navFn) {
+          html += '<div class="list-item context-link" data-context-nav="' + esc(sec.type) + '" data-context-id="' + esc(item[sec.idField]) + '" style="cursor:pointer;padding:4px 8px;font-size:12px">';
+        } else {
+          html += '<div class="list-item" style="padding:4px 8px;font-size:12px">';
+        }
+        html += '<div class="list-item-main"><div class="list-item-title" style="font-size:12px">' + esc(itemName) + '</div></div>';
+        html += statusBadge;
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    if (!hasContent) {
+      containerEl.innerHTML = "";
+      return;
+    }
+
+    html += '</div>';
+    containerEl.innerHTML = html;
+
+    // Cross-navigation from context
+    containerEl.querySelectorAll(".context-link").forEach(function (el) {
+      el.addEventListener("click", function () {
+        var nav = el.dataset.contextNav;
+        var id = el.dataset.contextId;
+        if (nav === "goals") { switchView("goals"); loadGoalDetail(id); }
+        else if (nav === "people") { switchView("people"); loadPersonDetail(id); }
+        else if (nav === "departments") { switchView("departments"); loadDepartmentDetail(id); }
+        else if (nav === "capabilities") { switchView("capabilities"); loadCapabilityDetail(id); }
+        else if (nav === "operations") { switchView("operations"); loadOperationDetail(id); }
+      });
+    });
+  }
 
   // ── Goals ──────────────────────────────────────────
 
@@ -2274,6 +2368,9 @@
         switchView("brief");
       });
     });
+
+    // Context panel
+    loadContext("goal", goal.id, goalsDetailEl);
   }
 
   // ── People ──────────────────────────────────────────
@@ -2446,6 +2543,9 @@
         loadOperationDetail(el.dataset.opId);
       });
     });
+
+    // Context panel
+    loadContext("person", person.id, peopleDetailEl);
   }
 
   // ── Departments ──────────────────────────────────────
@@ -2567,6 +2667,9 @@
         loadCapabilityDetail(el.dataset.capId);
       });
     });
+
+    // Context panel
+    loadContext("department", dept.id, deptDetailEl);
   }
 
   // ── SOPs ─────────────────────────────────────────────
@@ -3167,6 +3270,9 @@
 
     // Load jobs for this operation (client-side filter)
     loadOperationJobs(op.id);
+
+    // Context panel
+    loadContext("operation", op.id, opsDetailEl);
   }
 
   function loadOperationHeartbeats(operationId) {
