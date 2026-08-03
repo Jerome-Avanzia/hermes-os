@@ -576,6 +576,7 @@
   .journal-type.decision { background: #1e3a5f; color: #93c5fd; }
   .journal-type.experiment { background: #3b2f00; color: #fcd34d; }
   .journal-type.operation { background: var(--accent-dim); color: var(--accent); }
+  .journal-type.lesson { background: #1a2f1a; color: #86efac; }
 
   .widget-row {
     display: flex;
@@ -1648,6 +1649,14 @@
       }
     }
 
+    // Lessons from brief
+    if (briefData && briefData.lessons) {
+      for (var li = 0; li < briefData.lessons.length; li++) {
+        var les = briefData.lessons[li];
+        entries.push({ date: les.date || "", type: "lesson", title: les.title, id: les.id, status: les.source });
+      }
+    }
+
     // Operations
     for (var oi = 0; oi < opsList.length; oi++) {
       var op = opsList[oi];
@@ -1924,11 +1933,41 @@
     }
     html += '</div>';
 
+    // Outcome display for completed/failed operations
+    if ((op.status === "completed" || op.status === "failed") && op.outcome) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Outcome</div>';
+      if (op.outcome_classification) {
+        html += '  <div class="list-item-meta">Classification: <strong>' + esc(op.outcome_classification) + '</strong></div>';
+      }
+      html += '  <div style="color:var(--text-main);font-size:13px;margin-top:4px">' + esc(op.outcome) + '</div>';
+      html += '</div>';
+    }
+
+    // Completion controls for executing operations
+    if (op.status === "executing") {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Complete Operation</div>';
+      html += '  <textarea id="op-outcome-text" placeholder="Describe the outcome..." style="width:100%;min-height:60px;background:var(--bg-card);color:var(--text-main);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:13px;resize:vertical;margin-bottom:8px"></textarea>';
+      html += '  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+      html += '    <select id="op-outcome-cls" style="background:var(--bg-card);color:var(--text-main);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px">';
+      html += '      <option value="success">Success</option>';
+      html += '      <option value="partial">Partial</option>';
+      html += '    </select>';
+      html += '    <button class="detail-btn accent" id="op-complete">Complete</button>';
+      html += '    <button class="detail-btn danger" id="op-fail">Mark Failed</button>';
+      html += '  </div>';
+      html += '</div>';
+    }
+
     // Timestamps
     html += '<div class="detail-section">';
     html += '  <div class="detail-section-title">Timeline</div>';
     html += '  <div class="list-item-meta">Created: ' + formatDate(op.created_at) + '</div>';
     html += '  <div class="list-item-meta">Updated: ' + formatDate(op.updated_at) + '</div>';
+    if (op.decision_id) {
+      html += '  <div class="list-item-meta">Decision: ' + esc(op.decision_id) + '</div>';
+    }
     html += '</div>';
 
     // Jobs section
@@ -1955,6 +1994,20 @@
       });
       document.getElementById("op-reject").addEventListener("click", function () {
         rejectOperation(op.id);
+      });
+    }
+
+    if (op.status === "executing") {
+      document.getElementById("op-complete").addEventListener("click", function () {
+        var outcome = document.getElementById("op-outcome-text").value.trim();
+        if (!outcome) return;
+        var cls = document.getElementById("op-outcome-cls").value;
+        completeOperation(op.id, outcome, cls);
+      });
+      document.getElementById("op-fail").addEventListener("click", function () {
+        var outcome = document.getElementById("op-outcome-text").value.trim();
+        if (!outcome) return;
+        failOperation(op.id, outcome);
       });
     }
 
@@ -2004,6 +2057,32 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (op) {
         if (op) { renderOperationDetail(op); loadBadges(); }
+      })
+      .catch(function () {});
+  }
+
+  function completeOperation(id, outcome, classification) {
+    fetch(wsBase() + "/operations/" + encodeURIComponent(id) + "/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outcome: outcome, outcome_classification: classification })
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data && data.operation) { renderOperationDetail(data.operation); loadBadges(); cachedBrief = null; }
+      })
+      .catch(function () {});
+  }
+
+  function failOperation(id, outcome) {
+    fetch(wsBase() + "/operations/" + encodeURIComponent(id) + "/fail", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outcome: outcome, outcome_classification: "failure" })
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data && data.operation) { renderOperationDetail(data.operation); loadBadges(); cachedBrief = null; }
       })
       .catch(function () {});
   }

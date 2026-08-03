@@ -16,6 +16,7 @@ from hermes.models import (
     Goal,
     KPI,
     Lesson,
+    Operation,
     Opportunity,
     Strategy,
 )
@@ -594,3 +595,47 @@ class TestExecutiveBrief:
             if key not in d and key in example:
                 d[key] = example[key]
         _validate_against_schema(d, _load_schema("executive-brief.schema.json"))
+
+
+# -- Operation (Business Knowledge) -------------------------------------------
+
+
+class TestOperationBK:
+    """Validate Operation schema and example for the Business Knowledge layer.
+
+    The Operation model is dual-purpose (workspace YAML + BK markdown).
+    The BK schema uses operation_id/business_id while the model uses id/workspace_id.
+    These tests validate the schema and example independently.
+    """
+
+    def test_operation_has_bk_fields(self):
+        """Operation model includes all BK-relevant fields."""
+        from datetime import datetime, timezone
+        now = datetime(2026, 8, 3, tzinfo=timezone.utc)
+        op = Operation(
+            id="OPS-001",
+            workspace_id="biz_1",
+            request="Test",
+            status="completed",
+            created_at=now,
+            updated_at=now,
+            outcome="Done",
+            outcome_classification="success",
+            decision_id="DEC-001",
+            recommendation_id="rec_001",
+            review_id="review_001",
+        )
+        assert op.outcome == "Done"
+        assert op.outcome_classification == "success"
+        assert op.decision_id == "DEC-001"
+
+    def test_example_validates_against_schema(self):
+        example = _load_example("operation.example.json")
+        schema = _load_schema("operation.schema.json")
+        _validate_against_schema(example, schema)
+
+    def test_schema_required_fields(self):
+        schema = _load_schema("operation.schema.json")
+        assert set(schema["required"]) == {
+            "operation_id", "business_id", "title", "status", "operation_date",
+        }

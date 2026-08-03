@@ -624,3 +624,140 @@ def test_act_on_recommendation_decision_has_traceability(tmp_path):
     assert dec["recommendation_id"] is not None
     assert dec["review_id"] is not None
     assert dec["brief_id"] is not None
+
+
+# -- Sprint 30: Operation Completion -----------------------------------------
+
+
+def _operation_service(tmp_path):
+    """Build a service with operation stores and a business dir with Operations.md."""
+    import shutil
+    from pathlib import Path
+    from hermes.kernel.operation_store import OperationStore
+    from hermes.models import Operation
+
+    service, mocks = _mocked_service()
+    op_store = OperationStore(workspaces_root=tmp_path)
+    service.operation_store = op_store
+
+    # Set up a temp business dir with Operations.md
+    business_dir = tmp_path / "businesses" / "TEST"
+    business_dir.mkdir(parents=True)
+    src = Path("businesses/AVANZIA/Operations.md")
+    shutil.copy2(src, business_dir / "Operations.md")
+
+    mocks["context_engine"].workspace_engine.resolve_business_dir.return_value = business_dir
+
+    # Create an executing operation
+    from datetime import datetime, timezone
+    now = datetime(2026, 8, 3, tzinfo=timezone.utc)
+    op = Operation(
+        id="OP-20260803-001",
+        workspace_id="AVANZIA",
+        request="Launch campaign",
+        status="executing",
+        created_at=now,
+        updated_at=now,
+        decision_id="DEC-007",
+        recommendation_id="rec_bot_001",
+        review_id="review_2026-08-01",
+    )
+    op_store.save(op)
+
+    return service, mocks, business_dir, op
+
+
+def test_complete_operation_transitions_and_writes_md(tmp_path):
+    service, mocks, business_dir, op = _operation_service(tmp_path)
+
+    result = service.complete_operation("AVANZIA", "OP-20260803-001", "Delivered on time", "success")
+
+    assert result["operation"]["status"] == "completed"
+    assert result["operation"]["outcome"] == "Delivered on time"
+    assert result["operation"]["outcome_classification"] == "success"
+    assert result["bk_operation_id"] == "OPS-001"
+
+    # Check Operations.md was updated
+    text = (business_dir / "Operations.md").read_text()
+    assert "OPS-001" in text
+    assert "Completed" in text
+
+
+def test_fail_operation_transitions_and_writes_md(tmp_path):
+    service, mocks, business_dir, op = _operation_service(tmp_path)
+
+    result = service.fail_operation("AVANZIA", "OP-20260803-001", "Blocked by vendor")
+
+    assert result["operation"]["status"] == "failed"
+    assert result["operation"]["outcome"] == "Blocked by vendor"
+    assert result["operation"]["outcome_classification"] == "failure"
+
+    text = (business_dir / "Operations.md").read_text()
+    assert "OPS-001" in text
+    assert "Failed" in text
+
+
+def test_complete_operation_invalid_state_raises(tmp_path):
+    """Completing a non-executing operation should raise InvalidTransitionError."""
+    from hermes.models.operation import InvalidTransitionError
+
+    service, mocks, business_dir, op = _operation_service(tmp_path)
+
+    # First complete it
+    service.complete_operation("AVANZIA", "OP-20260803-001", "Done")
+
+    # Trying to complete again should fail
+    with pytest.raises(InvalidTransitionError):
+        service.complete_operation("AVANZIA", "OP-20260803-001", "Again")
+
+
+def test_complete_operation_preserves_traceability(tmp_path):
+    service, mocks, business_dir, op = _operation_service(tmp_path)
+
+    result = service.complete_operation("AVANZIA", "OP-20260803-001", "Done")
+
+    assert result["operation"]["decision_id"] == "DEC-007"
+    assert result["operation"]["recommendation_id"] == "rec_bot_001"
+    assert result["operation"]["review_id"] == "review_2026-08-01"
+
+
+def test_act_on_recommendation_operation_has_traceability(tmp_path):
+    """Operations created via act_on_recommendation include traceability fields."""
+    service, mocks, review, business_dir = _decision_service(tmp_path)
+    from hermes.kernel.operation_store import OperationStore
+    service.operation_store = OperationStore(workspaces_root=tmp_path)
+    # Create the operations directory
+    (tmp_path / "AVANZIA" / "operations").mkdir(parents=True, exist_ok=True)
+
+    with patch.object(service, "_run_ceo_review", return_value=review):
+        result = service.act_on_recommendation(
+            "AVANZIA", "rec_bot_001", "approve", create_operation=True,
+        )
+
+    op = result["operation"]
+    assert op is not None
+    assert op["decision_id"] == "DEC-007"
+    assert op["recommendation_id"] == "rec_bot_001"
+    assert op["review_id"] == "review_2026-08-01T00:00:00+00:00"
+
+
+def test_serialize_review_includes_lessons(tmp_path):
+    """_serialize_review should include lessons from business data."""
+    service, mocks, review, business_dir = _decision_service(tmp_path)
+    from hermes.models import Lesson
+    review.data.lessons = [
+        Lesson(
+            lesson_id="LES-001",
+            business_id="TEST",
+            title="Test lesson",
+            summary="Test",
+            source="review",
+            recommendation="Do this",
+            date="2026-08",
+        )
+    ]
+
+    serialized = service._serialize_review(review)
+    assert "lessons" in serialized
+    assert len(serialized["lessons"]) == 1
+    assert serialized["lessons"][0]["id"] == "LES-001"

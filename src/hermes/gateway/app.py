@@ -60,6 +60,11 @@ class CreateOperationRequest(BaseModel):
     request: str
 
 
+class CompleteOperationRequest(BaseModel):
+    outcome: str
+    outcome_classification: str = "success"
+
+
 class CreateDecisionRequest(BaseModel):
     recommendation_id: str
     action: str
@@ -317,6 +322,50 @@ async def reject_operation(workspace_id: str, operation_id: str) -> JSONResponse
     """Reject an escalated Operation."""
     try:
         result = _hermes_service.reject_operation(workspace_id, operation_id)
+    except OperationNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Operation not found: {operation_id}"},
+        )
+    except InvalidTransitionError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={"error": str(exc)},
+        )
+    return JSONResponse(content=result)
+
+
+@app.post("/v1/workspaces/{workspace_id}/operations/{operation_id}/complete")
+async def complete_operation(
+    workspace_id: str, operation_id: str, body: CompleteOperationRequest
+) -> JSONResponse:
+    """Complete an executing Operation with an outcome."""
+    try:
+        result = _hermes_service.complete_operation(
+            workspace_id, operation_id, body.outcome, body.outcome_classification
+        )
+    except OperationNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Operation not found: {operation_id}"},
+        )
+    except InvalidTransitionError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={"error": str(exc)},
+        )
+    return JSONResponse(content=result)
+
+
+@app.post("/v1/workspaces/{workspace_id}/operations/{operation_id}/fail")
+async def fail_operation(
+    workspace_id: str, operation_id: str, body: CompleteOperationRequest
+) -> JSONResponse:
+    """Fail an executing Operation with an outcome."""
+    try:
+        result = _hermes_service.fail_operation(
+            workspace_id, operation_id, body.outcome, body.outcome_classification
+        )
     except OperationNotFoundError:
         return JSONResponse(
             status_code=404,

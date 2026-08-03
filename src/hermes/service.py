@@ -9,6 +9,8 @@ from hermes.conductor import Conductor
 from hermes.kernel.ceo_loop import CEOLoop
 from hermes.kernel.decision_id import generate_decision_id
 from hermes.kernel.decision_writer import DecisionWriter
+from hermes.kernel.operation_id_bk import generate_bk_operation_id
+from hermes.kernel.operation_writer import OperationWriter
 from hermes.kernel.executor import Executor
 from hermes.kernel.file_content_reader import FileContentReader
 from hermes.kernel.file_selector import FileSelector
@@ -281,6 +283,72 @@ class HermesService:
         self.operation_store.save(op)
         return self._serialize_operation(op)
 
+    # -- Operation Completion (Sprint 30) ----------------------------------------
+
+    def complete_operation(
+        self,
+        workspace_id: str,
+        operation_id: str,
+        outcome: str,
+        outcome_classification: str = "success",
+    ) -> dict:
+        """Complete an executing Operation and write it to Operations.md.
+
+        Transitions the workspace Operation to 'completed', then appends
+        a historical record to the business's Operations.md file.
+        """
+        self.validate_workspace(workspace_id)
+        op = self.operation_store.load(workspace_id, operation_id)
+        transition_operation(op, "completed")
+        op.outcome = outcome
+        op.outcome_classification = outcome_classification
+        self.operation_store.save(op)
+
+        # Write to Business Knowledge (Operations.md)
+        business_dir = self.context_engine.workspace_engine.resolve_business_dir(
+            workspace_id
+        )
+        bk_id = generate_bk_operation_id(business_dir)
+        writer = OperationWriter()
+        writer.append_operation(business_dir, op, bk_id)
+
+        return {
+            "operation": self._serialize_operation(op),
+            "bk_operation_id": bk_id,
+        }
+
+    def fail_operation(
+        self,
+        workspace_id: str,
+        operation_id: str,
+        outcome: str,
+        outcome_classification: str = "failure",
+    ) -> dict:
+        """Fail an executing Operation and write it to Operations.md.
+
+        Transitions the workspace Operation to 'failed', then appends
+        a historical record to the business's Operations.md file.
+        """
+        self.validate_workspace(workspace_id)
+        op = self.operation_store.load(workspace_id, operation_id)
+        transition_operation(op, "failed")
+        op.outcome = outcome
+        op.outcome_classification = outcome_classification
+        self.operation_store.save(op)
+
+        # Write to Business Knowledge (Operations.md)
+        business_dir = self.context_engine.workspace_engine.resolve_business_dir(
+            workspace_id
+        )
+        bk_id = generate_bk_operation_id(business_dir)
+        writer = OperationWriter()
+        writer.append_operation(business_dir, op, bk_id)
+
+        return {
+            "operation": self._serialize_operation(op),
+            "bk_operation_id": bk_id,
+        }
+
     # -- Executive Decision Loop -------------------------------------------------
 
     def act_on_recommendation(
@@ -348,11 +416,23 @@ class HermesService:
 
         # Optionally create an Operation for approved decisions
         if create_operation and action == "approve" and self.operation_store:
-            op_dict = self.create_operation_from_chat(
-                workspace_id,
-                f"[{decision_id}] {rec.title}",
+            now_op = datetime.now(timezone.utc)
+            op_id = generate_operation_id(
+                self.operation_store.operations_dir(workspace_id)
             )
-            result["operation"] = op_dict
+            operation = Operation(
+                id=op_id,
+                workspace_id=workspace_id,
+                request=f"[{decision_id}] {rec.title}",
+                status="created",
+                created_at=now_op,
+                updated_at=now_op,
+                decision_id=decision_id,
+                recommendation_id=rec.recommendation_id,
+                review_id=review.review_id,
+            )
+            self.operation_store.save(operation)
+            result["operation"] = self._serialize_operation(operation)
         else:
             result["operation"] = None
 
@@ -414,7 +494,7 @@ class HermesService:
 
     @staticmethod
     def _serialize_operation(op: Operation) -> dict:
-        return {
+        data = {
             "id": op.id,
             "workspace_id": op.workspace_id,
             "request": op.request,
@@ -422,6 +502,17 @@ class HermesService:
             "created_at": op.created_at.isoformat(),
             "updated_at": op.updated_at.isoformat(),
         }
+        if op.outcome is not None:
+            data["outcome"] = op.outcome
+        if op.outcome_classification is not None:
+            data["outcome_classification"] = op.outcome_classification
+        if op.decision_id is not None:
+            data["decision_id"] = op.decision_id
+        if op.recommendation_id is not None:
+            data["recommendation_id"] = op.recommendation_id
+        if op.review_id is not None:
+            data["review_id"] = op.review_id
+        return data
 
     @staticmethod
     def _serialize_job(j: Job, include_output: bool = False) -> dict:
@@ -589,6 +680,18 @@ class HermesService:
             for e in data.experiments
         ]
 
+        # Lessons (for Business Journal)
+        lessons = [
+            {
+                "id": l.lesson_id,
+                "title": l.title,
+                "source": l.source,
+                "date": l.date,
+                "recommendation": l.recommendation,
+            }
+            for l in data.lessons
+        ]
+
         # Recommendations with scores
         recommendations = []
         for rec in review.engine_result.recommendations:
@@ -622,6 +725,7 @@ class HermesService:
             "bottlenecks": bottlenecks,
             "decisions": decisions,
             "experiments": experiments,
+            "lessons": lessons,
             "execution_status": review.execution_status,
             "warnings": review.all_warnings,
         }

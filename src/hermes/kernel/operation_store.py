@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 _KNOWN_FIELDS = frozenset({
     "version", "id", "workspace_id", "request", "status",
     "created_at", "updated_at",
+    "outcome", "outcome_classification",
+    "decision_id", "recommendation_id", "review_id",
 })
 
 _PERSISTENCE_VERSION = 1
@@ -50,6 +52,12 @@ class OperationStore:
             "created_at": operation.created_at.isoformat(),
             "updated_at": operation.updated_at.isoformat(),
         })
+        # Persist optional fields only when set
+        for opt in ("outcome", "outcome_classification",
+                     "decision_id", "recommendation_id", "review_id"):
+            val = getattr(operation, opt)
+            if val is not None:
+                data[opt] = val
 
         with open(path, "w", encoding="utf-8") as f:
             yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
@@ -76,6 +84,11 @@ class OperationStore:
             status=data["status"],
             created_at=_parse_datetime(data["created_at"]),
             updated_at=_parse_datetime(data["updated_at"]),
+            outcome=data.get("outcome"),
+            outcome_classification=data.get("outcome_classification"),
+            decision_id=data.get("decision_id"),
+            recommendation_id=data.get("recommendation_id"),
+            review_id=data.get("review_id"),
             extra_fields=extra,
         )
 

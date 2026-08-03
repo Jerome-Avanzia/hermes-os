@@ -14,6 +14,24 @@ OPERATION_STATUSES = frozenset({
     "failed",
 })
 
+# Persistent statuses written to Operations.md (Business Knowledge layer).
+# awaiting_escalation is an internal workspace lifecycle state, not persisted.
+BK_OPERATION_STATUSES = frozenset({
+    "created",
+    "executing",
+    "completed",
+    "failed",
+    "rejected",
+})
+
+# Structured outcome classification for analytics.
+OUTCOME_CLASSIFICATIONS = frozenset({
+    "success",
+    "partial",
+    "failure",
+    "cancelled",
+})
+
 VALID_TRANSITIONS: dict[str, list[str]] = {
     "created": ["executing"],
     "executing": ["completed", "awaiting_escalation", "failed"],
@@ -35,6 +53,11 @@ class Operation:
     status: str
     created_at: datetime
     updated_at: datetime
+    outcome: str | None = None
+    outcome_classification: str | None = None
+    decision_id: str | None = None
+    recommendation_id: str | None = None
+    review_id: str | None = None
     extra_fields: dict[str, Any] = field(default_factory=dict)
 
 

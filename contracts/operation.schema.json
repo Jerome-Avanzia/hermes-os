@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-os.dev/contracts/operation.schema.json",
+  "title": "Operation",
+  "description": "Canonical Hermes OS Operation object (Business Knowledge layer).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation_id",
+    "business_id",
+    "title",
+    "status",
+    "operation_date"
+  ],
+  "properties": {
+    "operation_id": {
+      "type": "string"
+    },
+    "business_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "created",
+        "executing",
+        "completed",
+        "failed",
+        "rejected"
+      ]
+    },
+    "outcome": {
+      "type": "string"
+    },
+    "outcome_classification": {
+      "type": "string",
+      "enum": [
+        "success",
+        "partial",
+        "failure",
+        "cancelled"
+      ]
+    },
+    "operation_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "decision_id": {
+      "type": "string"
+    },
+    "recommendation_id": {
+      "type": "string"
+    },
+    "review_id": {
+      "type": "string"
+    },
+    "owner": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -1038,6 +1038,117 @@ def test_operations_reject_invalid_transition_returns_409():
     assert resp.status_code == 409
 
 
+# -- Operations Complete/Fail API (Sprint 30) --------------------------------
+
+
+def test_operations_complete_delegates_to_service():
+    service = MagicMock()
+    completed_op = {**_mock_operation(), "status": "completed", "outcome": "Done", "outcome_classification": "success"}
+    service.complete_operation.return_value = {"operation": completed_op, "bk_operation_id": "OPS-001"}
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post(
+            f"{WS_PREFIX}/operations/OP-20260801-001/complete",
+            json={"outcome": "Done", "outcome_classification": "success"},
+        )
+
+    assert resp.status_code == 200
+    service.complete_operation.assert_called_once_with(WS, "OP-20260801-001", "Done", "success")
+    assert resp.json()["operation"]["status"] == "completed"
+    assert resp.json()["bk_operation_id"] == "OPS-001"
+
+
+def test_operations_complete_not_found_returns_404():
+    from hermes.kernel.operation_store import OperationNotFoundError
+
+    service = MagicMock()
+    service.complete_operation.side_effect = OperationNotFoundError("not found")
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post(
+            f"{WS_PREFIX}/operations/OP-NONEXISTENT/complete",
+            json={"outcome": "Done"},
+        )
+
+    assert resp.status_code == 404
+
+
+def test_operations_complete_invalid_transition_returns_409():
+    from hermes.models.operation import InvalidTransitionError
+
+    service = MagicMock()
+    service.complete_operation.side_effect = InvalidTransitionError("bad transition")
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post(
+            f"{WS_PREFIX}/operations/OP-20260801-001/complete",
+            json={"outcome": "Done"},
+        )
+
+    assert resp.status_code == 409
+
+
+def test_operations_fail_delegates_to_service():
+    service = MagicMock()
+    failed_op = {**_mock_operation(), "status": "failed", "outcome": "Blocked", "outcome_classification": "failure"}
+    service.fail_operation.return_value = {"operation": failed_op, "bk_operation_id": "OPS-001"}
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post(
+            f"{WS_PREFIX}/operations/OP-20260801-001/fail",
+            json={"outcome": "Blocked", "outcome_classification": "failure"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["operation"]["status"] == "failed"
+
+
+def test_operations_fail_not_found_returns_404():
+    from hermes.kernel.operation_store import OperationNotFoundError
+
+    service = MagicMock()
+    service.fail_operation.side_effect = OperationNotFoundError("not found")
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post(
+            f"{WS_PREFIX}/operations/OP-NONEXISTENT/fail",
+            json={"outcome": "Blocked"},
+        )
+
+    assert resp.status_code == 404
+
+
+def test_operations_fail_invalid_transition_returns_409():
+    from hermes.models.operation import InvalidTransitionError
+
+    service = MagicMock()
+    service.fail_operation.side_effect = InvalidTransitionError("bad transition")
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post(
+            f"{WS_PREFIX}/operations/OP-20260801-001/fail",
+            json={"outcome": "Blocked"},
+        )
+
+    assert resp.status_code == 409
+
+
+def test_operations_complete_default_classification():
+    """When outcome_classification is omitted, it defaults to 'success'."""
+    service = MagicMock()
+    completed_op = {**_mock_operation(), "status": "completed"}
+    service.complete_operation.return_value = {"operation": completed_op, "bk_operation_id": "OPS-001"}
+
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.post(
+            f"{WS_PREFIX}/operations/OP-20260801-001/complete",
+            json={"outcome": "Done"},
+        )
+
+    assert resp.status_code == 200
+    service.complete_operation.assert_called_once_with(WS, "OP-20260801-001", "Done", "success")
+
+
 # -- Jobs API --------------------------------------------------------------
 
 
@@ -1608,3 +1719,73 @@ def test_ui_workspace_select_change_triggers_reload():
     resp = client.get("/")
     assert 'workspaceSel.addEventListener("change"' in resp.text
     assert "selectWorkspace" in resp.text
+
+
+# -- UI: Sprint 30 — Operations Completion & Journal Lessons -----------------
+
+
+def test_ui_journal_renders_lessons():
+    """Business Journal should aggregate lessons from brief data."""
+    resp = client.get("/")
+    assert "briefData.lessons" in resp.text
+    assert '"lesson"' in resp.text
+
+
+def test_ui_journal_lesson_type_css():
+    """Lesson type should have its own CSS class."""
+    resp = client.get("/")
+    assert ".journal-type.lesson" in resp.text
+
+
+def test_ui_operation_detail_has_complete_button():
+    """Operation detail shows Complete button for executing operations."""
+    resp = client.get("/")
+    assert "op-complete" in resp.text
+    assert "completeOperation" in resp.text
+
+
+def test_ui_operation_detail_has_fail_button():
+    """Operation detail shows Mark Failed button for executing operations."""
+    resp = client.get("/")
+    assert "op-fail" in resp.text
+    assert "failOperation" in resp.text
+
+
+def test_ui_operation_detail_has_outcome_textarea():
+    """Operation detail has textarea for outcome description."""
+    resp = client.get("/")
+    assert "op-outcome-text" in resp.text
+
+
+def test_ui_operation_detail_has_classification_select():
+    """Operation detail has select for outcome classification."""
+    resp = client.get("/")
+    assert "op-outcome-cls" in resp.text
+    assert "success" in resp.text
+    assert "partial" in resp.text
+
+
+def test_ui_operation_detail_shows_outcome_when_completed():
+    """Completed operations should display their outcome text."""
+    resp = client.get("/")
+    assert "op.outcome" in resp.text
+    assert "outcome_classification" in resp.text
+
+
+def test_ui_operation_detail_shows_decision_id():
+    """Operation detail shows decision_id for traceability."""
+    resp = client.get("/")
+    assert "op.decision_id" in resp.text
+
+
+def test_ui_complete_operation_posts_to_endpoint():
+    """completeOperation function posts to /operations/{id}/complete."""
+    resp = client.get("/")
+    assert "/complete" in resp.text
+    assert "outcome_classification" in resp.text
+
+
+def test_ui_fail_operation_posts_to_endpoint():
+    """failOperation function posts to /operations/{id}/fail."""
+    resp = client.get("/")
+    assert "/fail" in resp.text

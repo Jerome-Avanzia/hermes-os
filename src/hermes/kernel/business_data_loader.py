@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hermes.models import (
@@ -17,6 +18,7 @@ from hermes.models import (
     Goal,
     KPI,
     Lesson,
+    Operation,
     Opportunity,
     Strategy,
 )
@@ -26,6 +28,7 @@ _BOTTLENECK_CATEGORIES = frozenset(
     {"product", "marketing", "sales", "operations", "finance", "technology"}
 )
 _BOTTLENECK_STATUSES = frozenset({"open", "mitigating", "resolved"})
+_BK_OPERATION_STATUSES = frozenset({"created", "executing", "completed", "failed", "rejected"})
 _DECISION_STATUSES = frozenset({"proposed", "approved", "implemented", "reversed", "closed"})
 _EXPERIMENT_STATUSES = frozenset({"planned", "running", "completed", "cancelled"})
 _GOAL_STATUSES = frozenset({"planned", "active", "completed", "cancelled"})
@@ -50,6 +53,7 @@ class BusinessData:
     decisions: list[Decision] = field(default_factory=list)
     experiments: list[Experiment] = field(default_factory=list)
     lessons: list[Lesson] = field(default_factory=list)
+    operations: list[Operation] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -261,6 +265,9 @@ class BusinessDataLoader:
         lessons = self._load_lessons(
             business_dir / "Lessons_Learned.md", business_id, warnings
         )
+        operations = self._load_operations(
+            business_dir / "Operations.md", business_id, warnings
+        )
 
         return BusinessData(
             business=business,
@@ -272,6 +279,7 @@ class BusinessDataLoader:
             decisions=decisions,
             experiments=experiments,
             lessons=lessons,
+            operations=operations,
             warnings=warnings,
         )
 
@@ -841,3 +849,89 @@ class BusinessDataLoader:
                 )
             )
         return lessons
+
+    def _load_operations(
+        self, path: Path, business_id: str, warnings: list[str]
+    ) -> list[Operation]:
+        if not path.is_file():
+            # Operations.md is optional — no warning for missing file
+            return []
+        text = path.read_text(encoding="utf-8")
+        rows = _parse_table(text, "Operation Log")
+        if not rows:
+            return []
+
+        operations: list[Operation] = []
+        seen: set[str] = set()
+        for row in rows:
+            ops_id = row.get("ID", "").strip()
+            if not ops_id:
+                warnings.append("Operation row missing ID column, skipping")
+                continue
+            if ops_id in seen:
+                warnings.append(f"Duplicate operation ID: {ops_id}, skipping")
+                continue
+            seen.add(ops_id)
+
+            operation_text = row.get("Operation", "").strip()
+            status_raw = row.get("Status", "").strip()
+            date_raw = row.get("Date", "").strip()
+
+            missing = [
+                f
+                for f, v in [
+                    ("Operation", operation_text),
+                    ("Status", status_raw),
+                ]
+                if not v
+            ]
+            if missing:
+                warnings.append(
+                    f"Operation {ops_id} missing required columns: "
+                    f"{', '.join(missing)}, skipping"
+                )
+                continue
+
+            status = _normalize_status(status_raw)
+            if status not in _BK_OPERATION_STATUSES:
+                warnings.append(
+                    f"Operation {ops_id}: unknown status '{status}'"
+                )
+
+            outcome_raw = row.get("Outcome", "").strip()
+            outcome = None if not outcome_raw else outcome_raw
+
+            # Parse outcome_classification from outcome prefix if present
+            outcome_classification = None
+            if outcome:
+                for cls in ("Success", "Partial", "Failure", "Cancelled"):
+                    if outcome.startswith(cls + " "):
+                        outcome_classification = cls.lower()
+                        break
+
+            # Build a minimal datetime from the date string
+            now = datetime.now(timezone.utc)
+            if date_raw:
+                try:
+                    parts = date_raw.split("-")
+                    year = int(parts[0])
+                    month = int(parts[1]) if len(parts) > 1 else 1
+                    ts = datetime(year, month, 1, tzinfo=timezone.utc)
+                except (ValueError, IndexError):
+                    ts = now
+            else:
+                ts = now
+
+            operations.append(
+                Operation(
+                    id=ops_id,
+                    workspace_id=business_id,
+                    request=operation_text,
+                    status=status,
+                    created_at=ts,
+                    updated_at=ts,
+                    outcome=outcome,
+                    outcome_classification=outcome_classification,
+                )
+            )
+        return operations
