@@ -11,6 +11,12 @@ from hermes.kernel.decision_id import generate_decision_id
 from hermes.kernel.decision_writer import DecisionWriter
 from hermes.kernel.department_registry import DepartmentRegistry
 from hermes.kernel.operation_id_bk import generate_bk_operation_id
+from hermes.kernel.operation_runtime import (
+    StepNotActionableError,
+    StepNotFoundError,
+    complete_step as runtime_complete_step,
+    get_progress,
+)
 from hermes.kernel.operation_writer import OperationWriter
 from hermes.kernel.sop_registry import SOPRegistry
 from hermes.kernel.executor import Executor
@@ -477,6 +483,82 @@ class HermesService:
             "updated_at": d.updated_at,
         }
 
+    # -- Operation SOP Runtime (Sprint 34) ---------------------------------------
+
+    def get_operation_progress(
+        self, workspace_id: str, operation_id: str,
+    ) -> dict | None:
+        """Return SOP step progress for an Operation, or None if no SOP linked."""
+        self.validate_workspace(workspace_id)
+        if not self.operation_store:
+            return None
+        op = self.operation_store.load(workspace_id, operation_id)
+        if not op.sop_id:
+            return None
+        sop = self.sop_registry.get(op.sop_id)
+        if sop is None:
+            return None
+        progress = get_progress(op, sop)
+        return self._serialize_progress(progress)
+
+    def complete_operation_step(
+        self, workspace_id: str, operation_id: str, step_id: str,
+    ) -> dict:
+        """Mark the next SOP step complete. Sequential enforcement applies.
+
+        Raises OperationNotFoundError, StepNotFoundError, StepNotActionableError.
+        """
+        self.validate_workspace(workspace_id)
+        if not self.operation_store:
+            raise RuntimeError("OperationStore is required")
+        op = self.operation_store.load(workspace_id, operation_id)
+        if not op.sop_id:
+            raise StepNotFoundError("Operation has no SOP linked")
+        sop = self.sop_registry.get(op.sop_id)
+        if sop is None:
+            raise StepNotFoundError(f"SOP not found: {op.sop_id}")
+        progress = runtime_complete_step(op, sop, step_id)
+        self.operation_store.save(op)
+        return self._serialize_progress(progress)
+
+    def link_sop_to_operation(
+        self, workspace_id: str, operation_id: str, sop_id: str,
+    ) -> dict:
+        """Link an SOP to an Operation. Returns the updated Operation."""
+        self.validate_workspace(workspace_id)
+        if not self.operation_store:
+            raise RuntimeError("OperationStore is required")
+        op = self.operation_store.load(workspace_id, operation_id)
+        # Verify SOP exists
+        sop = self.sop_registry.get(sop_id)
+        if sop is None:
+            raise StepNotFoundError(f"SOP not found: {sop_id}")
+        op.sop_id = sop_id
+        self.operation_store.save(op)
+        return self._serialize_operation(op)
+
+    @staticmethod
+    def _serialize_progress(p) -> dict:
+        return {
+            "sop_id": p.sop_id,
+            "total_steps": p.total_steps,
+            "completed_steps": p.completed_steps,
+            "completion_pct": p.completion_pct,
+            "all_complete": p.all_complete,
+            "current_step": p.current_step,
+            "steps": [
+                {
+                    "id": s.id,
+                    "index": s.index,
+                    "title": s.title,
+                    "description": s.description,
+                    "completed": s.completed,
+                    "completed_at": s.completed_at,
+                }
+                for s in p.steps
+            ],
+        }
+
     # -- Capability Runtime (Sprint 31) -----------------------------------------
 
     def list_capabilities(self, workspace_id: str) -> list[dict]:
@@ -673,6 +755,8 @@ class HermesService:
             data["recommendation_id"] = op.recommendation_id
         if op.review_id is not None:
             data["review_id"] = op.review_id
+        if op.sop_id is not None:
+            data["sop_id"] = op.sop_id
         return data
 
     @staticmethod

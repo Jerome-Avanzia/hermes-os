@@ -29,6 +29,7 @@ from hermes.kernel.job_store import JobStore
 from hermes.kernel.operation_store import OperationNotFoundError, OperationStore
 from hermes.kernel.profile_loader import ProfileLoader
 from hermes.kernel.workspace_engine import WorkspaceEngine, WorkspaceNotFoundError
+from hermes.kernel.operation_runtime import StepNotActionableError, StepNotFoundError
 from hermes.models.operation import InvalidTransitionError
 from hermes.providers.ollama_provider import ChatMessage, OllamaConnectionError, OllamaProvider
 from hermes.runtime.context_engine import ContextEngine
@@ -63,6 +64,14 @@ class CreateOperationRequest(BaseModel):
 class CompleteOperationRequest(BaseModel):
     outcome: str
     outcome_classification: str = "success"
+
+
+class LinkSOPRequest(BaseModel):
+    sop_id: str
+
+
+class CompleteStepRequest(BaseModel):
+    step_id: str
 
 
 class CreateDecisionRequest(BaseModel):
@@ -374,6 +383,73 @@ async def fail_operation(
     except InvalidTransitionError as exc:
         return JSONResponse(
             status_code=409,
+            content={"error": str(exc)},
+        )
+    return JSONResponse(content=result)
+
+
+@app.get("/v1/workspaces/{workspace_id}/operations/{operation_id}/progress")
+async def get_operation_progress(workspace_id: str, operation_id: str) -> JSONResponse:
+    """Return SOP step progress for an Operation."""
+    try:
+        result = _hermes_service.get_operation_progress(workspace_id, operation_id)
+    except OperationNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Operation not found: {operation_id}"},
+        )
+    if result is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "No SOP linked to this operation"},
+        )
+    return JSONResponse(content=result)
+
+
+@app.post("/v1/workspaces/{workspace_id}/operations/{operation_id}/steps/complete")
+async def complete_operation_step(
+    workspace_id: str, operation_id: str, body: CompleteStepRequest
+) -> JSONResponse:
+    """Complete the next SOP step for an Operation."""
+    try:
+        result = _hermes_service.complete_operation_step(
+            workspace_id, operation_id, body.step_id
+        )
+    except OperationNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Operation not found: {operation_id}"},
+        )
+    except StepNotFoundError as exc:
+        return JSONResponse(
+            status_code=404,
+            content={"error": str(exc)},
+        )
+    except StepNotActionableError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={"error": str(exc)},
+        )
+    return JSONResponse(content=result)
+
+
+@app.post("/v1/workspaces/{workspace_id}/operations/{operation_id}/link-sop")
+async def link_sop_to_operation(
+    workspace_id: str, operation_id: str, body: LinkSOPRequest
+) -> JSONResponse:
+    """Link an SOP to an Operation."""
+    try:
+        result = _hermes_service.link_sop_to_operation(
+            workspace_id, operation_id, body.sop_id
+        )
+    except OperationNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Operation not found: {operation_id}"},
+        )
+    except StepNotFoundError as exc:
+        return JSONResponse(
+            status_code=404,
             content={"error": str(exc)},
         )
     return JSONResponse(content=result)

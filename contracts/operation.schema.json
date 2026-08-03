@@ -57,6 +57,10 @@
     "review_id": {
       "type": "string"
     },
+    "sop_id": {
+      "type": "string",
+      "description": "ID of the linked SOP for structured step tracking"
+    },
     "owner": {
       "type": "string"
     },

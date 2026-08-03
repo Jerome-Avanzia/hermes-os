@@ -58,6 +58,7 @@ class Operation:
     decision_id: str | None = None
     recommendation_id: str | None = None
     review_id: str | None = None
+    sop_id: str | None = None
     extra_fields: dict[str, Any] = field(default_factory=dict)
 
 

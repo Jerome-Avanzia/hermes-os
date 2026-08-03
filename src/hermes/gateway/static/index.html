@@ -2347,6 +2347,25 @@
       html += '</div>';
     }
 
+    // SOP Progress section
+    if (op.sop_id) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">SOP Progress</div>';
+      html += '  <div class="list-item-meta" style="margin-bottom:8px">SOP: <strong>' + esc(op.sop_id) + '</strong></div>';
+      html += '  <div id="op-sop-progress"><div class="list-empty">Loading progress...</div></div>';
+      html += '</div>';
+    } else if (op.status === "created" || op.status === "executing") {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">SOP</div>';
+      html += '  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+      html += '    <select id="op-sop-select" style="flex:1;background:var(--bg-card);color:var(--text-main);border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:13px">';
+      html += '      <option value="">— Select an SOP —</option>';
+      html += '    </select>';
+      html += '    <button class="detail-btn accent" id="op-link-sop">Link SOP</button>';
+      html += '  </div>';
+      html += '</div>';
+    }
+
     // Timestamps
     html += '<div class="detail-section">';
     html += '  <div class="detail-section-title">Timeline</div>';
@@ -2398,8 +2417,115 @@
       });
     }
 
+    // Load SOP progress if linked
+    if (op.sop_id) {
+      loadSOPProgress(op.id);
+    } else if ((op.status === "created" || op.status === "executing") && document.getElementById("op-sop-select")) {
+      // Populate SOP select dropdown
+      fetch(wsBase() + "/sops")
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (sops) {
+          var sel = document.getElementById("op-sop-select");
+          if (!sel) return;
+          for (var i = 0; i < sops.length; i++) {
+            var opt = document.createElement("option");
+            opt.value = sops[i].id;
+            opt.textContent = sops[i].title + " (" + sops[i].id + ")";
+            sel.appendChild(opt);
+          }
+        })
+        .catch(function () {});
+      document.getElementById("op-link-sop").addEventListener("click", function () {
+        var sel = document.getElementById("op-sop-select");
+        var sopId = sel ? sel.value : "";
+        if (!sopId) return;
+        fetch(wsBase() + "/operations/" + encodeURIComponent(op.id) + "/link-sop", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sop_id: sopId })
+        })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (updated) {
+            if (updated) { renderOperationDetail(updated); }
+          })
+          .catch(function () {});
+      });
+    }
+
     // Load jobs for this operation (client-side filter)
     loadOperationJobs(op.id);
+  }
+
+  function loadSOPProgress(operationId) {
+    var el = document.getElementById("op-sop-progress");
+    if (!el) return;
+    fetch(wsBase() + "/operations/" + encodeURIComponent(operationId) + "/progress")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (progress) {
+        if (!progress) {
+          el.innerHTML = '<div class="list-empty">No progress data.</div>';
+          return;
+        }
+        renderSOPProgress(el, operationId, progress);
+      })
+      .catch(function () {
+        el.innerHTML = '<div class="list-empty">Cannot load progress.</div>';
+      });
+  }
+
+  function renderSOPProgress(el, operationId, progress) {
+    var html = '';
+    // Progress bar
+    html += '<div style="background:var(--border);border-radius:4px;height:8px;margin-bottom:12px;overflow:hidden">';
+    html += '  <div style="background:var(--accent);height:100%;width:' + progress.completion_pct + '%;transition:width 0.3s"></div>';
+    html += '</div>';
+    html += '<div class="list-item-meta" style="margin-bottom:8px">' + progress.completed_steps + ' / ' + progress.total_steps + ' steps (' + progress.completion_pct + '%)</div>';
+
+    // Step checklist
+    for (var i = 0; i < progress.steps.length; i++) {
+      var step = progress.steps[i];
+      var isCurrent = step.id === progress.current_step;
+      var icon = step.completed ? '&#10003;' : (isCurrent ? '&#9679;' : '&#9675;');
+      var color = step.completed ? 'var(--accent)' : (isCurrent ? 'var(--text-main)' : 'var(--text-muted)');
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">';
+      html += '  <span style="color:' + color + ';font-size:14px;width:20px;text-align:center">' + icon + '</span>';
+      html += '  <div style="flex:1">';
+      html += '    <div style="color:' + (step.completed ? 'var(--text-muted)' : 'var(--text-main)') + ';font-size:13px;' + (step.completed ? 'text-decoration:line-through' : '') + '">' + esc(step.title) + '</div>';
+      if (step.description) {
+        html += '    <div class="list-item-meta">' + esc(step.description) + '</div>';
+      }
+      if (step.completed_at) {
+        html += '    <div class="list-item-meta" style="font-size:10px">Completed: ' + formatDate(step.completed_at) + '</div>';
+      }
+      html += '  </div>';
+      if (isCurrent) {
+        html += '  <button class="detail-btn accent" style="font-size:11px;padding:4px 10px" data-step-id="' + esc(step.id) + '">Complete</button>';
+      }
+      html += '</div>';
+    }
+    el.innerHTML = html;
+
+    // Attach click handlers for complete buttons
+    var btns = el.querySelectorAll('[data-step-id]');
+    for (var b = 0; b < btns.length; b++) {
+      btns[b].addEventListener('click', (function (stepId) {
+        return function () {
+          fetch(wsBase() + "/operations/" + encodeURIComponent(operationId) + "/steps/complete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ step_id: stepId })
+          })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (updated) {
+              if (updated) {
+                var el2 = document.getElementById("op-sop-progress");
+                if (el2) renderSOPProgress(el2, operationId, updated);
+              }
+            })
+            .catch(function () {});
+        };
+      })(btns[b].getAttribute('data-step-id')));
+    }
   }
 
   function loadOperationJobs(operationId) {

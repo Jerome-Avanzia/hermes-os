@@ -20,6 +20,7 @@ _KNOWN_FIELDS = frozenset({
     "created_at", "updated_at",
     "outcome", "outcome_classification",
     "decision_id", "recommendation_id", "review_id",
+    "sop_id",
 })
 
 _PERSISTENCE_VERSION = 1
@@ -54,7 +55,8 @@ class OperationStore:
         })
         # Persist optional fields only when set
         for opt in ("outcome", "outcome_classification",
-                     "decision_id", "recommendation_id", "review_id"):
+                     "decision_id", "recommendation_id", "review_id",
+                     "sop_id"):
             val = getattr(operation, opt)
             if val is not None:
                 data[opt] = val
@@ -89,6 +91,7 @@ class OperationStore:
             decision_id=data.get("decision_id"),
             recommendation_id=data.get("recommendation_id"),
             review_id=data.get("review_id"),
+            sop_id=data.get("sop_id"),
             extra_fields=extra,
         )
 
