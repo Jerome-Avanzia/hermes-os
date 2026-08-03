@@ -397,6 +397,24 @@ async def get_capability(workspace_id: str, capability_id: str) -> JSONResponse:
     return JSONResponse(content=cap)
 
 
+@app.get("/v1/workspaces/{workspace_id}/sops")
+async def list_sops(workspace_id: str) -> list[dict]:
+    """List all SOPs (summaries, no content)."""
+    return _hermes_service.list_sops(workspace_id)
+
+
+@app.get("/v1/workspaces/{workspace_id}/sops/{sop_id:path}")
+async def get_sop(workspace_id: str, sop_id: str) -> JSONResponse:
+    """Return full SOP detail with markdown content."""
+    sop = _hermes_service.get_sop(workspace_id, sop_id)
+    if sop is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"SOP not found: {sop_id}"},
+        )
+    return JSONResponse(content=sop)
+
+
 @app.get("/v1/workspaces/{workspace_id}/jobs")
 async def list_jobs(workspace_id: str) -> list[dict]:
     """List all Jobs for the workspace."""

@@ -9,6 +9,7 @@
   "inputs": ["project brief", "brand guidelines", "target audience"],
   "outputs": ["marketing copy draft", "revision notes"],
   "sop_ref": null,
+  "sop_refs": ["copywriting/content-review"],
   "skill_id": "copywriting",
   "owner": "Marketing",
   "depends_on": []

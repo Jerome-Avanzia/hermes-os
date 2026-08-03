@@ -11,6 +11,7 @@ from hermes.kernel.decision_id import generate_decision_id
 from hermes.kernel.decision_writer import DecisionWriter
 from hermes.kernel.operation_id_bk import generate_bk_operation_id
 from hermes.kernel.operation_writer import OperationWriter
+from hermes.kernel.sop_registry import SOPRegistry
 from hermes.kernel.executor import Executor
 from hermes.kernel.file_content_reader import FileContentReader
 from hermes.kernel.file_selector import FileSelector
@@ -59,6 +60,7 @@ class HermesService:
         conductor: Conductor | None = None,
         operation_store: OperationStore | None = None,
         job_store: JobStore | None = None,
+        sop_registry: SOPRegistry | None = None,
     ) -> None:
         self.context_engine = context_engine or ContextEngine()
         self.planner = planner or Planner()
@@ -70,6 +72,7 @@ class HermesService:
         self.conductor = conductor
         self.operation_store = operation_store
         self.job_store = job_store
+        self.sop_registry = sop_registry or SOPRegistry()
 
     # -- Workspace validation --------------------------------------------------
 
@@ -512,9 +515,52 @@ class HermesService:
             "outputs": c.outputs,
             "keywords": c.keywords,
             "sop_ref": c.sop_ref,
+            "sop_refs": c.sop_refs,
             "skill_id": c.skill_id,
             "owner": c.owner,
             "depends_on": c.depends_on,
+        }
+
+    # -- SOP Runtime (Sprint 32) ------------------------------------------------
+
+    def list_sops(self, workspace_id: str) -> list[dict]:
+        """Return all SOPs from the registry (summaries, no content)."""
+        self.validate_workspace(workspace_id)
+        return [self._serialize_sop_summary(s) for s in self.sop_registry.list()]
+
+    def get_sop(self, workspace_id: str, sop_id: str) -> dict | None:
+        """Return full SOP detail with markdown content, or None."""
+        self.validate_workspace(workspace_id)
+        sop = self.sop_registry.get(sop_id)
+        if sop is None:
+            return None
+        return self._serialize_sop(sop)
+
+    @staticmethod
+    def _serialize_sop_summary(s) -> dict:
+        return {
+            "id": s.id,
+            "title": s.title,
+            "skill_id": s.skill_id,
+            "description": s.description,
+            "status": s.status,
+            "owner": s.owner,
+            "category": s.category,
+        }
+
+    @staticmethod
+    def _serialize_sop(s) -> dict:
+        return {
+            "id": s.id,
+            "title": s.title,
+            "skill_id": s.skill_id,
+            "filename": s.filename,
+            "content": s.content,
+            "description": s.description,
+            "version": s.version,
+            "status": s.status,
+            "owner": s.owner,
+            "category": s.category,
         }
 
     # -- Jobs ------------------------------------------------------------------

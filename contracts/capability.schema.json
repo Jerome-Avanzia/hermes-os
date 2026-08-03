@@ -50,7 +50,13 @@
       "items": { "type": "string" }
     },
     "sop_ref": {
-      "type": ["string", "null"]
+      "type": ["string", "null"],
+      "description": "Legacy field — prefer sop_refs."
+    },
+    "sop_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "SOP IDs referenced by this capability."
     },
     "skill_id": {
       "type": "string"

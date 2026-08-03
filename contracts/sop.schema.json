@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermes-os.dev/contracts/sop.schema.json",
+  "title": "SOP",
+  "description": "Canonical Hermes OS Standard Operating Procedure. SOP IDs are filesystem-derived ({skill_id}/{filename-stem}) and change if a file is renamed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "title",
+    "skill_id",
+    "filename",
+    "content",
+    "status"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Filesystem-derived ID: {skill_id}/{filename-stem}. Changes if the file is renamed."
+    },
+    "title": {
+      "type": "string"
+    },
+    "skill_id": {
+      "type": "string"
+    },
+    "filename": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "deprecated"
+      ]
+    },
+    "owner": {
+      "type": ["string", "null"]
+    },
+    "category": {
+      "type": ["string", "null"],
+      "description": "Descriptive category (e.g. Operational, Technical, Business, Marketing, Sales)."
+    }
+  }
+}

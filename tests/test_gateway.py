@@ -1894,3 +1894,108 @@ def test_ui_capabilities_has_status_badges():
     assert ".status-badge.draft" in resp.text
     assert ".status-badge.experimental" in resp.text
     assert ".status-badge.deprecated" in resp.text
+
+
+def test_ui_capabilities_shows_sop_links():
+    """Capability detail shows clickable SOP links."""
+    resp = client.get("/")
+    assert "Standard Operating Procedures" in resp.text
+    assert "sop-link" in resp.text
+
+
+# -- SOPs API (Sprint 32) -----------------------------------------------------
+
+
+def test_get_sops_returns_200():
+    service = MagicMock()
+    service.list_sops.return_value = [
+        {"id": "copywriting/content-review", "title": "Content Review Process",
+         "skill_id": "copywriting", "description": "Procedure.", "status": "active",
+         "owner": "Marketing", "category": "Marketing"},
+    ]
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/sops")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    service.list_sops.assert_called_once_with(WS)
+
+
+def test_get_sops_has_required_fields():
+    service = MagicMock()
+    service.list_sops.return_value = [
+        {"id": "copywriting/content-review", "title": "Content Review",
+         "skill_id": "copywriting", "description": "Procedure.", "status": "active",
+         "owner": "Marketing", "category": "Marketing"},
+    ]
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/sops")
+    sop = resp.json()[0]
+    assert "id" in sop
+    assert "title" in sop
+    assert "skill_id" in sop
+    assert "category" in sop
+
+
+def test_get_sop_detail_returns_200():
+    service = MagicMock()
+    service.get_sop.return_value = {
+        "id": "copywriting/content-review", "title": "Content Review Process",
+        "skill_id": "copywriting", "filename": "content-review.md",
+        "content": "# Content Review Process\n\nDetails.",
+        "description": "Procedure.", "version": "1.0.0", "status": "active",
+        "owner": "Marketing", "category": "Marketing",
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/sops/copywriting/content-review")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "copywriting/content-review"
+    assert resp.json()["content"] == "# Content Review Process\n\nDetails."
+
+
+def test_get_sop_not_found_returns_404():
+    service = MagicMock()
+    service.get_sop.return_value = None
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/sops/nonexistent/sop")
+    assert resp.status_code == 404
+
+
+# -- UI: SOPs view (Sprint 32) ------------------------------------------------
+
+
+def test_ui_sops_view_exists():
+    resp = client.get("/")
+    assert 'data-view="sops"' in resp.text
+    assert 'id="view-sops"' in resp.text
+
+
+def test_ui_sops_nav_item():
+    resp = client.get("/")
+    assert ">SOPs</div>" in resp.text or "SOPs" in resp.text
+
+
+def test_ui_sops_renders_list():
+    resp = client.get("/")
+    assert "loadSOPs" in resp.text
+    assert "renderSOPList" in resp.text
+
+
+def test_ui_sops_renders_detail():
+    resp = client.get("/")
+    assert "renderSOPDetail" in resp.text
+    assert "loadSOPDetail" in resp.text
+
+
+def test_ui_sops_shows_category():
+    resp = client.get("/")
+    assert "sop.category" in resp.text
+
+
+def test_ui_sops_shows_content():
+    resp = client.get("/")
+    assert "sop.content" in resp.text
+
+
+def test_ui_sops_has_back_button():
+    resp = client.get("/")
+    assert "sop-back" in resp.text

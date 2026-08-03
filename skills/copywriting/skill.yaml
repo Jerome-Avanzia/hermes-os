@@ -28,5 +28,8 @@ keywords:
   - content
   - homepage copy
 
+sop_refs:
+  - copywriting/content-review
+
 depends_on:
   - brand-strategy

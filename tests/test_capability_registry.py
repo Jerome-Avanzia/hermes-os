@@ -123,6 +123,7 @@ def test_registry_enriched_fields():
     assert "marketing copy draft" in cap.outputs
     assert cap.owner == "Marketing"
     assert "brand-strategy" in cap.depends_on
+    assert "copywriting/content-review" in cap.sop_refs
 
 
 def test_registry_kernel_has_enriched_fields():
@@ -156,6 +157,7 @@ def test_registry_defaults_for_missing_fields(tmp_path):
     assert cap.inputs == []
     assert cap.outputs == []
     assert cap.sop_ref is None
+    assert cap.sop_refs == []
     assert cap.owner is None
     assert cap.depends_on == []
 
@@ -168,6 +170,53 @@ def test_registry_empty_dir(tmp_path):
 def test_registry_nonexistent_dir():
     reg = CapabilityRegistry(skills_root=Path("/nonexistent/path"))
     assert reg.list() == []
+
+
+# -- Status values -------------------------------------------------------------
+
+
+def test_registry_legacy_sop_ref_fallback(tmp_path):
+    """Legacy sop_ref populates sop_refs when sop_refs is absent."""
+    skill_dir = tmp_path / "legacy"
+    skill_dir.mkdir()
+    manifest = {
+        "id": "legacy",
+        "name": "Legacy",
+        "version": "0.1.0",
+        "capabilities": ["legacy"],
+        "keywords": ["legacy"],
+        "provides": ["something"],
+        "sop_ref": "legacy/old-sop",
+    }
+    with open(skill_dir / "skill.yaml", "w") as f:
+        yaml.safe_dump(manifest, f)
+
+    reg = CapabilityRegistry(skills_root=tmp_path)
+    cap = reg.get("legacy")
+    assert cap.sop_ref == "legacy/old-sop"
+    assert cap.sop_refs == ["legacy/old-sop"]
+
+
+def test_registry_sop_refs_preferred_over_sop_ref(tmp_path):
+    """When both sop_refs and sop_ref exist, sop_refs wins."""
+    skill_dir = tmp_path / "both"
+    skill_dir.mkdir()
+    manifest = {
+        "id": "both",
+        "name": "Both",
+        "version": "0.1.0",
+        "capabilities": ["both"],
+        "keywords": ["both"],
+        "provides": ["something"],
+        "sop_ref": "both/old",
+        "sop_refs": ["both/new-a", "both/new-b"],
+    }
+    with open(skill_dir / "skill.yaml", "w") as f:
+        yaml.safe_dump(manifest, f)
+
+    reg = CapabilityRegistry(skills_root=tmp_path)
+    cap = reg.get("both")
+    assert cap.sop_refs == ["both/new-a", "both/new-b"]
 
 
 # -- Status values -------------------------------------------------------------

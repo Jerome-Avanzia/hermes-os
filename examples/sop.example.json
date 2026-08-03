@@ -1,0 +1,12 @@
+{
+  "id": "copywriting/content-review",
+  "title": "Content Review Process",
+  "skill_id": "copywriting",
+  "filename": "content-review.md",
+  "content": "---\nversion: \"1.0.0\"\ncategory: Marketing\n---\n\n# Content Review Process\n\nStandard procedure for reviewing marketing copy before publication.\n",
+  "description": "Standard procedure for reviewing marketing copy before publication.",
+  "version": "1.0.0",
+  "status": "active",
+  "owner": "Marketing",
+  "category": "Marketing"
+}

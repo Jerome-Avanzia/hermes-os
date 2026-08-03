@@ -821,3 +821,85 @@ def test_get_capability_not_found_returns_none():
     mocks["context_engine"].capability_engine.registry = reg
 
     assert service.get_capability("AVANZIA", "nonexistent") is None
+
+
+# -- Sprint 32: SOP Runtime ---------------------------------------------------
+
+
+def test_list_sops_delegates_to_registry():
+    service, mocks = _mocked_service()
+    from hermes.kernel.sop_registry import SOPRegistry
+    from hermes.models.sop import SOP
+
+    reg = MagicMock(spec=SOPRegistry)
+    reg.list.return_value = [
+        SOP(
+            id="copywriting/content-review", title="Content Review Process",
+            skill_id="copywriting", filename="content-review.md",
+            content="# Content Review Process\n\nDetails.",
+            description="Standard procedure.", version="1.0.0",
+            status="active", owner="Marketing", category="Marketing",
+        ),
+    ]
+    service.sop_registry = reg
+
+    result = service.list_sops("AVANZIA")
+    assert len(result) == 1
+    assert result[0]["id"] == "copywriting/content-review"
+    assert result[0]["title"] == "Content Review Process"
+    assert result[0]["category"] == "Marketing"
+    # Summary should NOT include content
+    assert "content" not in result[0]
+    reg.list.assert_called_once()
+
+
+def test_get_sop_delegates_to_registry():
+    service, mocks = _mocked_service()
+    from hermes.kernel.sop_registry import SOPRegistry
+    from hermes.models.sop import SOP
+
+    reg = MagicMock(spec=SOPRegistry)
+    reg.get.return_value = SOP(
+        id="copywriting/content-review", title="Content Review Process",
+        skill_id="copywriting", filename="content-review.md",
+        content="# Content Review Process\n\nDetails.",
+        description="Standard procedure.", version="1.0.0",
+        status="active", owner="Marketing", category="Marketing",
+    )
+    service.sop_registry = reg
+
+    result = service.get_sop("AVANZIA", "copywriting/content-review")
+    assert result is not None
+    assert result["id"] == "copywriting/content-review"
+    assert result["content"] == "# Content Review Process\n\nDetails."
+    assert result["category"] == "Marketing"
+    assert result["filename"] == "content-review.md"
+
+
+def test_get_sop_not_found_returns_none():
+    service, mocks = _mocked_service()
+    from hermes.kernel.sop_registry import SOPRegistry
+
+    reg = MagicMock(spec=SOPRegistry)
+    reg.get.return_value = None
+    service.sop_registry = reg
+
+    assert service.get_sop("AVANZIA", "nonexistent/sop") is None
+
+
+def test_capability_serialization_includes_sop_refs():
+    service, mocks = _mocked_service()
+    from hermes.kernel.capability_registry import CapabilityRegistry
+    from hermes.models import Capability
+
+    reg = MagicMock(spec=CapabilityRegistry)
+    reg.get.return_value = Capability(
+        id="copywriting", name="Copywriting", version="1.0.0",
+        provides=["marketing copy"], keywords=["copy"],
+        description="Drafts copy", status="active", skill_id="copywriting",
+        sop_refs=["copywriting/content-review"],
+    )
+    mocks["context_engine"].capability_engine.registry = reg
+
+    result = service.get_capability("AVANZIA", "copywriting")
+    assert result["sop_refs"] == ["copywriting/content-review"]

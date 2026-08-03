@@ -130,6 +130,12 @@ class CapabilityRegistry:
         capability_id: str,
         skill_id: str,
     ) -> Capability:
+        # Read sop_refs (new) with fallback to legacy sop_ref.
+        sop_refs = manifest.get("sop_refs", [])
+        sop_ref = manifest.get("sop_ref")
+        if not sop_refs and sop_ref:
+            sop_refs = [sop_ref]
+
         return Capability(
             id=capability_id,
             name=manifest.get("name", capability_id),
@@ -139,7 +145,8 @@ class CapabilityRegistry:
             description=manifest.get("description", ""),
             inputs=manifest.get("inputs", []),
             outputs=manifest.get("outputs", []),
-            sop_ref=manifest.get("sop_ref"),
+            sop_ref=sop_ref,
+            sop_refs=sop_refs,
             status=manifest.get("status", "active"),
             skill_id=skill_id,
             owner=manifest.get("owner"),

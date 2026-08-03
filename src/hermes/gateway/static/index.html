@@ -1064,6 +1064,7 @@
       <div class="nav-item" data-view="documents">Documents</div>
       <div class="nav-item" data-view="memory">Memory</div>
       <div class="nav-item" data-view="capabilities">Capabilities</div>
+      <div class="nav-item" data-view="sops">SOPs</div>
       <div class="nav-item" data-view="mcp">MCP</div>
       <div class="nav-item" data-view="profiles">Profiles</div>
     </div>
@@ -1152,6 +1153,10 @@
         <div id="capabilities-list" class="list-view"></div>
         <div id="capabilities-detail" class="detail-view" style="display:none"></div>
       </div>
+      <div id="view-sops" class="view">
+        <div id="sops-list" class="list-view"></div>
+        <div id="sops-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-mcp" class="view"><div class="view-placeholder"><div class="view-placeholder-title">MCP</div><div class="view-placeholder-sub">Coming soon</div></div></div>
       <div id="view-profiles" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Profiles</div><div class="view-placeholder-sub">Coming soon</div></div></div>
 
@@ -1211,6 +1216,7 @@
     if (name === "operations") loadOperations();
     if (name === "jobs") loadJobs();
     if (name === "capabilities") loadCapabilities();
+    if (name === "sops") loadSOPs();
   }
 
   document.querySelectorAll(".nav-item[data-view]").forEach(function (el) {
@@ -1730,6 +1736,16 @@
       html += '</div>';
     }
 
+    // SOPs
+    if (cap.sop_refs && cap.sop_refs.length > 0) {
+      html += '<div class="cap-section">';
+      html += '  <div class="cap-section-title">Standard Operating Procedures</div>';
+      for (var i = 0; i < cap.sop_refs.length; i++) {
+        html += '<a class="cap-tag sop-link" data-sop-id="' + esc(cap.sop_refs[i]) + '" href="#" style="cursor:pointer;text-decoration:underline;color:var(--accent)">' + esc(cap.sop_refs[i]) + '</a>';
+      }
+      html += '</div>';
+    }
+
     // Dependencies
     if (cap.depends_on && cap.depends_on.length > 0) {
       html += '<div class="cap-section">';
@@ -1745,7 +1761,6 @@
     html += '  <div class="detail-section-title">Metadata</div>';
     html += '  <div class="list-item-meta">Skill: ' + esc(cap.skill_id || "—") + '</div>';
     if (cap.owner) html += '  <div class="list-item-meta">Owner: ' + esc(cap.owner) + '</div>';
-    if (cap.sop_ref) html += '  <div class="list-item-meta">SOP: ' + esc(cap.sop_ref) + '</div>';
     if (cap.keywords && cap.keywords.length > 0) {
       html += '  <div class="list-item-meta" style="margin-top:4px">Keywords: ' + cap.keywords.map(esc).join(", ") + '</div>';
     }
@@ -1753,6 +1768,99 @@
 
     capDetailEl.innerHTML = html;
     document.getElementById("cap-back").addEventListener("click", function () { loadCapabilities(); });
+    capDetailEl.querySelectorAll(".sop-link").forEach(function (el) {
+      el.addEventListener("click", function (e) {
+        e.preventDefault();
+        switchView("sops");
+        loadSOPDetail(el.dataset.sopId);
+      });
+    });
+  }
+
+  // ── SOPs ─────────────────────────────────────────────
+
+  var sopListEl   = document.getElementById("sops-list");
+  var sopDetailEl = document.getElementById("sops-detail");
+
+  function loadSOPs() {
+    if (!activeWorkspaceId) return;
+    sopListEl.style.display = "";
+    sopDetailEl.style.display = "none";
+    sopListEl.innerHTML = '<div class="list-empty">Loading SOPs...</div>';
+
+    fetch(wsBase() + "/sops")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (sops) { renderSOPList(sops); })
+      .catch(function () { sopListEl.innerHTML = '<div class="list-empty">Cannot load SOPs.</div>'; });
+  }
+
+  function renderSOPList(sops) {
+    if (sops.length === 0) {
+      sopListEl.innerHTML = '<div class="list-empty">No SOPs registered.</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < sops.length; i++) {
+      var s = sops[i];
+      html += '<div class="list-item" data-sop-id="' + esc(s.id) + '" style="cursor:pointer">';
+      html += '  <div class="list-item-main">';
+      html += '    <div class="list-item-title">' + esc(s.title) + '</div>';
+      html += '    <div class="list-item-meta">' + esc(s.skill_id) + (s.category ? ' &middot; ' + esc(s.category) : '') + '</div>';
+      if (s.description) {
+        html += '    <div class="list-item-meta" style="margin-top:2px">' + esc(s.description) + '</div>';
+      }
+      html += '  </div>';
+      html += '  <span class="status-badge ' + esc(s.status) + '">' + formatStatus(s.status) + '</span>';
+      html += '</div>';
+    }
+    sopListEl.innerHTML = html;
+    sopListEl.querySelectorAll("[data-sop-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadSOPDetail(el.dataset.sopId); });
+    });
+  }
+
+  function loadSOPDetail(sopId) {
+    sopListEl.style.display = "none";
+    sopDetailEl.style.display = "";
+    sopDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(wsBase() + "/sops/" + encodeURIComponent(sopId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (sop) {
+        if (!sop) { sopDetailEl.innerHTML = '<div class="list-empty">SOP not found.</div>'; return; }
+        renderSOPDetail(sop);
+      })
+      .catch(function () { sopDetailEl.innerHTML = '<div class="list-empty">Cannot load SOP.</div>'; });
+  }
+
+  function renderSOPDetail(sop) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(sop.title) + '</div>';
+    html += '  <div class="detail-meta">' + esc(sop.id) + ' &middot; <span class="status-badge ' + esc(sop.status) + '">' + formatStatus(sop.status) + '</span></div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="sop-back">Back</button>';
+    html += '</div>';
+
+    // Metadata
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Metadata</div>';
+    html += '  <div class="list-item-meta">Skill: ' + esc(sop.skill_id) + '</div>';
+    if (sop.owner) html += '  <div class="list-item-meta">Owner: ' + esc(sop.owner) + '</div>';
+    if (sop.category) html += '  <div class="list-item-meta">Category: ' + esc(sop.category) + '</div>';
+    if (sop.version) html += '  <div class="list-item-meta">Version: ' + esc(sop.version) + '</div>';
+    html += '  <div class="list-item-meta">File: ' + esc(sop.filename) + '</div>';
+    html += '</div>';
+
+    // Markdown content
+    html += '<div class="detail-section" style="margin-top:16px">';
+    html += '  <div class="detail-section-title">Content</div>';
+    html += '  <pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;color:var(--text-main);line-height:1.6;margin:0">' + esc(sop.content) + '</pre>';
+    html += '</div>';
+
+    sopDetailEl.innerHTML = html;
+    document.getElementById("sop-back").addEventListener("click", function () { loadSOPs(); });
   }
 
   // ── Business Journal ──────────────────────────────

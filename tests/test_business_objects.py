@@ -659,6 +659,7 @@ class TestCapability:
         assert c.inputs == []
         assert c.outputs == []
         assert c.sop_ref is None
+        assert c.sop_refs == []
         assert c.owner is None
         assert c.depends_on == []
 
@@ -673,6 +674,7 @@ class TestCapability:
             inputs=["brief"],
             outputs=["draft"],
             sop_ref="sops/copy.md",
+            sop_refs=["copywriting/content-review"],
             status="active",
             skill_id="copywriting",
             owner="Marketing",
@@ -680,6 +682,7 @@ class TestCapability:
         )
         assert c.owner == "Marketing"
         assert c.depends_on == ["brand-strategy"]
+        assert c.sop_refs == ["copywriting/content-review"]
 
     def test_example_validates_against_schema(self):
         example = _load_example("capability.example.json")
@@ -694,3 +697,61 @@ class TestCapability:
         from hermes.models.capability import CAPABILITY_STATUSES
         for status in ("draft", "active", "experimental", "deprecated"):
             assert status in CAPABILITY_STATUSES
+
+
+# -- SOP -----------------------------------------------------------------------
+
+
+class TestSOP:
+    def test_required_fields(self):
+        from hermes.models.sop import SOP
+        s = SOP(
+            id="test/my-sop",
+            title="My SOP",
+            skill_id="test",
+            filename="my-sop.md",
+            content="# My SOP\n\nContent.",
+        )
+        assert s.description == ""
+        assert s.version == ""
+        assert s.status == "active"
+        assert s.owner is None
+        assert s.category is None
+
+    def test_all_fields(self):
+        from hermes.models.sop import SOP
+        s = SOP(
+            id="copywriting/content-review",
+            title="Content Review Process",
+            skill_id="copywriting",
+            filename="content-review.md",
+            content="# Content Review Process\n\nDetails.",
+            description="Standard procedure.",
+            version="1.0.0",
+            status="active",
+            owner="Marketing",
+            category="Marketing",
+        )
+        assert s.category == "Marketing"
+        assert s.owner == "Marketing"
+
+    def test_example_validates_against_schema(self):
+        example = _load_example("sop.example.json")
+        schema = _load_schema("sop.schema.json")
+        _validate_against_schema(example, schema)
+
+    def test_schema_required_fields(self):
+        schema = _load_schema("sop.schema.json")
+        assert set(schema["required"]) == {
+            "id", "title", "skill_id", "filename", "content", "status",
+        }
+
+    def test_all_status_values_valid(self):
+        from hermes.models.sop import SOP_STATUSES
+        for status in ("draft", "active", "deprecated"):
+            assert status in SOP_STATUSES
+
+    def test_category_values(self):
+        from hermes.models.sop import SOP_CATEGORIES
+        for cat in ("Operational", "Technical", "Business", "Marketing", "Sales"):
+            assert cat in SOP_CATEGORIES
