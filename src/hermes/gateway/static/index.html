@@ -1182,6 +1182,7 @@
       <div class="nav-section-title">Knowledge</div>
       <div class="nav-item" data-view="documents">Documents</div>
       <div class="nav-item" data-view="memory">Memory</div>
+      <div class="nav-item" data-view="goals">Goals</div>
       <div class="nav-item" data-view="people">People</div>
       <div class="nav-item" data-view="departments">Departments</div>
       <div class="nav-item" data-view="capabilities">Capabilities</div>
@@ -1277,6 +1278,10 @@
         <div id="documents-detail" class="detail-view" style="display:none"></div>
       </div>
       <div id="view-memory" class="view"><div class="view-placeholder"><div class="view-placeholder-title">Memory</div><div class="view-placeholder-sub">Coming soon</div></div></div>
+      <div id="view-goals" class="view">
+        <div id="goals-list" class="list-view"></div>
+        <div id="goals-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-people" class="view">
         <div id="people-list" class="list-view"></div>
         <div id="people-detail" class="detail-view" style="display:none"></div>
@@ -1351,6 +1356,7 @@
     if (name === "documents") loadDocuments();
     if (name === "operations") loadOperations();
     if (name === "jobs") loadJobs();
+    if (name === "goals") loadGoals();
     if (name === "people") loadPeople();
     if (name === "departments") loadDepartments();
     if (name === "capabilities") loadCapabilities();
@@ -2081,6 +2087,196 @@
   }
 
   // ── People (Sprint 38) ────────────────────────────────
+
+  // ── Goals ──────────────────────────────────────────
+
+  var goalsListEl   = document.getElementById("goals-list");
+  var goalsDetailEl = document.getElementById("goals-detail");
+
+  function loadGoals() {
+    if (!activeWorkspaceId) return;
+    goalsListEl.style.display = "";
+    goalsDetailEl.style.display = "none";
+    goalsListEl.innerHTML = '<div class="list-empty">Loading goals...</div>';
+
+    fetch(wsBase() + "/goals")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (goals) { renderGoalsList(goals); })
+      .catch(function () { goalsListEl.innerHTML = '<div class="list-empty">Cannot load goals.</div>'; });
+  }
+
+  function renderGoalsList(goals) {
+    if (goals.length === 0) {
+      goalsListEl.innerHTML = '<div class="list-empty">No goals registered.</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < goals.length; i++) {
+      var g = goals[i];
+      html += '<div class="list-item" data-goal-id="' + esc(g.id) + '" style="cursor:pointer">';
+      html += '  <div class="list-item-main">';
+      html += '    <div class="list-item-title">' + esc(g.title) + '</div>';
+      html += '    <div class="list-item-meta">' + esc(g.owner) + ' &middot; Target: ' + esc(g.target_date) + '</div>';
+      html += '    <div class="list-item-meta" style="margin-top:2px">';
+      html += g.kpi_count + ' KPIs &middot; ' + g.decision_count + ' decisions';
+      html += '</div>';
+      html += '  </div>';
+      html += '  <span class="status-badge ' + esc(g.status) + '">' + formatStatus(g.status) + '</span>';
+      html += '</div>';
+    }
+    goalsListEl.innerHTML = html;
+    goalsListEl.querySelectorAll("[data-goal-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadGoalDetail(el.dataset.goalId); });
+    });
+  }
+
+  function loadGoalDetail(goalId) {
+    goalsListEl.style.display = "none";
+    goalsDetailEl.style.display = "";
+    goalsDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(wsBase() + "/goals/" + encodeURIComponent(goalId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (goal) {
+        if (!goal) { goalsDetailEl.innerHTML = '<div class="list-empty">Goal not found.</div>'; return; }
+        renderGoalDetail(goal);
+      })
+      .catch(function () { goalsDetailEl.innerHTML = '<div class="list-empty">Cannot load goal.</div>'; });
+  }
+
+  function renderGoalDetail(goal) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(goal.title) + '</div>';
+    html += '  <div class="detail-meta">' + esc(goal.owner) + ' &middot; <span class="status-badge ' + esc(goal.status) + '">' + formatStatus(goal.status) + '</span></div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="goal-back">Back</button>';
+    html += '</div>';
+
+    // Description
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Description</div>';
+    html += '  <div class="list-item-meta">' + esc(goal.description) + '</div>';
+    html += '</div>';
+
+    // Target
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Target</div>';
+    html += '  <div class="list-item-meta">' + esc(goal.target_value) + ' &middot; Due: ' + esc(goal.target_date) + '</div>';
+    html += '</div>';
+
+    // Strategy
+    if (goal.strategy_id) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Strategy</div>';
+      html += '  <div class="list-item-meta">' + esc(goal.strategy_id) + '</div>';
+      html += '</div>';
+    }
+
+    // KPIs
+    if (goal.kpis && goal.kpis.length > 0) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">KPIs</div>';
+      for (var ki = 0; ki < goal.kpis.length; ki++) {
+        var k = goal.kpis[ki];
+        html += '<div class="list-item goal-kpi-link" data-kpi-id="' + esc(k.id) + '">';
+        html += '  <div class="list-item-main">';
+        html += '    <div class="list-item-title" style="font-size:13px">' + esc(k.name) + '</div>';
+        html += '    <div class="list-item-meta">' + k.current + ' / ' + k.target + ' ' + esc(k.unit) + '</div>';
+        html += '  </div>';
+        html += '  <span class="status-badge ' + esc(k.status) + '">' + formatStatus(k.status) + '</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Decisions
+    if (goal.decisions && goal.decisions.length > 0) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Decisions</div>';
+      for (var di = 0; di < goal.decisions.length; di++) {
+        var dec = goal.decisions[di];
+        html += '<div class="list-item goal-decision-link" data-decision-id="' + esc(dec.id) + '" style="cursor:pointer">';
+        html += '  <div class="list-item-main">';
+        html += '    <div class="list-item-title" style="font-size:13px">' + esc(dec.title) + '</div>';
+        html += '    <div class="list-item-meta">' + esc(dec.date) + '</div>';
+        html += '  </div>';
+        html += '  <span class="status-badge ' + esc(dec.status) + '">' + formatStatus(dec.status) + '</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Operations (via Decision chain)
+    if (goal.operations && goal.operations.length > 0) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Operations</div>';
+      for (var oi = 0; oi < goal.operations.length; oi++) {
+        var op = goal.operations[oi];
+        html += '<div class="list-item goal-op-link" data-op-id="' + esc(op.id) + '" style="cursor:pointer">';
+        html += '  <div class="list-item-main">';
+        html += '    <div class="list-item-title" style="font-size:13px">' + esc(op.id) + '</div>';
+        html += '    <div class="list-item-meta">' + esc(op.request) + '</div>';
+        html += '  </div>';
+        html += '  <span class="status-badge ' + esc(op.status) + '">' + formatStatus(op.status) + '</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Capabilities (Amendment 4)
+    if (goal.capabilities && goal.capabilities.length > 0) {
+      html += '<div class="cap-section">';
+      html += '  <div class="cap-section-title">Supporting Capabilities</div>';
+      for (var ci = 0; ci < goal.capabilities.length; ci++) {
+        var cap = goal.capabilities[ci];
+        html += '<a class="cap-tag goal-cap-link" data-cap-id="' + esc(cap.id) + '" href="#" style="cursor:pointer;text-decoration:underline;color:var(--accent)">' + esc(cap.name) + '</a>';
+      }
+      html += '</div>';
+    }
+
+    // Traceability warnings (Amendment 5)
+    if (goal.traceability_warnings && goal.traceability_warnings.length > 0) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title" style="color:#fca5a5">Traceability Warnings</div>';
+      for (var wi = 0; wi < goal.traceability_warnings.length; wi++) {
+        html += '<div class="list-item-meta" style="color:#fca5a5">' + esc(goal.traceability_warnings[wi]) + '</div>';
+      }
+      html += '</div>';
+    }
+
+    goalsDetailEl.innerHTML = html;
+
+    // Back button
+    document.getElementById("goal-back").addEventListener("click", function () { loadGoals(); });
+
+    // Cross-navigation to capabilities
+    goalsDetailEl.querySelectorAll(".goal-cap-link").forEach(function (el) {
+      el.addEventListener("click", function (e) {
+        e.preventDefault();
+        switchView("capabilities");
+        loadCapabilityDetail(el.dataset.capId);
+      });
+    });
+
+    // Cross-navigation to operations
+    goalsDetailEl.querySelectorAll(".goal-op-link").forEach(function (el) {
+      el.addEventListener("click", function () {
+        switchView("operations");
+        loadOperationDetail(el.dataset.opId);
+      });
+    });
+
+    // Cross-navigation to decisions (navigate to brief/journal)
+    goalsDetailEl.querySelectorAll(".goal-decision-link").forEach(function (el) {
+      el.addEventListener("click", function () {
+        switchView("brief");
+      });
+    });
+  }
+
+  // ── People ──────────────────────────────────────────
 
   var peopleListEl   = document.getElementById("people-list");
   var peopleDetailEl = document.getElementById("people-detail");

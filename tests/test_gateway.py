@@ -2131,6 +2131,171 @@ def test_ui_people_shows_blocked_highlight():
     assert "blocked_operations" in resp.text
 
 
+# -- Goals API (Sprint 39) -----------------------------------------------------
+
+
+def test_get_goals_returns_200():
+    service = MagicMock()
+    service.list_goals.return_value = [
+        {"id": "GOAL-001", "title": "Build Profitable Portfolio",
+         "owner": "Founder", "status": "active", "target_date": "2027-07-31",
+         "kpi_count": 2, "decision_count": 1},
+    ]
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/goals")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    service.list_goals.assert_called_once_with(WS)
+
+
+def test_get_goals_has_cross_ref_counts():
+    service = MagicMock()
+    service.list_goals.return_value = [
+        {"id": "GOAL-001", "title": "Build", "owner": "Founder",
+         "status": "active", "target_date": "2027-07-31",
+         "kpi_count": 3, "decision_count": 2},
+    ]
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/goals")
+    goal = resp.json()[0]
+    assert "kpi_count" in goal
+    assert "decision_count" in goal
+
+
+def test_get_goal_detail_returns_200():
+    service = MagicMock()
+    service.get_goal.return_value = {
+        "id": "GOAL-001", "business_id": "biz_avanzia",
+        "title": "Build Profitable Portfolio",
+        "description": "Operate portfolio", "target_value": "Consistent sales",
+        "target_date": "2027-07-31", "owner": "Founder", "status": "active",
+        "strategy_id": "Portfolio Growth",
+        "kpis": [{"id": "KPI-001", "name": "Revenue", "current": 0, "target": 1000, "unit": "USD", "status": "at_risk"}],
+        "decisions": [{"id": "DEC-001", "title": "Launch", "status": "approved", "date": "2026-07"}],
+        "operations": [],
+        "capabilities": [{"id": "cap-1", "name": "AI Pipeline", "status": "active"}],
+        "traceability_warnings": [],
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/goals/GOAL-001")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "GOAL-001"
+    assert "kpis" in data
+    assert "decisions" in data
+    assert "operations" in data
+    assert "capabilities" in data
+    assert "traceability_warnings" in data
+
+
+def test_get_goal_not_found_returns_404():
+    service = MagicMock()
+    service.get_goal.return_value = None
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/goals/GOAL-999")
+    assert resp.status_code == 404
+
+
+def test_get_goal_detail_includes_capabilities():
+    """Amendment 4: Goal detail includes supporting capabilities."""
+    service = MagicMock()
+    service.get_goal.return_value = {
+        "id": "GOAL-001", "business_id": "biz_avanzia",
+        "title": "Test", "description": "Test", "target_value": "Test",
+        "target_date": "2027-07-31", "owner": "Founder", "status": "active",
+        "strategy_id": None,
+        "kpis": [], "decisions": [], "operations": [],
+        "capabilities": [{"id": "cap-1", "name": "AI Pipeline", "status": "active"}],
+        "traceability_warnings": [],
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/goals/GOAL-001")
+    assert "capabilities" in resp.json()
+    assert len(resp.json()["capabilities"]) == 1
+
+
+def test_get_goal_detail_includes_traceability_warnings():
+    """Amendment 5: Traceability validation results included."""
+    service = MagicMock()
+    service.get_goal.return_value = {
+        "id": "GOAL-001", "business_id": "biz_avanzia",
+        "title": "Test", "description": "Test", "target_value": "Test",
+        "target_date": "2027-07-31", "owner": "Founder", "status": "active",
+        "strategy_id": None,
+        "kpis": [], "decisions": [], "operations": [],
+        "capabilities": [],
+        "traceability_warnings": ["Operation OP-1 lacks chain"],
+    }
+    with patch("hermes.gateway.app._hermes_service", service):
+        resp = client.get(f"{WS_PREFIX}/goals/GOAL-001")
+    warnings = resp.json()["traceability_warnings"]
+    assert len(warnings) == 1
+    assert "lacks chain" in warnings[0]
+
+
+# -- UI: Goals view (Sprint 39) -----------------------------------------------
+
+
+def test_ui_goals_view_exists():
+    resp = client.get("/")
+    assert 'data-view="goals"' in resp.text
+    assert 'id="view-goals"' in resp.text
+
+
+def test_ui_goals_nav_item():
+    resp = client.get("/")
+    assert ">Goals</div>" in resp.text or "Goals" in resp.text
+
+
+def test_ui_goals_renders_list():
+    resp = client.get("/")
+    assert "loadGoals" in resp.text
+    assert "renderGoalsList" in resp.text
+
+
+def test_ui_goals_renders_detail():
+    resp = client.get("/")
+    assert "renderGoalDetail" in resp.text
+    assert "loadGoalDetail" in resp.text
+
+
+def test_ui_goals_shows_kpis():
+    resp = client.get("/")
+    assert "goal-kpi-link" in resp.text
+
+
+def test_ui_goals_shows_decisions():
+    resp = client.get("/")
+    assert "goal-decision-link" in resp.text
+
+
+def test_ui_goals_shows_operations():
+    resp = client.get("/")
+    assert "goal-op-link" in resp.text
+
+
+def test_ui_goals_shows_capabilities():
+    """Amendment 4: Goal detail shows supporting capabilities."""
+    resp = client.get("/")
+    assert "goal-cap-link" in resp.text
+
+
+def test_ui_goals_has_back_button():
+    resp = client.get("/")
+    assert "goal-back" in resp.text
+
+
+def test_ui_goals_shows_traceability_warnings():
+    """Amendment 5: Traceability warnings visible in UI."""
+    resp = client.get("/")
+    assert "traceability_warnings" in resp.text
+
+
+def test_ui_goals_cross_navigates_to_capabilities():
+    resp = client.get("/")
+    assert "goal-cap-link" in resp.text
+
+
 # -- Departments API (Sprint 33) ----------------------------------------------
 
 

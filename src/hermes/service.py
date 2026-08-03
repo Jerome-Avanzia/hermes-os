@@ -20,6 +20,7 @@ from hermes.kernel.heartbeat_runtime import (
     list_heartbeats,
 )
 from hermes.kernel.heartbeat_store import HeartbeatStore
+from hermes.kernel.goal_registry import GoalRegistry
 from hermes.kernel.people_registry import PeopleRegistry
 from hermes.kernel.notification_runtime import (
     apply_acknowledgements,
@@ -90,6 +91,7 @@ class HermesService:
         heartbeat_store: HeartbeatStore | None = None,
         acknowledgement_store: AcknowledgementStore | None = None,
         people_registry: PeopleRegistry | None = None,
+        goal_registry: GoalRegistry | None = None,
     ) -> None:
         self.context_engine = context_engine or ContextEngine()
         self.planner = planner or Planner()
@@ -106,6 +108,7 @@ class HermesService:
         self.heartbeat_store = heartbeat_store
         self.acknowledgement_store = acknowledgement_store
         self.people_registry = people_registry or PeopleRegistry()
+        self.goal_registry = goal_registry or GoalRegistry()
 
     # -- Workspace validation --------------------------------------------------
 
@@ -1015,6 +1018,145 @@ class HermesService:
             "status": person.status,
             "responsibilities": person.responsibilities,
             "owner_aliases": person.owner_aliases,
+        }
+
+    # -- Goals (Sprint 39) ----------------------------------------------------
+
+    def list_goals(self, workspace_id: str) -> list[dict]:
+        """Return all goals with summary cross-reference counts."""
+        self.validate_workspace(workspace_id)
+        goals = self.goal_registry.list()
+        review = self._run_ceo_review(workspace_id)
+        data = review.data
+
+        result = []
+        for goal in goals:
+            linked_kpis = [k for k in data.kpis if k.goal_id == goal.goal_id]
+            linked_decisions = [d for d in data.decisions if d.goal_id == goal.goal_id]
+            d = self._serialize_goal_summary(goal)
+            d["kpi_count"] = len(linked_kpis)
+            d["decision_count"] = len(linked_decisions)
+            result.append(d)
+        return result
+
+    def get_goal(self, workspace_id: str, goal_id: str) -> dict | None:
+        """Return full goal detail with cross-references and traceability."""
+        self.validate_workspace(workspace_id)
+        goal = self.goal_registry.get(goal_id)
+        if goal is None:
+            return None
+
+        review = self._run_ceo_review(workspace_id)
+        data = review.data
+
+        # Cross-reference: KPIs linked to this goal
+        linked_kpis = [k for k in data.kpis if k.goal_id == goal.goal_id]
+
+        # Cross-reference: Decisions linked to this goal
+        linked_decisions = [d for d in data.decisions if d.goal_id == goal.goal_id]
+        decision_ids = {d.decision_id for d in linked_decisions}
+
+        # Cross-reference: Operations via Decision chain (Amendment 5)
+        ops = self.operation_store.list(workspace_id) if self.operation_store else []
+        linked_ops = [
+            o for o in ops
+            if o.decision_id and o.decision_id in decision_ids
+        ]
+
+        # Cross-reference: Capabilities via owner match (Amendment 4)
+        cap_registry = self.context_engine.capability_engine.registry
+        all_caps = cap_registry.list()
+        linked_caps = [
+            c for c in all_caps
+            if self._owner_matches(c.owner, type("_P", (), {"id": goal.owner, "owner_aliases": []})())
+            or any(
+                c.owner and c.owner.strip().lower() == goal.owner.strip().lower()
+                for _ in [None]
+            )
+        ]
+        # Simpler: match capabilities whose owner matches the goal owner string
+        linked_caps = [
+            c for c in all_caps
+            if c.owner and c.owner.strip().lower() == goal.owner.strip().lower()
+        ]
+
+        # Traceability validation (Amendment 5):
+        # Every active operation associated with this goal must trace through
+        # Goal -> Decision -> Operation chain.
+        traceability_warnings = []
+        bk_ops = [o for o in data.operations if o.status in ("created", "executing")]
+        for bk_op in bk_ops:
+            op_owner = bk_op.extra_fields.get("owner", "")
+            if op_owner and op_owner.strip().lower() == goal.owner.strip().lower():
+                # Check if this BK operation has a decision_id linking to this goal
+                if not bk_op.decision_id or bk_op.decision_id not in decision_ids:
+                    traceability_warnings.append(
+                        f"Operation {bk_op.id} appears related to goal {goal.goal_id} "
+                        f"by owner but lacks Goal->Decision->Operation chain"
+                    )
+
+        d = self._serialize_goal(goal)
+        d["kpis"] = [
+            {
+                "id": k.kpi_id,
+                "name": k.name,
+                "current": k.current_value,
+                "target": k.target_value,
+                "unit": k.unit,
+                "status": k.status,
+            }
+            for k in linked_kpis
+        ]
+        d["decisions"] = [
+            {
+                "id": dec.decision_id,
+                "title": dec.title,
+                "status": dec.status,
+                "date": dec.decision_date,
+            }
+            for dec in linked_decisions
+        ]
+        d["operations"] = [
+            {
+                "id": o.id,
+                "request": o.request,
+                "status": o.status,
+            }
+            for o in linked_ops
+        ]
+        d["capabilities"] = [
+            {
+                "id": c.id,
+                "name": c.name,
+                "status": c.status,
+            }
+            for c in linked_caps
+        ]
+        d["traceability_warnings"] = traceability_warnings
+        return d
+
+    @staticmethod
+    def _serialize_goal_summary(goal) -> dict:
+        return {
+            "id": goal.goal_id,
+            "title": goal.title,
+            "owner": goal.owner,
+            "status": goal.status,
+            "target_date": goal.target_date,
+        }
+
+    @staticmethod
+    def _serialize_goal(goal) -> dict:
+        return {
+            "id": goal.goal_id,
+            "business_id": goal.business_id,
+            "title": goal.title,
+            "description": goal.description,
+            "target_value": goal.target_value,
+            "target_date": goal.target_date,
+            "owner": goal.owner,
+            "status": goal.status,
+            "strategy_id": goal.strategy_id,
         }
 
     # -- Jobs ------------------------------------------------------------------

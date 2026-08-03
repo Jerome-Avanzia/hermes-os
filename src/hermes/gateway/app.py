@@ -538,6 +538,24 @@ async def get_person(workspace_id: str, person_id: str) -> JSONResponse:
     return JSONResponse(content=person)
 
 
+@app.get("/v1/workspaces/{workspace_id}/goals")
+async def list_goals(workspace_id: str) -> list[dict]:
+    """List all strategic goals with cross-reference counts."""
+    return _hermes_service.list_goals(workspace_id)
+
+
+@app.get("/v1/workspaces/{workspace_id}/goals/{goal_id}")
+async def get_goal(workspace_id: str, goal_id: str) -> JSONResponse:
+    """Return full goal detail with KPIs, Decisions, Operations, Capabilities."""
+    goal = _hermes_service.get_goal(workspace_id, goal_id)
+    if goal is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Goal not found: {goal_id}"},
+        )
+    return JSONResponse(content=goal)
+
+
 @app.get("/v1/workspaces/{workspace_id}/departments")
 async def list_departments(workspace_id: str) -> list[dict]:
     """List all departments with aggregate metrics."""
