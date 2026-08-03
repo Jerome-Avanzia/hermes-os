@@ -405,9 +405,10 @@ def test_response_has_attention(graph, empty_data):
 # -- Supported types -----------------------------------------------------------
 
 
-def test_supported_types_includes_all_nine():
+def test_supported_types_includes_all_ten():
     expected = {"goal", "person", "department", "capability",
-                "operation", "decision", "kpi", "sop", "repository"}
+                "operation", "decision", "kpi", "sop", "repository",
+                "service"}
     assert SUPPORTED_TYPES == expected
 
 

@@ -54,8 +54,12 @@ from hermes.providers.ai_provider import AIProvider
 from hermes.providers.ollama_provider import ChatMessage
 from hermes.kernel.workspace_engine import WorkspaceNotFoundError  # noqa: F401 — re-exported for Gateway
 from hermes.runtime.context_engine import ContextEngine
+from hermes.runtime.docker_provider import DockerProvider
 from hermes.runtime.github_provider import GitHubProvider
 from hermes.runtime.github_runtime import GitHubRuntime
+from hermes.runtime.host_provider import HostProvider
+from hermes.runtime.infrastructure_runtime import InfrastructureRuntime
+from hermes.runtime.traefik_provider import TraefikProvider
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +118,7 @@ class HermesService:
         self.goal_registry = goal_registry or GoalRegistry()
         self._context_graph: ContextGraph | None = None
         self._github_runtime: GitHubRuntime | None = None
+        self._infrastructure_runtime: InfrastructureRuntime | None = None
 
     # -- Workspace validation --------------------------------------------------
 
@@ -1226,6 +1231,74 @@ class HermesService:
             "topics": r.topics,
         }
 
+    # -- Infrastructure Runtime (Sprint 42) --------------------------------------
+
+    def _get_infrastructure_runtime(self) -> InfrastructureRuntime:
+        """Lazily build the InfrastructureRuntime from config."""
+        if self._infrastructure_runtime is None:
+            providers = [
+                DockerProvider(host=config.docker_host()),
+                TraefikProvider(api_url=config.traefik_url()),
+                HostProvider(),
+            ]
+            self._infrastructure_runtime = InfrastructureRuntime(providers)
+        return self._infrastructure_runtime
+
+    def infrastructure_health(self) -> dict:
+        """Return aggregated infrastructure health status."""
+        runtime = self._get_infrastructure_runtime()
+        h = runtime.health()
+        return {
+            "configured": h.configured,
+            "last_refresh": h.last_refresh,
+            "providers": [
+                {
+                    "name": p.provider_name,
+                    "configured": p.configured,
+                    "reachable": p.reachable,
+                    "detail": p.detail,
+                }
+                for p in h.providers
+            ],
+        }
+
+    def list_services(self) -> list[dict]:
+        """Return all infrastructure services as serialized dicts."""
+        runtime = self._get_infrastructure_runtime()
+        services = runtime.list_services()
+        return [self._serialize_service(s) for s in services]
+
+    def get_service(self, service_id: str) -> dict | None:
+        """Return a single service by ID, or None."""
+        runtime = self._get_infrastructure_runtime()
+        svc = runtime.get_service(service_id)
+        if svc is None:
+            return None
+        return self._serialize_service(svc)
+
+    @staticmethod
+    def _serialize_service(s) -> dict:
+        return {
+            "id": s.id,
+            "name": s.name,
+            "type": s.type,
+            "status": s.status,
+            "health": s.health,
+            "image": s.image,
+            "image_tag": s.image_tag,
+            "repository_ref": s.repository_ref,
+            "container_name": s.container_name,
+            "uptime": s.uptime,
+            "started_at": s.started_at,
+            "cpu_percent": s.cpu_percent,
+            "memory_usage": s.memory_usage,
+            "memory_limit": s.memory_limit,
+            "resource_state": s.resource_state,
+            "ports": s.ports,
+            "labels": s.labels,
+            "urls": s.urls,
+        }
+
     # -- Context Graph (Sprint 40) ---------------------------------------------
 
     def _get_context_graph(self) -> ContextGraph:
@@ -1270,6 +1343,10 @@ class HermesService:
         runtime = self._get_github_runtime()
         repos = runtime.list_repositories() if runtime.configured else []
 
+        # Fetch services for context graph (Sprint 42)
+        infra_runtime = self._get_infrastructure_runtime()
+        services = infra_runtime.list_services() if infra_runtime.configured else []
+
         data = GraphData(
             workspace_id=workspace_id,
             operations=ops,
@@ -1278,6 +1355,7 @@ class HermesService:
             notifications=notifications,
             heartbeat_store=self.heartbeat_store,
             repositories=repos,
+            services=services,
         )
 
         return self._get_context_graph().resolve(object_type, object_id, data)
@@ -1419,6 +1497,20 @@ class HermesService:
                     if latest and latest.status == "blocked":
                         heartbeat_pulse["blocked"] += 1
 
+        # Infrastructure summary — "Is production healthy?" (Amendment 4)
+        infra_runtime = self._get_infrastructure_runtime()
+        infra_summary = {"configured": False, "total": 0, "healthy": 0, "unhealthy": 0, "resource_critical": 0}
+        if infra_runtime.configured:
+            try:
+                services = infra_runtime.list_services()
+                infra_summary["configured"] = True
+                infra_summary["total"] = len(services)
+                infra_summary["healthy"] = sum(1 for s in services if s.health == "healthy")
+                infra_summary["unhealthy"] = sum(1 for s in services if s.health == "unhealthy")
+                infra_summary["resource_critical"] = sum(1 for s in services if s.resource_state == "critical")
+            except Exception:
+                pass
+
         return {
             "workspace": {"name": ws.name or workspace_id},
             "operations": {
@@ -1432,6 +1524,7 @@ class HermesService:
             "notifications": self._compute_notification_summary(
                 workspace_id, ops, review,
             ),
+            "infrastructure": infra_summary,
         }
 
     def _compute_notification_summary(

@@ -52,6 +52,7 @@ class GraphData:
     notifications: list = field(default_factory=list)
     heartbeat_store: Any = None
     repositories: list = field(default_factory=list)
+    services: list = field(default_factory=list)
 
 
 # -- Internal resolution context -----------------------------------------------
@@ -79,6 +80,8 @@ class _Ctx:
     cap_index: dict
     sop_index: dict
     repo_index: dict
+    services: list
+    service_index: dict
 
 
 # -- Serializers ---------------------------------------------------------------
@@ -134,6 +137,12 @@ def _ser_repo(r) -> dict:
             "language": r.language, "url": r.url, "visibility": r.visibility}
 
 
+def _ser_service(s) -> dict:
+    return {"id": s.id, "name": s.name, "status": s.status,
+            "health": s.health, "image_tag": s.image_tag,
+            "resource_state": s.resource_state}
+
+
 # -- Object finders ------------------------------------------------------------
 
 
@@ -147,6 +156,7 @@ _FINDERS: dict[str, Callable] = {
     "decision":   lambda ctx, oid: next((d for d in ctx.decisions if d.decision_id == oid), None),
     "kpi":        lambda ctx, oid: next((k for k in ctx.kpis if k.kpi_id == oid), None),
     "repository": lambda ctx, oid: ctx.repo_index.get(oid),
+    "service":    lambda ctx, oid: ctx.service_index.get(oid),
 }
 
 _SUMMARIZERS: dict[str, Callable] = {
@@ -159,6 +169,7 @@ _SUMMARIZERS: dict[str, Callable] = {
     "decision":   _ser_decision,
     "kpi":        _ser_kpi,
     "repository": _ser_repo,
+    "service":    _ser_service,
 }
 
 
@@ -534,6 +545,120 @@ def _cap_repositories(cap, ctx):
             if r in ctx.repo_index]
 
 
+# -- Edge resolvers: Service (Sprint 42) ----------------------------------------
+
+
+def _service_repositories(svc, ctx):
+    if not svc.repository_ref:
+        return []
+    r = ctx.repo_index.get(svc.repository_ref)
+    return [_ser_repo(r)] if r else []
+
+
+def _service_capabilities(svc, ctx):
+    if not svc.repository_ref:
+        return []
+    return [_ser_cap(c) for c in ctx.all_capabilities
+            if svc.repository_ref in c.repository_refs]
+
+
+def _service_people(svc, ctx):
+    if not svc.repository_ref:
+        return []
+    caps = [c for c in ctx.all_capabilities
+            if svc.repository_ref in c.repository_refs]
+    seen: set[str] = set()
+    result = []
+    for cap in caps:
+        for p in ctx.all_people:
+            if p.id not in seen and _owner_matches(cap.owner, p):
+                seen.add(p.id)
+                result.append(_ser_person(p))
+    return result
+
+
+def _service_departments(svc, ctx):
+    if not svc.repository_ref:
+        return []
+    caps = [c for c in ctx.all_capabilities
+            if svc.repository_ref in c.repository_refs]
+    dept_ids = {c.department_id for c in caps if c.department_id}
+    return [_ser_dept(ctx.dept_index[d]) for d in dept_ids
+            if d in ctx.dept_index]
+
+
+def _service_goals(svc, ctx):
+    if not svc.repository_ref:
+        return []
+    caps = [c for c in ctx.all_capabilities
+            if svc.repository_ref in c.repository_refs]
+    if not caps:
+        return []
+    cap_owners = {c.owner.strip().lower() for c in caps if c.owner}
+    return [_ser_goal(g) for g in ctx.all_goals
+            if g.owner and g.owner.strip().lower() in cap_owners]
+
+
+def _service_operations(svc, ctx):
+    if not svc.repository_ref:
+        return []
+    caps = [c for c in ctx.all_capabilities
+            if svc.repository_ref in c.repository_refs]
+    sop_set: set[str] = set()
+    for c in caps:
+        sop_set.update(c.sop_refs)
+    return [_ser_op(o) for o in ctx.operations
+            if o.sop_id and o.sop_id in sop_set]
+
+
+def _service_notifications(svc, ctx):
+    return _notifs_for_ids([svc.id], ctx)
+
+
+# -- Service edges on existing types (Sprint 42) --------------------------------
+
+
+def _find_services_by_repo_refs(repo_ids, ctx):
+    """Find services whose repository_ref matches any of the given repo IDs."""
+    return [_ser_service(s) for s in ctx.services
+            if s.repository_ref and s.repository_ref in repo_ids]
+
+
+def _goal_services(goal, ctx):
+    goal_caps = [c for c in ctx.all_capabilities
+                 if c.owner and goal.owner
+                 and c.owner.strip().lower() == goal.owner.strip().lower()]
+    repo_ids: set[str] = set()
+    for c in goal_caps:
+        repo_ids.update(c.repository_refs)
+    return _find_services_by_repo_refs(repo_ids, ctx)
+
+
+def _person_services(person, ctx):
+    caps = [c for c in ctx.all_capabilities if _owner_matches(c.owner, person)]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return _find_services_by_repo_refs(repo_ids, ctx)
+
+
+def _dept_services(dept, ctx):
+    caps = [c for c in ctx.all_capabilities if c.department_id == dept.id]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return _find_services_by_repo_refs(repo_ids, ctx)
+
+
+def _cap_services(cap, ctx):
+    return _find_services_by_repo_refs(set(cap.repository_refs), ctx)
+
+
+def _repo_services(repo, ctx):
+    return [_ser_service(s) for s in ctx.services
+            if s.repository_ref == repo.id]
+
+
 # -- Declarative edge registry (Amendment 2) -----------------------------------
 
 
@@ -543,6 +668,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "departments": _goal_departments,
         "capabilities": _goal_capabilities,
         "repositories": _goal_repositories,
+        "services": _goal_services,
         "kpis": _goal_kpis,
         "decisions": _goal_decisions,
         "operations": _goal_operations,
@@ -553,6 +679,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "departments": _person_departments,
         "capabilities": _person_capabilities,
         "repositories": _person_repositories,
+        "services": _person_services,
         "goals": _person_goals,
         "operations": _person_operations,
         "heartbeats": _person_heartbeats,
@@ -562,6 +689,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "people": _dept_people,
         "capabilities": _dept_capabilities,
         "repositories": _dept_repositories,
+        "services": _dept_services,
         "goals": _dept_goals,
         "operations": _dept_operations,
         "sops": _dept_sops,
@@ -570,6 +698,7 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "departments": _cap_departments,
         "people": _cap_people,
         "repositories": _cap_repositories,
+        "services": _cap_services,
         "sops": _cap_sops,
         "goals": _cap_goals,
         "operations": _cap_operations,
@@ -605,12 +734,22 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "people": _repo_people,
         "departments": _repo_departments,
         "goals": _repo_goals,
+        "services": _repo_services,
+    },
+    "service": {
+        "repositories": _service_repositories,
+        "capabilities": _service_capabilities,
+        "people": _service_people,
+        "departments": _service_departments,
+        "goals": _service_goals,
+        "operations": _service_operations,
+        "notifications": _service_notifications,
     },
 }
 
 ALL_RELATION_KEYS = frozenset({
     "goals", "people", "departments", "capabilities",
-    "repositories", "operations", "decisions", "kpis", "sops",
+    "repositories", "services", "operations", "decisions", "kpis", "sops",
     "heartbeats", "notifications",
 })
 
@@ -728,10 +867,12 @@ class ContextGraph:
             notifications=data.notifications,
             heartbeat_store=data.heartbeat_store,
             repositories=data.repositories,
+            services=data.services,
             goal_index={g.goal_id: g for g in all_goals},
             person_index={p.id: p for p in all_people},
             dept_index={d.id: d for d in all_departments},
             cap_index={c.id: c for c in all_capabilities},
             sop_index={s.id: s for s in all_sops},
             repo_index={r.id: r for r in data.repositories},
+            service_index={s.id: s for s in data.services},
         )

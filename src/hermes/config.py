@@ -45,3 +45,11 @@ def github_org() -> str:
 
 def github_token() -> str:
     return os.environ.get("HERMES_GITHUB_TOKEN", "")
+
+
+def docker_host() -> str:
+    return os.environ.get("HERMES_DOCKER_HOST", "unix:///var/run/docker.sock")
+
+
+def traefik_url() -> str:
+    return os.environ.get("HERMES_TRAEFIK_URL", "")

@@ -721,6 +721,24 @@ async def get_repository(repo_id: str) -> JSONResponse:
     return JSONResponse(content=repo)
 
 
+@app.get("/v1/services")
+async def list_services() -> list[dict]:
+    """List all infrastructure services."""
+    return _hermes_service.list_services()
+
+
+@app.get("/v1/services/{service_id}")
+async def get_service(service_id: str) -> JSONResponse:
+    """Return a single infrastructure service by ID."""
+    svc = _hermes_service.get_service(service_id)
+    if svc is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Service not found: {service_id}"},
+        )
+    return JSONResponse(content=svc)
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -730,6 +748,12 @@ async def health() -> dict[str, str]:
 async def github_health() -> dict:
     """GitHub integration health check (Amendment 6)."""
     return _hermes_service.github_health()
+
+
+@app.get("/health/infrastructure")
+async def infrastructure_health() -> dict:
+    """Infrastructure runtime health check (Sprint 42)."""
+    return _hermes_service.infrastructure_health()
 
 
 # -- Static UI (must be mounted last so API routes take precedence) ---------

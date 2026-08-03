@@ -1174,6 +1174,7 @@
       <div class="nav-item" data-view="brief">Brief</div>
       <div class="nav-item" data-view="chat">Chat</div>
       <div class="nav-item" data-view="operations">Operations</div>
+      <div class="nav-item" data-view="infrastructure">Infrastructure</div>
       <div class="nav-item" data-view="journal">Journal</div>
       <div class="nav-item" data-view="jobs">Jobs</div>
     </div>
@@ -1269,6 +1270,10 @@
       <div id="view-operations" class="view">
         <div id="operations-list" class="list-view"></div>
         <div id="operations-detail" class="detail-view" style="display:none"></div>
+      </div>
+      <div id="view-infrastructure" class="view">
+        <div id="infrastructure-list" class="list-view"></div>
+        <div id="infrastructure-detail" class="detail-view" style="display:none"></div>
       </div>
       <div id="view-jobs" class="view">
         <div id="jobs-list" class="list-view"></div>
@@ -1367,6 +1372,7 @@
     if (name === "capabilities") loadCapabilities();
     if (name === "sops") loadSOPs();
     if (name === "repositories") loadRepositories();
+    if (name === "infrastructure") loadInfrastructure();
     if (name === "notifications") loadNotifications();
   }
 
@@ -1440,6 +1446,7 @@
     var notifs = data.notifications || {};
     var pulse = data.heartbeat_pulse || {};
     var pending = data.pending_decisions || 0;
+    var infra = data.infrastructure || {};
 
     // Header
     homeHeader.textContent = ws.name || "Hermes";
@@ -1470,6 +1477,26 @@
       html += '<div class="widget-sub">All clear</div>';
     }
     html += '</div>';
+
+    if (infra.configured) {
+      html += '<div class="dash-card" id="home-infra-card">';
+      html += '<div class="widget-title">Infrastructure</div>';
+      if (infra.unhealthy > 0 || infra.resource_critical > 0) {
+        html += '<div class="widget-value" style="color:#fca5a5">' + infra.unhealthy + '</div>';
+        html += '<div class="widget-sub" style="color:#fca5a5">unhealthy</div>';
+        var iparts = [];
+        iparts.push(infra.healthy + ' healthy');
+        if (infra.resource_critical > 0) iparts.push('<span style="color:#fca5a5">' + infra.resource_critical + ' resource critical</span>');
+        iparts.push(infra.total + ' total');
+        html += '<div class="widget-sub">' + iparts.join(' &middot; ') + '</div>';
+      } else {
+        html += '<div class="widget-value" style="color:#6ee7b7">' + infra.healthy + '</div>';
+        html += '<div class="widget-sub">healthy services</div>';
+        html += '<div class="widget-sub">' + infra.total + ' total</div>';
+      }
+      html += '</div>';
+    }
+
     html += '</div>';
 
     // ── What changed? ─────────────────────────────────
@@ -1552,6 +1579,9 @@
 
     var decisionsCard = document.getElementById("home-decisions-card");
     if (decisionsCard) decisionsCard.addEventListener("click", function () { switchView("brief"); });
+
+    var infraCard = document.getElementById("home-infra-card");
+    if (infraCard) infraCard.addEventListener("click", function () { switchView("infrastructure"); });
   }
 
   // ── Executive Brief ───────────────────────────────
@@ -2138,6 +2168,7 @@
       { key: "decisions", label: "Related Decisions", idField: "id", nameField: "title", type: "decisions", navFn: null },
       { key: "kpis", label: "Related KPIs", idField: "id", nameField: "name", type: "kpis", navFn: null },
       { key: "repositories", label: "Related Repositories", idField: "id", nameField: "name", type: "repositories", navFn: "loadRepositoryDetail" },
+      { key: "services", label: "Related Services", idField: "id", nameField: "name", type: "services", navFn: "loadServiceDetail" },
       { key: "sops", label: "Related SOPs", idField: "id", nameField: "title", type: "sops", navFn: null },
       { key: "heartbeats", label: "Related Heartbeats", idField: "id", nameField: "summary", type: "heartbeats", navFn: null },
       { key: "notifications", label: "Related Notifications", idField: "id", nameField: "title", type: "notifications", navFn: null },
@@ -2186,6 +2217,7 @@
         else if (nav === "capabilities") { switchView("capabilities"); loadCapabilityDetail(id); }
         else if (nav === "operations") { switchView("operations"); loadOperationDetail(id); }
         else if (nav === "repositories") { switchView("repositories"); loadRepositoryDetail(id); }
+        else if (nav === "services") { switchView("infrastructure"); loadServiceDetail(id); }
       });
     });
   }
@@ -2855,6 +2887,158 @@
     if (activeWorkspaceId) {
       var ctxEl = document.getElementById("repo-context");
       loadContext("repository", repo.id, ctxEl);
+    }
+  }
+
+  // ── Infrastructure (Sprint 42) ─────────────────────
+
+  var infraListEl = document.getElementById("infrastructure-list");
+  var infraDetailEl = document.getElementById("infrastructure-detail");
+
+  function loadInfrastructure() {
+    infraListEl.style.display = "";
+    infraDetailEl.style.display = "none";
+    infraListEl.innerHTML = '<div class="list-empty">Loading infrastructure...</div>';
+
+    fetch(GATEWAY + "/v1/services")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (services) { renderInfraList(services); })
+      .catch(function () { infraListEl.innerHTML = '<div class="list-empty">Cannot load infrastructure.</div>'; });
+  }
+
+  function infraHealthColor(h) {
+    if (h === "healthy") return "var(--accent)";
+    if (h === "unhealthy") return "var(--red)";
+    if (h === "starting") return "#fcd34d";
+    return "var(--text-dim)";
+  }
+
+  function infraResourceBadge(state) {
+    if (state === "critical") return '<span class="status-badge" style="background:#991b1b;color:#fca5a5;font-size:10px">critical</span>';
+    if (state === "elevated") return '<span class="status-badge" style="background:#78350f;color:#fcd34d;font-size:10px">elevated</span>';
+    return "";
+  }
+
+  function renderInfraList(services) {
+    if (services.length === 0) {
+      infraListEl.innerHTML = '<div class="list-empty">No services discovered. Ensure containers have a <code>hermes.service</code> label.</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < services.length; i++) {
+      var s = services[i];
+      html += '<div class="list-item" data-service-id="' + esc(s.id) + '" style="cursor:pointer">';
+      html += '  <div class="list-item-main">';
+      html += '    <div class="list-item-title">' + esc(s.name) + '</div>';
+      html += '    <div class="list-item-meta">';
+      html += '      <span style="color:' + infraHealthColor(s.health) + '">' + esc(s.health) + '</span>';
+      html += '      &middot; ' + esc(s.status);
+      if (s.image_tag) html += ' &middot; ' + esc(s.image_tag);
+      if (s.repository_ref) html += ' &middot; ' + esc(s.repository_ref);
+      if (s.uptime) html += ' &middot; up ' + esc(s.uptime);
+      html += '    </div>';
+      html += '  </div>';
+      html += '  <div>';
+      html += infraResourceBadge(s.resource_state);
+      html += '  <span class="status-badge ' + (s.status === "running" ? "active" : "completed") + '">' + esc(s.status) + '</span>';
+      html += '  </div>';
+      html += '</div>';
+    }
+    infraListEl.innerHTML = html;
+    infraListEl.querySelectorAll("[data-service-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadServiceDetail(el.dataset.serviceId); });
+    });
+  }
+
+  function loadServiceDetail(serviceId) {
+    infraListEl.style.display = "none";
+    infraDetailEl.style.display = "";
+    infraDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(GATEWAY + "/v1/services/" + encodeURIComponent(serviceId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (svc) {
+        if (!svc) { infraDetailEl.innerHTML = '<div class="list-empty">Service not found.</div>'; return; }
+        renderServiceDetail(svc);
+      })
+      .catch(function () { infraDetailEl.innerHTML = '<div class="list-empty">Cannot load service.</div>'; });
+  }
+
+  function formatBytes(bytes) {
+    if (!bytes) return "0 B";
+    var units = ["B", "KB", "MB", "GB"];
+    var i = 0;
+    var v = bytes;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return v.toFixed(i > 0 ? 1 : 0) + " " + units[i];
+  }
+
+  function renderServiceDetail(svc) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(svc.name) + '</div>';
+    html += '  <div class="detail-meta">';
+    html += '    <span style="color:' + infraHealthColor(svc.health) + '">' + esc(svc.health) + '</span>';
+    html += '    &middot; ' + esc(svc.status);
+    html += '    &middot; ' + esc(svc.type);
+    if (svc.resource_state !== "normal") html += ' &middot; ' + infraResourceBadge(svc.resource_state);
+    html += '  </div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="infra-back">Back</button>';
+    html += '</div>';
+
+    // Metadata
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Metadata</div>';
+    html += '  <div class="list-item-meta">ID: ' + esc(svc.id) + '</div>';
+    html += '  <div class="list-item-meta">Container: ' + esc(svc.container_name || "—") + '</div>';
+    html += '  <div class="list-item-meta">Image: ' + esc(svc.image || "—") + ':' + esc(svc.image_tag || "latest") + '</div>';
+    if (svc.started_at) html += '  <div class="list-item-meta">Started: ' + esc(svc.started_at) + '</div>';
+    if (svc.uptime) html += '  <div class="list-item-meta">Uptime: ' + esc(svc.uptime) + '</div>';
+    html += '</div>';
+
+    // Runtime
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Runtime</div>';
+    html += '  <div class="list-item-meta">CPU: ' + svc.cpu_percent.toFixed(1) + '%</div>';
+    html += '  <div class="list-item-meta">Memory: ' + formatBytes(svc.memory_usage) + ' / ' + formatBytes(svc.memory_limit) + '</div>';
+    html += '  <div class="list-item-meta">Resource state: ' + esc(svc.resource_state) + '</div>';
+    if (svc.ports && svc.ports.length > 0) html += '  <div class="list-item-meta">Ports: ' + esc(svc.ports.join(", ")) + '</div>';
+    if (svc.urls && svc.urls.length > 0) html += '  <div class="list-item-meta">URLs: ' + svc.urls.map(function(u) { return '<a href="' + esc(u) + '" target="_blank" rel="noopener" style="color:var(--accent)">' + esc(u) + '</a>'; }).join(", ") + '</div>';
+    html += '</div>';
+
+    // Repository
+    if (svc.repository_ref) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Repository</div>';
+      html += '  <div class="list-item context-link" data-context-nav="repositories" data-context-id="' + esc(svc.repository_ref) + '" style="cursor:pointer;padding:4px 8px;font-size:12px">';
+      html += '    <span class="list-item-title">' + esc(svc.repository_ref) + '</span>';
+      html += '  </div>';
+      html += '</div>';
+    }
+
+    // Context panel
+    if (activeWorkspaceId) {
+      html += '<div id="service-context" style="margin-top:16px"></div>';
+    }
+
+    infraDetailEl.innerHTML = html;
+    document.getElementById("infra-back").addEventListener("click", function () { loadInfrastructure(); });
+
+    // Repository link
+    infraDetailEl.querySelectorAll(".context-link").forEach(function (el) {
+      el.addEventListener("click", function () {
+        var nav = el.dataset.contextNav;
+        var id = el.dataset.contextId;
+        if (nav === "repositories") { switchView("repositories"); loadRepositoryDetail(id); }
+      });
+    });
+
+    // Load context
+    if (activeWorkspaceId) {
+      var ctxEl = document.getElementById("service-context");
+      loadContext("service", svc.id, ctxEl);
     }
   }
 
