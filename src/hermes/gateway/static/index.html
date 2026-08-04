@@ -1179,6 +1179,7 @@
       <div class="nav-item" data-view="data">Data</div>
       <div class="nav-item" data-view="ai">AI</div>
       <div class="nav-item" data-view="impact">Impact</div>
+      <div class="nav-item" data-view="readiness">Readiness</div>
       <div class="nav-item" data-view="journal">Journal</div>
       <div class="nav-item" data-view="jobs">Jobs</div>
     </div>
@@ -1295,6 +1296,9 @@
         <div id="impact-selector" class="list-view"></div>
         <div id="impact-result" class="detail-view" style="display:none"></div>
       </div>
+      <div id="view-readiness" class="view">
+        <div id="readiness-content" class="list-view"></div>
+      </div>
       <div id="view-jobs" class="view">
         <div id="jobs-list" class="list-view"></div>
         <div id="jobs-detail" class="detail-view" style="display:none"></div>
@@ -1397,6 +1401,7 @@
     if (name === "data") loadData();
     if (name === "ai") loadAI();
     if (name === "impact") loadImpactView();
+    if (name === "readiness") loadReadinessView();
     if (name === "notifications") loadNotifications();
   }
 
@@ -3964,6 +3969,141 @@
     document.getElementById("impact-back").addEventListener("click", function () {
       loadImpactView();
     });
+  }
+
+  // ── Executive Readiness (Sprint 47) ─────────────────
+
+  var readinessContentEl = document.getElementById("readiness-content");
+  var readinessScenario = "deployment";
+
+  function loadReadinessView() {
+    if (!activeWorkspaceId) return;
+    readinessContentEl.innerHTML = '<div class="detail-header"><div class="detail-title">Loading readiness...</div></div>';
+    fetch("/v1/workspaces/" + activeWorkspaceId + "/readiness?scenario=" + readinessScenario)
+      .then(function (r) { return r.json(); })
+      .then(function (data) { renderReadiness(data); })
+      .catch(function () { readinessContentEl.innerHTML = '<div class="detail-header"><div class="detail-title">Failed to load readiness</div></div>'; });
+  }
+
+  function renderReadiness(data) {
+    var isReady = data.overall_status === "ready";
+    var badgeColor = isReady ? "#22c55e" : "#ef4444";
+    var badgeLabel = isReady ? "READY" : "NOT READY";
+
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">Executive Readiness</div>';
+    html += '  <div class="detail-meta">' + (data.scenario_label || data.scenario) + ' scenario</div>';
+    html += '</div>';
+
+    // Scenario selector
+    html += '<div class="detail-section" style="margin-bottom:16px">';
+    html += '<select id="readiness-scenario-select" style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-size:13px">';
+    var scenarios = ["deployment","repository_merge","workflow_activation","database_maintenance","provider_switch"];
+    var scenarioLabels = {"deployment":"Deployment","repository_merge":"Repository Merge","workflow_activation":"Workflow Activation","database_maintenance":"Database Maintenance","provider_switch":"Provider Switch"};
+    for (var si = 0; si < scenarios.length; si++) {
+      var sel = scenarios[si] === readinessScenario ? " selected" : "";
+      html += '<option value="' + scenarios[si] + '"' + sel + '>' + scenarioLabels[scenarios[si]] + '</option>';
+    }
+    html += '</select>';
+    html += '</div>';
+
+    // Overall badge
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:16px;text-align:center">';
+    html += '<div style="display:inline-block;background:' + badgeColor + ';color:#fff;font-weight:700;font-size:18px;padding:8px 24px;border-radius:6px;letter-spacing:1px">' + badgeLabel + '</div>';
+    html += '<div style="margin-top:8px;font-size:24px;font-weight:700;color:var(--text)">' + data.overall_score + '%</div>';
+    if (data.critical_dependencies > 0) {
+      html += '<div style="margin-top:4px;font-size:12px;color:#ef4444">' + data.critical_dependencies + ' critical dependenc' + (data.critical_dependencies === 1 ? 'y' : 'ies') + '</div>';
+    }
+    html += '</div>';
+
+    // Category cards — 4x2 grid
+    html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">';
+    var catOrder = ["infrastructure","repositories","automation","data","ai","operations","business","goals"];
+    var catLabels = {"infrastructure":"Infra","repositories":"Repos","automation":"Auto","data":"Data","ai":"AI","operations":"Ops","business":"Biz","goals":"Goals"};
+    for (var ci = 0; ci < catOrder.length; ci++) {
+      var catName = catOrder[ci];
+      var cat = data.categories[catName];
+      if (!cat) continue;
+      var cStatus = cat.status;
+      var cColor = cStatus === "ready" ? "#22c55e" : cStatus === "warning" ? "#f59e0b" : cStatus === "blocked" ? "#ef4444" : "#6b7280";
+      var cIcon = cStatus === "ready" ? "&#x25CF;" : cStatus === "warning" ? "&#x25B2;" : cStatus === "blocked" ? "&#x2717;" : "&#x2014;";
+      html += '<div class="readiness-card" data-cat="' + catName + '" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px;text-align:center;cursor:pointer">';
+      html += '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">' + (catLabels[catName] || catName) + '</div>';
+      html += '<div style="color:' + cColor + ';font-size:16px">' + cIcon + ' <span style="font-weight:700">' + cat.score + '</span></div>';
+      html += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">' + cStatus.replace("_"," ") + '</div>';
+      html += '</div>';
+    }
+    html += '</div>';
+
+    // Checklist
+    if (data.checklist && data.checklist.length > 0) {
+      html += '<div class="detail-section"><div class="section-title">Readiness Checklist</div>';
+      for (var cli = 0; cli < data.checklist.length; cli++) {
+        var item = data.checklist[cli];
+        var chkIcon = item.status === "pass" ? '<span style="color:#22c55e">&#x2713;</span>' : item.status === "fail" ? '<span style="color:#ef4444">&#x2717;</span>' : item.status === "warning" ? '<span style="color:#f59e0b">&#x25B2;</span>' : '<span style="color:#6b7280">&#x2014;</span>';
+        html += '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">';
+        html += chkIcon + ' <strong>' + item.priority + '.</strong> ' + item.check;
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Blockers
+    if (data.blockers && data.blockers.length > 0) {
+      html += '<div class="detail-section"><div class="section-title" style="color:#ef4444">Blocking Issues (' + data.blockers.length + ')</div>';
+      for (var bi = 0; bi < data.blockers.length; bi++) {
+        var b = data.blockers[bi];
+        html += '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer" onclick="switchView(\'' + _readinessViewForType(b.object_type) + '\')">';
+        html += '<span style="color:#ef4444">&#x2717;</span> ' + b.reason;
+        html += '<span style="color:var(--text-muted);font-size:11px;margin-left:8px">' + b.object_type + ':' + b.object_id + '</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Warnings
+    if (data.warnings && data.warnings.length > 0) {
+      html += '<div class="detail-section"><div class="section-title" style="color:#f59e0b">Warnings (' + data.warnings.length + ')</div>';
+      for (var wi = 0; wi < data.warnings.length; wi++) {
+        var w = data.warnings[wi];
+        html += '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer" onclick="switchView(\'' + _readinessViewForType(w.object_type) + '\')">';
+        html += '<span style="color:#f59e0b">&#x25B2;</span> ' + w.reason;
+        html += '<span style="color:var(--text-muted);font-size:11px;margin-left:8px">' + w.object_type + ':' + w.object_id + '</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    readinessContentEl.innerHTML = html;
+
+    // Scenario selector handler
+    var scenarioSel = document.getElementById("readiness-scenario-select");
+    if (scenarioSel) {
+      scenarioSel.addEventListener("change", function () {
+        readinessScenario = scenarioSel.value;
+        loadReadinessView();
+      });
+    }
+  }
+
+  function _readinessViewForType(objectType) {
+    var map = {
+      "service": "infrastructure",
+      "repository": "repositories",
+      "workflow": "automation",
+      "database": "data",
+      "table": "data",
+      "llm_provider": "ai",
+      "model": "ai",
+      "operation": "operations",
+      "capability": "capabilities",
+      "goal": "goals",
+      "person": "people",
+      "department": "departments",
+      "kpi": "goals",
+      "runtime": "home",
+    };
+    return map[objectType] || "home";
   }
 
   // ── Business Journal ──────────────────────────────

@@ -1777,6 +1777,277 @@ class HermesService:
             "direction": report.direction,
         }
 
+    # -- Readiness (Sprint 47) -------------------------------------------------
+
+    def readiness(
+        self,
+        workspace_id: str,
+        scenario: str = "deployment",
+    ) -> dict:
+        """Compute executive readiness evaluation for a scenario.
+
+        Returns a serialized ReadinessReport dict.
+        Raises ValueError for unknown scenario.
+        """
+        from hermes.context.readiness_engine import ReadinessEngine, SCENARIOS
+        from hermes.context.risk_engine import RiskEngine
+
+        if scenario not in SCENARIOS:
+            raise ValueError(
+                f"Unknown scenario: {scenario}. "
+                f"Valid: {', '.join(sorted(SCENARIOS))}"
+            )
+
+        self.validate_workspace(workspace_id)
+        snapshot = self._build_readiness_snapshot(workspace_id)
+        engine = ReadinessEngine(RiskEngine())
+        report = engine.evaluate(snapshot, scenario)
+        return self._serialize_readiness_report(report)
+
+    def readiness_category(
+        self,
+        workspace_id: str,
+        category: str,
+        scenario: str = "deployment",
+    ) -> dict:
+        """Evaluate a single readiness category within a scenario.
+
+        Returns a serialized CategoryResult dict.
+        Raises ValueError for unknown category or scenario.
+        """
+        from hermes.context.readiness_engine import (
+            ALL_CATEGORIES,
+            ReadinessEngine,
+            SCENARIOS,
+        )
+        from hermes.context.risk_engine import RiskEngine
+
+        if category not in ALL_CATEGORIES:
+            raise ValueError(
+                f"Unknown category: {category}. "
+                f"Valid: {', '.join(sorted(ALL_CATEGORIES))}"
+            )
+        if scenario not in SCENARIOS:
+            raise ValueError(
+                f"Unknown scenario: {scenario}. "
+                f"Valid: {', '.join(sorted(SCENARIOS))}"
+            )
+
+        self.validate_workspace(workspace_id)
+        snapshot = self._build_readiness_snapshot(workspace_id)
+        engine = ReadinessEngine(RiskEngine())
+        result = engine.evaluate_category(snapshot, category, scenario)
+        return self._serialize_category_result(result)
+
+    def _build_readiness_snapshot(self, workspace_id: str):
+        """Assemble ReadinessSnapshot from all runtime sources."""
+        from hermes.context.readiness_engine import ReadinessSnapshot
+
+        # Operations
+        ops = self.operation_store.list(workspace_id) if self.operation_store else []
+        operations = [self._serialize_operation(op) for op in ops]
+
+        # CEO Review data (KPIs, decisions)
+        try:
+            review = self._run_ceo_review(workspace_id)
+            kpis = [
+                {"id": k.kpi_id, "name": k.name, "status": k.status,
+                 "goal_id": k.goal_id}
+                for k in review.data.kpis
+            ]
+            decisions = [
+                {"id": d.decision_id, "title": getattr(d, "title", ""),
+                 "status": getattr(d, "status", "")}
+                for d in review.data.decisions
+            ]
+        except Exception:
+            kpis = []
+            decisions = []
+            review = None
+
+        # Notifications
+        notifications = self._generate_notifications(
+            workspace_id, ops=ops, review=review,
+        )
+        notif_dicts = [
+            {"id": n.id, "title": n.title, "severity": n.severity,
+             "category": n.category}
+            for n in notifications
+        ]
+
+        # Runtimes
+        gh_runtime = self._get_github_runtime()
+        repos = (
+            [self._serialize_repo(r) for r in gh_runtime.list_repositories()]
+            if gh_runtime.configured else []
+        )
+
+        infra_runtime = self._get_infrastructure_runtime()
+        services = (
+            [self._serialize_service(s) for s in infra_runtime.list_services()]
+            if infra_runtime.configured else []
+        )
+
+        n8n_runtime = self._get_n8n_runtime()
+        workflows = (
+            [self._serialize_workflow(w) for w in n8n_runtime.list_workflows()]
+            if n8n_runtime.configured else []
+        )
+
+        nocodb_runtime = self._get_nocodb_runtime()
+        databases = (
+            [self._serialize_database(d) for d in nocodb_runtime.list_databases()]
+            if nocodb_runtime.configured else []
+        )
+        tables = (
+            [self._serialize_table(t) for t in nocodb_runtime.list_tables()]
+            if nocodb_runtime.configured else []
+        )
+
+        llm_runtime = self._get_llm_runtime()
+        llm_providers = (
+            [self._serialize_llm_provider(p) for p in llm_runtime.list_providers()]
+            if llm_runtime.configured else []
+        )
+        llm_models = (
+            [self._serialize_llm_model(m) for m in llm_runtime.list_models()]
+            if llm_runtime.configured else []
+        )
+
+        # Business-layer objects
+        capabilities = [
+            self._serialize_capability_summary(c)
+            for c in self.context_engine.capability_engine.registry.list()
+        ]
+        goals = [
+            self._serialize_goal_summary(g)
+            for g in self.goal_registry.list()
+        ]
+        people = [
+            self._serialize_person_summary(p)
+            for p in self.people_registry.list()
+        ]
+        departments = [
+            self._serialize_department_summary(d)
+            for d in self.department_registry.list()
+        ]
+
+        # Heartbeats by operation (newest first)
+        heartbeats_by_operation: dict[str, list[dict]] = {}
+        if self.heartbeat_store:
+            from hermes.kernel.heartbeat_runtime import get_latest
+            for op in ops:
+                if op.status in ("created", "executing"):
+                    hbs = self.heartbeat_store.list_by_operation(
+                        workspace_id, op.id,
+                    )
+                    if hbs:
+                        heartbeats_by_operation[op.id] = [
+                            {"status": hb.status, "summary": hb.summary}
+                            for hb in hbs
+                        ]
+
+        return ReadinessSnapshot(
+            workspace_id=workspace_id,
+            services=services,
+            repositories=repos,
+            workflows=workflows,
+            databases=databases,
+            tables=tables,
+            llm_providers=llm_providers,
+            models=llm_models,
+            operations=operations,
+            notifications=notif_dicts,
+            capabilities=capabilities,
+            goals=goals,
+            people=people,
+            departments=departments,
+            kpis=kpis,
+            decisions=decisions,
+            heartbeats_by_operation=heartbeats_by_operation,
+            infrastructure_configured=infra_runtime.configured,
+            github_configured=gh_runtime.configured,
+            n8n_configured=n8n_runtime.configured,
+            nocodb_configured=nocodb_runtime.configured,
+            llm_configured=llm_runtime.configured,
+        )
+
+    @staticmethod
+    def _serialize_readiness_report(report) -> dict:
+        """Convert a ReadinessReport to a JSON-serializable dict."""
+
+        def _ser_issue(issue) -> dict:
+            return {
+                "category": issue.category,
+                "object_type": issue.object_type,
+                "object_id": issue.object_id,
+                "name": issue.name,
+                "reason": issue.reason,
+                "severity": issue.severity,
+            }
+
+        def _ser_category(result) -> dict:
+            return {
+                "category": result.category,
+                "status": result.status,
+                "score": result.score,
+                "blockers": [_ser_issue(i) for i in result.blockers],
+                "warnings": [_ser_issue(i) for i in result.warnings],
+                "checked": result.checked,
+                "healthy": result.healthy,
+            }
+
+        def _ser_checklist(item) -> dict:
+            return {
+                "priority": item.priority,
+                "category": item.category,
+                "check": item.check,
+                "status": item.status,
+                "issues": [_ser_issue(i) for i in item.issues],
+            }
+
+        categories = {}
+        for cat_name, cat_result in report.categories.items():
+            categories[cat_name] = _ser_category(cat_result)
+
+        return {
+            "workspace_id": report.workspace_id,
+            "scenario": report.scenario,
+            "scenario_label": report.scenario_label,
+            "overall_status": report.overall_status,
+            "overall_score": report.overall_score,
+            "categories": categories,
+            "blockers": [_ser_issue(i) for i in report.blockers],
+            "warnings": [_ser_issue(i) for i in report.warnings],
+            "checklist": [_ser_checklist(i) for i in report.checklist],
+            "critical_dependencies": report.critical_dependencies,
+            "timestamp": report.timestamp,
+        }
+
+    @staticmethod
+    def _serialize_category_result(result) -> dict:
+        """Convert a CategoryResult to a JSON-serializable dict."""
+
+        def _ser_issue(issue) -> dict:
+            return {
+                "category": issue.category,
+                "object_type": issue.object_type,
+                "object_id": issue.object_id,
+                "name": issue.name,
+                "reason": issue.reason,
+                "severity": issue.severity,
+            }
+
+        return {
+            "category": result.category,
+            "status": result.status,
+            "score": result.score,
+            "blockers": [_ser_issue(i) for i in result.blockers],
+            "warnings": [_ser_issue(i) for i in result.warnings],
+            "checked": result.checked,
+            "healthy": result.healthy,
+        }
+
     # -- Jobs ------------------------------------------------------------------
 
     def list_jobs(self, workspace_id: str) -> list[dict]:

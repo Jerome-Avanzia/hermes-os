@@ -608,6 +608,59 @@ async def get_impact(
     return JSONResponse(content=result)
 
 
+@app.get("/v1/workspaces/{workspace_id}/readiness")
+async def get_readiness(
+    workspace_id: str,
+    scenario: str = "deployment",
+) -> JSONResponse:
+    """Compute executive readiness evaluation for a scenario (Sprint 47)."""
+    from hermes.context.readiness_engine import SCENARIO_NAMES
+
+    if scenario not in SCENARIO_NAMES:
+        return JSONResponse(
+            status_code=422,
+            content={"error": f"Unknown scenario: {scenario}. Valid: {', '.join(sorted(SCENARIO_NAMES))}"},
+        )
+
+    try:
+        result = _hermes_service.readiness(workspace_id, scenario)
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"error": str(exc)})
+
+    return JSONResponse(content=result)
+
+
+@app.get("/v1/workspaces/{workspace_id}/readiness/{category}")
+async def get_readiness_category(
+    workspace_id: str,
+    category: str,
+    scenario: str = "deployment",
+) -> JSONResponse:
+    """Evaluate a single readiness category within a scenario (Sprint 47)."""
+    from hermes.context.readiness_engine import ALL_CATEGORIES, SCENARIO_NAMES
+
+    if category not in ALL_CATEGORIES:
+        return JSONResponse(
+            status_code=422,
+            content={"error": f"Unknown category: {category}. Valid: {', '.join(sorted(ALL_CATEGORIES))}"},
+        )
+
+    if scenario not in SCENARIO_NAMES:
+        return JSONResponse(
+            status_code=422,
+            content={"error": f"Unknown scenario: {scenario}. Valid: {', '.join(sorted(SCENARIO_NAMES))}"},
+        )
+
+    try:
+        result = _hermes_service.readiness_category(
+            workspace_id, category, scenario,
+        )
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"error": str(exc)})
+
+    return JSONResponse(content=result)
+
+
 @app.get("/v1/workspaces/{workspace_id}/goals")
 async def list_goals(workspace_id: str) -> list[dict]:
     """List all strategic goals with cross-reference counts."""
