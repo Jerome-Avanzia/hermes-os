@@ -4,6 +4,12 @@ from hermes.models.business import Business
 from hermes.models.capability import Capability
 from hermes.models.code_repository import CodeRepository
 from hermes.models.context import Context
+from hermes.models.context_package import (
+    CapabilityReference,
+    ContextPackage,
+    KnowledgeReference,
+    TokenBudget,
+)
 from hermes.models.department import Department
 from hermes.models.decision import Decision
 from hermes.models.diagnostics_report import DiagnosticsReport
@@ -46,8 +52,10 @@ __all__ = [
     "Bottleneck",
     "Business",
     "Capability",
+    "CapabilityReference",
     "CodeRepository",
     "Context",
+    "ContextPackage",
     "Department",
     "Decision",
     "DiagnosticsReport",
@@ -64,6 +72,7 @@ __all__ = [
     "KPI",
     "KnowledgeContext",
     "KnowledgeDocument",
+    "KnowledgeReference",
     "Lesson",
     "LoadedSkill",
     "Notification",
@@ -82,6 +91,7 @@ __all__ = [
     "StaleOperation",
     "Strategy",
     "Task",
+    "TokenBudget",
     "TransitionRecord",
     "Workspace",
     "WorkspaceContext",

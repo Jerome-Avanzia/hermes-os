@@ -1,11 +1,13 @@
 import logging
 
 from hermes.kernel.capability_engine import CapabilityEngine
+from hermes.kernel.context_manager import ContextManager
 from hermes.kernel.knowledge_engine import KnowledgeEngine
 from hermes.kernel.profile_loader import ProfileLoader
 from hermes.kernel.project_resolver import ProjectResolver
 from hermes.kernel.workspace_engine import WorkspaceEngine
 from hermes.models import Context, KnowledgeContext, Project, Task
+from hermes.models.context_package import ContextPackage
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,28 @@ class ContextEngine:
         self.workspace_engine = workspace_engine or WorkspaceEngine()
         self.capability_engine = capability_engine or CapabilityEngine()
         self.profile_loader = profile_loader or ProfileLoader()
+        self.context_manager = ContextManager(
+            knowledge_engine=self.knowledge_engine,
+            capability_engine=self.capability_engine,
+        )
+
+    def assemble_context(
+        self,
+        query: str,
+        workspace_id: str,
+        max_knowledge: int = 10,
+        max_capabilities: int = 5,
+    ) -> ContextPackage:
+        """Assemble a typed ContextPackage for the given query.
+
+        Delegates to ContextManager for deterministic context selection.
+        """
+        return self.context_manager.assemble(
+            query=query,
+            workspace_id=workspace_id,
+            max_knowledge=max_knowledge,
+            max_capabilities=max_capabilities,
+        )
 
     def build(self, task: Task) -> Context:
         project = self.project_resolver.resolve(task)
