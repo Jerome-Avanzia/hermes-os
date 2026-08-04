@@ -1652,6 +1652,131 @@ class HermesService:
 
         return self._get_context_graph().resolve(object_type, object_id, data)
 
+    # -- Impact Analysis (Sprint 46) -------------------------------------------
+
+    def impact(
+        self,
+        workspace_id: str,
+        object_type: str,
+        object_id: str,
+        max_depth: int = 3,
+        direction: str = "forward",
+    ) -> dict:
+        """Compute impact analysis for a business object.
+
+        Returns a serialized ImpactReport dict.
+        Raises ValueError for unsupported object_type.
+        """
+        from hermes.context.impact_engine import ImpactEngine
+        from hermes.context.risk_engine import RiskEngine
+
+        self.validate_workspace(workspace_id)
+
+        # Assemble per-request data (same as get_context)
+        ops = self.operation_store.list(workspace_id) if self.operation_store else []
+
+        try:
+            review = self._run_ceo_review(workspace_id)
+            kpis = review.data.kpis
+            decisions = review.data.decisions
+        except Exception:
+            kpis = []
+            decisions = []
+            review = None
+
+        notifications = self._generate_notifications(
+            workspace_id, ops=ops, review=review,
+        )
+
+        runtime = self._get_github_runtime()
+        repos = runtime.list_repositories() if runtime.configured else []
+
+        infra_runtime = self._get_infrastructure_runtime()
+        services = infra_runtime.list_services() if infra_runtime.configured else []
+
+        n8n_runtime = self._get_n8n_runtime()
+        workflows = n8n_runtime.list_workflows() if n8n_runtime.configured else []
+
+        nocodb_runtime = self._get_nocodb_runtime()
+        databases = nocodb_runtime.list_databases() if nocodb_runtime.configured else []
+        tables = nocodb_runtime.list_tables() if nocodb_runtime.configured else []
+
+        llm_runtime = self._get_llm_runtime()
+        llm_providers = llm_runtime.list_providers() if llm_runtime.configured else []
+        llm_models = llm_runtime.list_models() if llm_runtime.configured else []
+
+        data = GraphData(
+            workspace_id=workspace_id,
+            operations=ops,
+            kpis=kpis,
+            decisions=decisions,
+            notifications=notifications,
+            heartbeat_store=self.heartbeat_store,
+            repositories=repos,
+            services=services,
+            workflows=workflows,
+            databases=databases,
+            tables=tables,
+            llm_providers=llm_providers,
+            models=llm_models,
+        )
+
+        engine = ImpactEngine(self._get_context_graph(), RiskEngine())
+        report = engine.analyze(object_type, object_id, data, max_depth, direction)
+        return self._serialize_impact_report(report)
+
+    @staticmethod
+    def _serialize_impact_report(report) -> dict:
+        """Convert an ImpactReport to a JSON-serializable dict."""
+
+        def _ser_obj(o) -> dict:
+            return {
+                "object_type": o.object_type,
+                "object_id": o.object_id,
+                "name": o.name,
+                "risk_level": o.risk_level,
+                "risk_reasons": o.risk_reasons,
+                "depth": o.depth,
+                "path": o.path,
+                "relationship_reason": o.relationship_reason,
+            }
+
+        affected = {}
+        for otype, objs in report.affected.items():
+            affected[otype] = [_ser_obj(o) for o in objs]
+
+        coverage = {
+            "types_analyzed": report.summary.coverage.types_analyzed,
+            "types_available": report.summary.coverage.types_available,
+            "objects_analyzed": report.summary.coverage.objects_analyzed,
+            "relationships_traversed": report.summary.coverage.relationships_traversed,
+            "unknown_references": report.summary.coverage.unknown_references,
+            "broken_links": report.summary.coverage.broken_links,
+        }
+
+        return {
+            "source": _ser_obj(report.source),
+            "summary": {
+                "source_type": report.summary.source_type,
+                "source_id": report.summary.source_id,
+                "source_name": report.summary.source_name,
+                "estimated_impact": report.summary.estimated_impact,
+                "affected_goals": report.summary.affected_goals,
+                "affected_operations": report.summary.affected_operations,
+                "affected_people": report.summary.affected_people,
+                "critical_dependencies": report.summary.critical_dependencies,
+                "blocking_risks": report.summary.blocking_risks,
+                "recommended_checks": report.summary.recommended_checks,
+                "safe_to_proceed": report.summary.safe_to_proceed,
+                "coverage": coverage,
+            },
+            "affected": affected,
+            "total_affected": report.total_affected,
+            "max_depth_reached": report.max_depth_reached,
+            "cycle_detected": report.cycle_detected,
+            "direction": report.direction,
+        }
+
     # -- Jobs ------------------------------------------------------------------
 
     def list_jobs(self, workspace_id: str) -> list[dict]:

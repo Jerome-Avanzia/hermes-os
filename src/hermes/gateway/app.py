@@ -562,6 +562,52 @@ async def get_context(workspace_id: str, object_type: str, object_id: str) -> JS
     return JSONResponse(content=result)
 
 
+@app.get("/v1/workspaces/{workspace_id}/impact/{object_type}/{object_id}")
+async def get_impact(
+    workspace_id: str,
+    object_type: str,
+    object_id: str,
+    max_depth: int = 3,
+    direction: str = "forward",
+) -> JSONResponse:
+    """Compute impact analysis for a business object (Sprint 46)."""
+    from hermes.context.context_graph import SUPPORTED_TYPES
+
+    if object_type not in SUPPORTED_TYPES:
+        return JSONResponse(
+            status_code=422,
+            content={"error": f"Unknown object type: {object_type}. Supported: {', '.join(sorted(SUPPORTED_TYPES))}"},
+        )
+
+    if direction not in ("forward", "reverse"):
+        return JSONResponse(
+            status_code=422,
+            content={"error": "direction must be 'forward' or 'reverse'"},
+        )
+
+    max_depth = max(1, min(5, max_depth))
+
+    try:
+        result = _hermes_service.impact(
+            workspace_id, object_type, object_id, max_depth, direction,
+        )
+    except ValueError as exc:
+        return JSONResponse(status_code=422, content={"error": str(exc)})
+
+    # If the source object was not found, the report still returns but
+    # we check if it has zero affected and source risk_reasons says not found
+    if (
+        result.get("total_affected", 0) == 0
+        and "Object not found" in (result.get("source", {}).get("risk_reasons", []))
+    ):
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"{object_type} not found: {object_id}"},
+        )
+
+    return JSONResponse(content=result)
+
+
 @app.get("/v1/workspaces/{workspace_id}/goals")
 async def list_goals(workspace_id: str) -> list[dict]:
     """List all strategic goals with cross-reference counts."""

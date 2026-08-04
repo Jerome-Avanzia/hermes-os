@@ -1178,6 +1178,7 @@
       <div class="nav-item" data-view="automation">Automation</div>
       <div class="nav-item" data-view="data">Data</div>
       <div class="nav-item" data-view="ai">AI</div>
+      <div class="nav-item" data-view="impact">Impact</div>
       <div class="nav-item" data-view="journal">Journal</div>
       <div class="nav-item" data-view="jobs">Jobs</div>
     </div>
@@ -1290,6 +1291,10 @@
         <div id="ai-list" class="list-view"></div>
         <div id="ai-detail" class="detail-view" style="display:none"></div>
       </div>
+      <div id="view-impact" class="view">
+        <div id="impact-selector" class="list-view"></div>
+        <div id="impact-result" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-jobs" class="view">
         <div id="jobs-list" class="list-view"></div>
         <div id="jobs-detail" class="detail-view" style="display:none"></div>
@@ -1391,6 +1396,7 @@
     if (name === "automation") loadAutomation();
     if (name === "data") loadData();
     if (name === "ai") loadAI();
+    if (name === "impact") loadImpactView();
     if (name === "notifications") loadNotifications();
   }
 
@@ -3667,6 +3673,297 @@
       var ctxEl = document.getElementById("model-context");
       loadContext("model", m.id, ctxEl);
     }
+  }
+
+  // ── Impact Analysis (Sprint 46) ────────────────────
+
+  var impactSelectorEl = document.getElementById("impact-selector");
+  var impactResultEl   = document.getElementById("impact-result");
+
+  var IMPACT_TYPES = [
+    { value: "goal", label: "Goal", endpoint: "/goals", idField: "goal_id", nameField: "title" },
+    { value: "person", label: "Person", endpoint: "/people", idField: "id", nameField: "name" },
+    { value: "department", label: "Department", endpoint: "/departments", idField: "id", nameField: "name" },
+    { value: "capability", label: "Capability", endpoint: "/capabilities", idField: "id", nameField: "name" },
+    { value: "repository", label: "Repository", endpoint: null, idField: "id", nameField: "name", globalEndpoint: "/v1/repositories" },
+    { value: "service", label: "Service", endpoint: null, idField: "id", nameField: "name", globalEndpoint: "/v1/services" },
+    { value: "workflow", label: "Workflow", endpoint: null, idField: "id", nameField: "name", globalEndpoint: "/v1/workflows" },
+    { value: "database", label: "Database", endpoint: null, idField: "id", nameField: "name", globalEndpoint: "/v1/databases" },
+    { value: "table", label: "Table", endpoint: null, idField: "id", nameField: "name", globalEndpoint: "/v1/tables" },
+    { value: "llm_provider", label: "LLM Provider", endpoint: null, idField: "id", nameField: "name", globalEndpoint: "/v1/llm-providers" },
+    { value: "model", label: "AI Model", endpoint: null, idField: "id", nameField: "name", globalEndpoint: "/v1/llm-models" },
+    { value: "operation", label: "Operation", endpoint: "/operations", idField: "id", nameField: "request" },
+  ];
+
+  function loadImpactView() {
+    impactSelectorEl.style.display = "";
+    impactResultEl.style.display = "none";
+    renderImpactSelector();
+  }
+
+  function renderImpactSelector() {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">Impact Analysis</div>';
+    html += '  <div class="detail-meta">Select an object to analyze its dependencies and impact</div>';
+    html += '</div>';
+
+    html += '<div class="detail-section" style="max-width:500px">';
+
+    // Direction toggle (Amendment 3)
+    html += '<div style="margin-bottom:12px">';
+    html += '  <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Direction</label>';
+    html += '  <select id="impact-direction" style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-size:13px;width:100%">';
+    html += '    <option value="forward">Forward — What depends on this?</option>';
+    html += '    <option value="reverse">Reverse — What supports this?</option>';
+    html += '  </select>';
+    html += '</div>';
+
+    // Object type dropdown
+    html += '<div style="margin-bottom:12px">';
+    html += '  <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Object Type</label>';
+    html += '  <select id="impact-type" style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-size:13px;width:100%">';
+    html += '    <option value="">Select a type...</option>';
+    for (var i = 0; i < IMPACT_TYPES.length; i++) {
+      html += '<option value="' + IMPACT_TYPES[i].value + '">' + IMPACT_TYPES[i].label + '</option>';
+    }
+    html += '  </select>';
+    html += '</div>';
+
+    // Object dropdown (populated dynamically)
+    html += '<div style="margin-bottom:12px">';
+    html += '  <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px">Object</label>';
+    html += '  <select id="impact-object" style="background:var(--surface);color:var(--text);border:1px solid var(--border);padding:8px 12px;border-radius:6px;font-size:13px;width:100%" disabled>';
+    html += '    <option value="">Select a type first...</option>';
+    html += '  </select>';
+    html += '</div>';
+
+    // Analyze button
+    html += '<button class="detail-btn" id="impact-analyze" disabled style="margin-top:8px;padding:8px 24px">Analyze</button>';
+
+    html += '</div>';
+
+    impactSelectorEl.innerHTML = html;
+
+    // Wire events
+    document.getElementById("impact-type").addEventListener("change", function () {
+      var val = this.value;
+      var objectSel = document.getElementById("impact-object");
+      var analyzeBtn = document.getElementById("impact-analyze");
+      if (!val) {
+        objectSel.innerHTML = '<option value="">Select a type first...</option>';
+        objectSel.disabled = true;
+        analyzeBtn.disabled = true;
+        return;
+      }
+      objectSel.innerHTML = '<option value="">Loading...</option>';
+      objectSel.disabled = true;
+      analyzeBtn.disabled = true;
+
+      // Find the type config
+      var tc = null;
+      for (var j = 0; j < IMPACT_TYPES.length; j++) {
+        if (IMPACT_TYPES[j].value === val) { tc = IMPACT_TYPES[j]; break; }
+      }
+      if (!tc) return;
+
+      var url = tc.globalEndpoint
+        ? GATEWAY + tc.globalEndpoint
+        : wsBase() + tc.endpoint;
+
+      fetch(url)
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (items) {
+          var opts = '<option value="">Select an object...</option>';
+          for (var k = 0; k < items.length; k++) {
+            var item = items[k];
+            var itemId = item[tc.idField] || item.id || "";
+            var itemName = item[tc.nameField] || item.name || itemId;
+            opts += '<option value="' + esc(itemId) + '">' + esc(itemName) + '</option>';
+          }
+          objectSel.innerHTML = opts;
+          objectSel.disabled = false;
+        })
+        .catch(function () {
+          objectSel.innerHTML = '<option value="">Failed to load</option>';
+        });
+    });
+
+    document.getElementById("impact-object").addEventListener("change", function () {
+      document.getElementById("impact-analyze").disabled = !this.value;
+    });
+
+    document.getElementById("impact-analyze").addEventListener("click", function () {
+      var otype = document.getElementById("impact-type").value;
+      var oid = document.getElementById("impact-object").value;
+      var dir = document.getElementById("impact-direction").value;
+      if (otype && oid) runImpactAnalysis(otype, oid, dir);
+    });
+  }
+
+  function impactRiskColor(level) {
+    if (level === "critical") return "#fca5a5";
+    if (level === "high") return "#fb923c";
+    if (level === "medium") return "#fcd34d";
+    if (level === "low") return "var(--text-muted)";
+    return "var(--text-dim)";
+  }
+
+  function impactBadge(level) {
+    if (level === "none") return "";
+    var bg = level === "critical" ? "#991b1b" : level === "high" ? "#9a3412" : level === "medium" ? "#78350f" : "#1e3a5f";
+    return '<span class="status-badge" style="background:' + bg + ';color:' + impactRiskColor(level) + ';font-size:10px">' + level + '</span>';
+  }
+
+  function impactEstimateBadge(est) {
+    var colors = { none: "var(--text-dim)", low: "var(--text-muted)", moderate: "#fcd34d", significant: "#fb923c", severe: "#fca5a5" };
+    var bgs = { none: "var(--surface)", low: "#1e3a5f", moderate: "#78350f", significant: "#9a3412", severe: "#991b1b" };
+    return '<span class="status-badge" style="background:' + (bgs[est] || bgs.none) + ';color:' + (colors[est] || colors.none) + '">' + (est || "none") + '</span>';
+  }
+
+  function runImpactAnalysis(objectType, objectId, direction) {
+    impactSelectorEl.style.display = "none";
+    impactResultEl.style.display = "";
+    impactResultEl.innerHTML = '<div class="list-empty">Analyzing impact...</div>';
+
+    var url = wsBase() + "/impact/" + encodeURIComponent(objectType) + "/" + encodeURIComponent(objectId);
+    url += "?direction=" + encodeURIComponent(direction) + "&max_depth=3";
+
+    fetch(url)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (report) {
+        if (!report) {
+          impactResultEl.innerHTML = '<div class="list-empty">Object not found or analysis failed.</div>';
+          return;
+        }
+        renderImpactReport(report);
+      })
+      .catch(function () {
+        impactResultEl.innerHTML = '<div class="list-empty">Impact analysis failed.</div>';
+      });
+  }
+
+  function renderImpactReport(report) {
+    var src = report.source || {};
+    var summary = report.summary || {};
+    var affected = report.affected || {};
+    var coverage = summary.coverage || {};
+
+    var html = '';
+
+    // Back button
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="impact-back">New Analysis</button>';
+    html += '</div>';
+
+    // Executive Summary Card
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:16px">';
+    html += '  <div class="detail-title" style="margin-bottom:8px">Executive Summary</div>';
+    html += '  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">';
+    html += '    <div><span style="color:var(--text-muted);font-size:11px">Source</span><br>' + esc(src.name || src.object_id) + '</div>';
+    html += '    <div><span style="color:var(--text-muted);font-size:11px">Type</span><br>' + esc(src.object_type) + '</div>';
+    html += '    <div><span style="color:var(--text-muted);font-size:11px">Direction</span><br>' + esc(report.direction || "forward") + '</div>';
+    html += '    <div><span style="color:var(--text-muted);font-size:11px">Impact</span><br>' + impactEstimateBadge(summary.estimated_impact) + '</div>';
+
+    // Safe to proceed
+    var safeColor = summary.safe_to_proceed ? "#6ee7b7" : "#fca5a5";
+    var safeText = summary.safe_to_proceed ? "YES" : "NO";
+    html += '    <div><span style="color:var(--text-muted);font-size:11px">Safe to Proceed</span><br><span style="color:' + safeColor + ';font-weight:600">' + safeText + '</span></div>';
+    html += '  </div>';
+
+    // Counts
+    html += '  <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-muted);margin-bottom:8px">';
+    html += '    <span>' + report.total_affected + ' affected objects</span>';
+    html += '    <span>' + (summary.affected_goals || []).length + ' goals</span>';
+    html += '    <span>' + (summary.affected_operations || []).length + ' operations</span>';
+    html += '    <span>' + (summary.affected_people || []).length + ' people</span>';
+    html += '    <span>' + summary.critical_dependencies + ' critical</span>';
+    html += '  </div>';
+
+    // Blocking risks
+    var risks = summary.blocking_risks || [];
+    if (risks.length > 0) {
+      html += '  <div style="margin-top:8px">';
+      html += '    <div style="font-size:11px;font-weight:600;color:#fca5a5;margin-bottom:4px">Blocking Risks</div>';
+      for (var ri = 0; ri < risks.length; ri++) {
+        html += '    <div style="font-size:12px;color:#fca5a5;padding:2px 0">' + esc(risks[ri]) + '</div>';
+      }
+      html += '  </div>';
+    }
+
+    // Recommended checks
+    var checks = summary.recommended_checks || [];
+    if (checks.length > 0) {
+      html += '  <div style="margin-top:8px">';
+      html += '    <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px">Recommended Checks</div>';
+      for (var ci = 0; ci < checks.length; ci++) {
+        html += '    <div style="font-size:12px;color:var(--text);padding:2px 0">' + esc(checks[ci]) + '</div>';
+      }
+      html += '  </div>';
+    }
+
+    html += '</div>';
+
+    // Impact Coverage (Amendment 4)
+    html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px">';
+    html += '  <div style="font-weight:600;margin-bottom:6px;color:var(--text-muted)">Impact Coverage</div>';
+    html += '  <div style="display:flex;gap:16px;flex-wrap:wrap;color:var(--text-muted)">';
+    html += '    <span>Types: ' + coverage.types_analyzed + '/' + coverage.types_available + '</span>';
+    html += '    <span>Objects: ' + coverage.objects_analyzed + '</span>';
+    html += '    <span>Relationships: ' + coverage.relationships_traversed + '</span>';
+    html += '    <span>Depth: ' + report.max_depth_reached + '</span>';
+    if (coverage.unknown_references > 0) {
+      html += '    <span style="color:#fcd34d">Unknown refs: ' + coverage.unknown_references + '</span>';
+    }
+    if (report.cycle_detected) {
+      html += '    <span style="color:var(--text-dim)">Cycles: detected</span>';
+    }
+    html += '  </div>';
+    var broken = coverage.broken_links || [];
+    if (broken.length > 0) {
+      html += '  <div style="margin-top:4px;color:#fcd34d;font-size:11px">Broken: ' + broken.map(esc).join(", ") + '</div>';
+    }
+    html += '</div>';
+
+    // Affected Objects grouped by type
+    var typeKeys = Object.keys(affected).sort();
+    for (var ti = 0; ti < typeKeys.length; ti++) {
+      var tk = typeKeys[ti];
+      var objs = affected[tk];
+      if (objs.length === 0) continue;
+
+      var typeLabel = tk.replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">' + esc(typeLabel) + ' (' + objs.length + ')</div>';
+
+      for (var oi = 0; oi < objs.length; oi++) {
+        var obj = objs[oi];
+        html += '<div class="list-item" style="padding:6px 8px">';
+        html += '  <div class="list-item-main">';
+        html += '    <div class="list-item-title" style="font-size:12px">' + esc(obj.name) + ' ' + impactBadge(obj.risk_level) + '</div>';
+        html += '    <div class="list-item-meta">';
+        if (obj.relationship_reason) html += esc(obj.relationship_reason);
+        html += '    </div>';
+        if (obj.risk_reasons && obj.risk_reasons.length > 0) {
+          html += '    <div class="list-item-meta" style="color:' + impactRiskColor(obj.risk_level) + '">' + obj.risk_reasons.map(esc).join("; ") + '</div>';
+        }
+        if (obj.path && obj.path.length > 0) {
+          html += '    <div class="list-item-meta" style="font-size:10px;color:var(--text-dim)">Path: ' + obj.path.map(esc).join(" → ") + '</div>';
+        }
+        html += '  </div>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    if (typeKeys.length === 0) {
+      html += '<div class="list-empty">No affected objects found.</div>';
+    }
+
+    impactResultEl.innerHTML = html;
+
+    document.getElementById("impact-back").addEventListener("click", function () {
+      loadImpactView();
+    });
   }
 
   // ── Business Journal ──────────────────────────────
