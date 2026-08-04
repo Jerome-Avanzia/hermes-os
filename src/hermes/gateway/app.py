@@ -285,9 +285,13 @@ async def list_knowledge(workspace_id: str) -> list[dict]:
     return _hermes_service.list_knowledge(workspace_id)
 
 
-@app.get("/v1/workspaces/{workspace_id}/knowledge/{document_id}")
+@app.get("/v1/workspaces/{workspace_id}/knowledge/{document_id:path}")
 async def get_knowledge(workspace_id: str, document_id: str) -> JSONResponse:
-    """Return a single Knowledge Document with full content."""
+    """Return a single Knowledge Document with full content.
+
+    Sprint 48: document_id uses path converter to support architecture
+    knowledge IDs containing colons (e.g. ``arch:decisions:ADR-0001``).
+    """
     doc = _hermes_service.get_knowledge(workspace_id, document_id)
     if doc is None:
         return JSONResponse(
@@ -295,6 +299,12 @@ async def get_knowledge(workspace_id: str, document_id: str) -> JSONResponse:
             content={"error": f"Knowledge document not found: {document_id}"},
         )
     return JSONResponse(content=doc)
+
+
+@app.get("/v1/architecture-sources")
+async def list_architecture_sources() -> list[dict]:
+    """List available architecture knowledge source categories (Sprint 48)."""
+    return _hermes_service.list_architecture_sources()
 
 
 @app.get("/v1/workspaces/{workspace_id}/operations")

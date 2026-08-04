@@ -2427,10 +2427,16 @@ class HermesService:
         }
 
     def list_knowledge(self, workspace_id: str) -> list[dict]:
-        """Return metadata for all Knowledge Documents in a workspace."""
+        """Return metadata for all Knowledge Documents in a workspace.
+
+        Sprint 48: Includes both business knowledge and architecture
+        knowledge documents.
+        """
         self.validate_workspace(workspace_id)
         try:
-            context = self.context_engine.knowledge_engine.load(workspace_id)
+            context = self.context_engine.knowledge_engine.load_with_architecture(
+                workspace_id,
+            )
         except (ValueError, FileNotFoundError):
             return []
         return [
@@ -2444,10 +2450,15 @@ class HermesService:
         ]
 
     def get_knowledge(self, workspace_id: str, document_id: str) -> dict | None:
-        """Return a single Knowledge Document with full content, or None."""
+        """Return a single Knowledge Document with full content, or None.
+
+        Sprint 48: Searches both business and architecture knowledge.
+        """
         self.validate_workspace(workspace_id)
         try:
-            context = self.context_engine.knowledge_engine.load(workspace_id)
+            context = self.context_engine.knowledge_engine.load_with_architecture(
+                workspace_id,
+            )
         except (ValueError, FileNotFoundError):
             return None
         for doc in context.documents:
@@ -2460,3 +2471,7 @@ class HermesService:
                     "content": doc.content,
                 }
         return None
+
+    def list_architecture_sources(self) -> list[dict]:
+        """Return metadata about available architecture knowledge sources."""
+        return self.context_engine.knowledge_engine.list_architecture_sources()

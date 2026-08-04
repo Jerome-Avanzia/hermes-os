@@ -72,7 +72,7 @@ class ContextEngine:
         )
 
         try:
-            knowledge = self.knowledge_engine.load(workspace_id)
+            knowledge = self.knowledge_engine.load_with_architecture(workspace_id)
         except (ValueError, FileNotFoundError):
             logger.info("No knowledge found for workspace %s", workspace_id)
             knowledge = KnowledgeContext(project=project, documents=[])

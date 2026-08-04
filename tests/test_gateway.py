@@ -345,9 +345,13 @@ def test_knowledge_list_returns_documents():
 
 
 def test_knowledge_list_contains_expected_count():
+    """Sprint 48: knowledge list includes business + architecture documents."""
     resp = client.get(f"{WS_PREFIX}/knowledge")
     docs = resp.json()
-    assert len(docs) == 12
+    # 12 business docs + architecture knowledge docs
+    assert len(docs) >= 12
+    business_docs = [d for d in docs if not d["id"].startswith("arch:")]
+    assert len(business_docs) == 12
 
 
 def test_knowledge_list_documents_have_positive_size():
@@ -357,10 +361,13 @@ def test_knowledge_list_documents_have_positive_size():
 
 
 def test_knowledge_list_preserves_manifest_order():
+    """Sprint 48: business docs first in manifest order, then architecture."""
     resp = client.get(f"{WS_PREFIX}/knowledge")
     docs = resp.json()
     assert docs[0]["id"] == "01-purpose"
-    assert docs[-1]["id"] == "12-homepage-tech-spec"
+    # Business docs occupy the first 12 positions in manifest order
+    business_docs = [d for d in docs if not d["id"].startswith("arch:")]
+    assert business_docs[-1]["id"] == "12-homepage-tech-spec"
 
 
 def test_knowledge_detail_returns_full_document():

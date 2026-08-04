@@ -1,3 +1,11 @@
+"""KnowledgeEngine — loads, selects, and ranks knowledge documents.
+
+Sprint 48: Extended with architecture knowledge integration.  The engine
+can now merge business knowledge with architecture knowledge (decision
+records, standards, specs, contracts, governance docs) into a single
+document list for downstream consumption.
+"""
+
 import logging
 from pathlib import Path
 from typing import Any
@@ -5,6 +13,7 @@ from typing import Any
 import yaml
 
 from hermes import config
+from hermes.kernel.architecture_knowledge import ArchitectureKnowledge
 from hermes.models import KnowledgeContext, KnowledgeDocument, Project
 
 logger = logging.getLogger(__name__)
@@ -28,11 +37,16 @@ _STOP_WORDS = frozenset({
 
 
 class KnowledgeEngine:
-    def __init__(self, knowledge_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        knowledge_root: Path | None = None,
+        architecture_knowledge: ArchitectureKnowledge | None = None,
+    ) -> None:
         self.knowledge_root = (
             Path(knowledge_root) if knowledge_root is not None else config.knowledge_root()
         )
         self.registry_path = self.knowledge_root / "registry.yaml"
+        self._architecture = architecture_knowledge or ArchitectureKnowledge()
 
     def select(
         self,
@@ -97,6 +111,45 @@ class KnowledgeEngine:
             "Loaded %d knowledge document(s) for project %s", len(documents), project_id
         )
         return KnowledgeContext(project=project, documents=documents)
+
+    def load_architecture(
+        self,
+        categories: list[str] | None = None,
+    ) -> list[KnowledgeDocument]:
+        """Load architecture knowledge documents.
+
+        Delegates to ArchitectureKnowledge.  Returns KnowledgeDocument
+        instances compatible with select() and all downstream consumers.
+        """
+        return self._architecture.load(categories=categories)
+
+    def load_with_architecture(
+        self,
+        project_id: str,
+        categories: list[str] | None = None,
+    ) -> KnowledgeContext:
+        """Load business knowledge merged with architecture knowledge.
+
+        Business documents come first (manifest order), followed by
+        architecture documents (category order, then filename).
+        """
+        context = self.load(project_id)
+        arch_docs = self.load_architecture(categories=categories)
+
+        merged = list(context.documents) + arch_docs
+
+        logger.info(
+            "Merged knowledge for %s: %d business + %d architecture = %d total",
+            project_id,
+            len(context.documents),
+            len(arch_docs),
+            len(merged),
+        )
+        return KnowledgeContext(project=context.project, documents=merged)
+
+    def list_architecture_sources(self) -> list[dict]:
+        """Return metadata about available architecture knowledge sources."""
+        return self._architecture.list_sources()
 
     def _load_document(self, project_path: Path, filename: str) -> KnowledgeDocument:
         document_path = project_path / filename
