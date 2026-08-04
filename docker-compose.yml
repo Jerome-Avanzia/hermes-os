@@ -16,4 +16,6 @@ services:
       - ./knowledge:/data/knowledge:ro
       - ./skills:/data/skills:ro
       - ./data/logs:/data/logs
-    command: ["--help"]
+    command: ["--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"

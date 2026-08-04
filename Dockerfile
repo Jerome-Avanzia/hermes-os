@@ -55,8 +55,10 @@ RUN mkdir -p /data/repos /data/knowledge /data/skills /data/logs \
 
 USER hermes
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD hermes --help > /dev/null || exit 1
+EXPOSE 8000
 
-ENTRYPOINT ["hermes"]
-CMD ["--help"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+
+ENTRYPOINT ["uvicorn", "hermes.gateway.app:app"]
+CMD ["--host", "0.0.0.0", "--port", "8000"]
