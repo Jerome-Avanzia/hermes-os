@@ -11,6 +11,13 @@ from hermes.models.context_package import (
     TokenBudget,
 )
 from hermes.models.department import Department
+from hermes.models.prompt_package import (
+    OmissionReason,
+    OmittedReference,
+    PromptPackage,
+    PromptSection,
+    TruncationReport,
+)
 from hermes.models.decision import Decision
 from hermes.models.diagnostics_report import DiagnosticsReport
 from hermes.models.execution_plan import ExecutionPlan
@@ -76,6 +83,8 @@ __all__ = [
     "Lesson",
     "LoadedSkill",
     "Notification",
+    "OmissionReason",
+    "OmittedReference",
     "Operation",
     "OperationProgress",
     "Opportunity",
@@ -84,6 +93,8 @@ __all__ = [
     "Plan",
     "Profile",
     "Project",
+    "PromptPackage",
+    "PromptSection",
     "Repository",
     "Result",
     "SOP",
@@ -93,6 +104,7 @@ __all__ = [
     "Task",
     "TokenBudget",
     "TransitionRecord",
+    "TruncationReport",
     "Workspace",
     "WorkspaceContext",
     "WorkspaceFile",
