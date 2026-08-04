@@ -819,6 +819,45 @@ async def nocodb_health() -> dict:
     return _hermes_service.nocodb_health()
 
 
+# -- LLM Runtime (Sprint 45) --------------------------------------------------
+
+
+@app.get("/v1/llm-providers")
+async def list_llm_providers() -> list[dict]:
+    """List all LLM providers."""
+    return _hermes_service.list_llm_providers()
+
+
+@app.get("/v1/llm-providers/{provider_id}")
+async def get_llm_provider(provider_id: str) -> JSONResponse:
+    """Get a single LLM provider by Hermes ID."""
+    result = _hermes_service.get_llm_provider(provider_id)
+    if result is None:
+        return JSONResponse({"error": "Provider not found"}, status_code=404)
+    return JSONResponse(result)
+
+
+@app.get("/v1/llm-models")
+async def list_llm_models() -> list[dict]:
+    """List all LLM models across all providers."""
+    return _hermes_service.list_llm_models()
+
+
+@app.get("/v1/llm-models/{model_id:path}")
+async def get_llm_model(model_id: str) -> JSONResponse:
+    """Get a single LLM model by Hermes ID."""
+    result = _hermes_service.get_llm_model(model_id)
+    if result is None:
+        return JSONResponse({"error": "Model not found"}, status_code=404)
+    return JSONResponse(result)
+
+
+@app.get("/health/llm")
+async def llm_health() -> dict:
+    """LLM runtime health check (Sprint 45)."""
+    return _hermes_service.llm_health()
+
+
 # -- Static UI (must be mounted last so API routes take precedence) ---------
 
 _static_dir = Path(__file__).parent / "static"

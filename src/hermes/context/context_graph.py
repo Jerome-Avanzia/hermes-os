@@ -56,6 +56,8 @@ class GraphData:
     workflows: list = field(default_factory=list)
     databases: list = field(default_factory=list)
     tables: list = field(default_factory=list)
+    llm_providers: list = field(default_factory=list)
+    models: list = field(default_factory=list)
 
 
 # -- Internal resolution context -----------------------------------------------
@@ -91,6 +93,10 @@ class _Ctx:
     database_index: dict
     tables: list
     table_index: dict
+    llm_providers: list
+    llm_provider_index: dict
+    models: list
+    model_index: dict
 
 
 # -- Serializers ---------------------------------------------------------------
@@ -169,6 +175,17 @@ def _ser_table(t) -> dict:
             "attention_state": t.attention_state}
 
 
+def _ser_llm_provider(p) -> dict:
+    return {"id": p.id, "name": p.name, "provider_type": p.provider_type,
+            "health_state": p.health_state, "model_count": p.model_count}
+
+
+def _ser_llm_model(m) -> dict:
+    return {"id": m.id, "name": m.name, "provider_id": m.provider_id,
+            "family": m.family, "status": m.status,
+            "attention_state": m.attention_state}
+
+
 # -- Object finders ------------------------------------------------------------
 
 
@@ -186,6 +203,8 @@ _FINDERS: dict[str, Callable] = {
     "workflow":   lambda ctx, oid: ctx.workflow_index.get(oid),
     "database":   lambda ctx, oid: ctx.database_index.get(oid),
     "table":      lambda ctx, oid: ctx.table_index.get(oid),
+    "llm_provider": lambda ctx, oid: ctx.llm_provider_index.get(oid),
+    "model":      lambda ctx, oid: ctx.model_index.get(oid),
 }
 
 _SUMMARIZERS: dict[str, Callable] = {
@@ -202,6 +221,8 @@ _SUMMARIZERS: dict[str, Callable] = {
     "workflow":   _ser_workflow,
     "database":   _ser_database,
     "table":      _ser_table,
+    "llm_provider": _ser_llm_provider,
+    "model":      _ser_llm_model,
 }
 
 
@@ -1109,6 +1130,320 @@ def _workflow_tables(wf, ctx):
     return _find_tables_by_cap_refs(caps, ctx)
 
 
+# -- LlmProvider edge resolvers (Sprint 45) ------------------------------------
+
+
+def _llmprov_models(prov, ctx):
+    return [_ser_llm_model(m) for m in ctx.models if m.provider_id == prov.id]
+
+
+def _llmprov_capabilities(prov, ctx):
+    model_ids = {m.id for m in ctx.models if m.provider_id == prov.id}
+    return [_ser_cap(c) for c in ctx.all_capabilities
+            if any(mr in model_ids for mr in c.model_refs)]
+
+
+def _llmprov_workflows(prov, ctx):
+    model_ids = {m.id for m in ctx.models if m.provider_id == prov.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(mr in model_ids for mr in c.model_refs)]
+    return _find_workflows_by_cap_refs(caps, ctx)
+
+
+def _llmprov_repositories(prov, ctx):
+    model_ids = {m.id for m in ctx.models if m.provider_id == prov.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(mr in model_ids for mr in c.model_refs)]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_repo(ctx.repo_index[r]) for r in repo_ids if r in ctx.repo_index]
+
+
+def _llmprov_services(prov, ctx):
+    model_ids = {m.id for m in ctx.models if m.provider_id == prov.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(mr in model_ids for mr in c.model_refs)]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_service(s) for s in ctx.services
+            if s.repository_ref and s.repository_ref in repo_ids]
+
+
+def _llmprov_people(prov, ctx):
+    model_ids = {m.id for m in ctx.models if m.provider_id == prov.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(mr in model_ids for mr in c.model_refs)]
+    seen: set[str] = set()
+    result = []
+    for cap in caps:
+        for p in ctx.all_people:
+            if p.id not in seen and _owner_matches(cap.owner, p):
+                seen.add(p.id)
+                result.append(_ser_person(p))
+    return result
+
+
+def _llmprov_departments(prov, ctx):
+    model_ids = {m.id for m in ctx.models if m.provider_id == prov.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(mr in model_ids for mr in c.model_refs)]
+    dept_ids = {c.department_id for c in caps if c.department_id}
+    return [_ser_dept(ctx.dept_index[d]) for d in dept_ids if d in ctx.dept_index]
+
+
+def _llmprov_goals(prov, ctx):
+    model_ids = {m.id for m in ctx.models if m.provider_id == prov.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(mr in model_ids for mr in c.model_refs)]
+    if not caps:
+        return []
+    cap_owners = {c.owner.strip().lower() for c in caps if c.owner}
+    return [_ser_goal(g) for g in ctx.all_goals
+            if g.owner and g.owner.strip().lower() in cap_owners]
+
+
+def _llmprov_notifications(prov, ctx):
+    return _notifs_for_ids([prov.id], ctx)
+
+
+# -- Model edge resolvers (Sprint 45) -----------------------------------------
+
+
+def _model_providers(mdl, ctx):
+    prov = ctx.llm_provider_index.get(mdl.provider_id)
+    return [_ser_llm_provider(prov)] if prov else []
+
+
+def _model_capabilities(mdl, ctx):
+    return [_ser_cap(c) for c in ctx.all_capabilities if mdl.id in c.model_refs]
+
+
+def _model_workflows(mdl, ctx):
+    caps = [c for c in ctx.all_capabilities if mdl.id in c.model_refs]
+    return _find_workflows_by_cap_refs(caps, ctx)
+
+
+def _model_repositories(mdl, ctx):
+    caps = [c for c in ctx.all_capabilities if mdl.id in c.model_refs]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_repo(ctx.repo_index[r]) for r in repo_ids if r in ctx.repo_index]
+
+
+def _model_services(mdl, ctx):
+    caps = [c for c in ctx.all_capabilities if mdl.id in c.model_refs]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_service(s) for s in ctx.services
+            if s.repository_ref and s.repository_ref in repo_ids]
+
+
+def _model_operations(mdl, ctx):
+    caps = [c for c in ctx.all_capabilities if mdl.id in c.model_refs]
+    cap_ids = {c.id for c in caps}
+    return [_ser_op(o) for o in ctx.operations
+            if getattr(o, "capability_id", None) in cap_ids]
+
+
+def _model_people(mdl, ctx):
+    caps = [c for c in ctx.all_capabilities if mdl.id in c.model_refs]
+    seen: set[str] = set()
+    result = []
+    for cap in caps:
+        for p in ctx.all_people:
+            if p.id not in seen and _owner_matches(cap.owner, p):
+                seen.add(p.id)
+                result.append(_ser_person(p))
+    return result
+
+
+def _model_departments(mdl, ctx):
+    caps = [c for c in ctx.all_capabilities if mdl.id in c.model_refs]
+    dept_ids = {c.department_id for c in caps if c.department_id}
+    return [_ser_dept(ctx.dept_index[d]) for d in dept_ids if d in ctx.dept_index]
+
+
+def _model_goals(mdl, ctx):
+    caps = [c for c in ctx.all_capabilities if mdl.id in c.model_refs]
+    if not caps:
+        return []
+    cap_owners = {c.owner.strip().lower() for c in caps if c.owner}
+    return [_ser_goal(g) for g in ctx.all_goals
+            if g.owner and g.owner.strip().lower() in cap_owners]
+
+
+def _model_notifications(mdl, ctx):
+    return _notifs_for_ids([mdl.id], ctx)
+
+
+# -- LlmProvider/Model edges on existing types (Sprint 45) --------------------
+
+
+def _find_models_by_cap_refs(cap_list, ctx):
+    """Find models referenced by any capability in the list."""
+    mdl_ids: set[str] = set()
+    for c in cap_list:
+        mdl_ids.update(c.model_refs)
+    return [_ser_llm_model(ctx.model_index[m]) for m in mdl_ids
+            if m in ctx.model_index]
+
+
+def _find_llm_providers_for_models(model_ids, ctx):
+    """Find providers that own any of the given model IDs."""
+    prov_ids: set[str] = set()
+    for m in ctx.models:
+        if m.id in model_ids:
+            prov_ids.add(m.provider_id)
+    return [_ser_llm_provider(ctx.llm_provider_index[p]) for p in prov_ids
+            if p in ctx.llm_provider_index]
+
+
+def _goal_llm_providers(goal, ctx):
+    goal_caps = [c for c in ctx.all_capabilities
+                 if c.owner and goal.owner
+                 and c.owner.strip().lower() == goal.owner.strip().lower()]
+    models = _find_models_by_cap_refs(goal_caps, ctx)
+    mdl_ids = {m["id"] for m in models}
+    return _find_llm_providers_for_models(mdl_ids, ctx)
+
+
+def _goal_models(goal, ctx):
+    goal_caps = [c for c in ctx.all_capabilities
+                 if c.owner and goal.owner
+                 and c.owner.strip().lower() == goal.owner.strip().lower()]
+    return _find_models_by_cap_refs(goal_caps, ctx)
+
+
+def _person_llm_providers(person, ctx):
+    caps = [c for c in ctx.all_capabilities if _owner_matches(c.owner, person)]
+    models = _find_models_by_cap_refs(caps, ctx)
+    mdl_ids = {m["id"] for m in models}
+    return _find_llm_providers_for_models(mdl_ids, ctx)
+
+
+def _person_models(person, ctx):
+    caps = [c for c in ctx.all_capabilities if _owner_matches(c.owner, person)]
+    return _find_models_by_cap_refs(caps, ctx)
+
+
+def _dept_llm_providers(dept, ctx):
+    caps = [c for c in ctx.all_capabilities if c.department_id == dept.id]
+    models = _find_models_by_cap_refs(caps, ctx)
+    mdl_ids = {m["id"] for m in models}
+    return _find_llm_providers_for_models(mdl_ids, ctx)
+
+
+def _dept_models(dept, ctx):
+    caps = [c for c in ctx.all_capabilities if c.department_id == dept.id]
+    return _find_models_by_cap_refs(caps, ctx)
+
+
+def _cap_llm_providers(cap, ctx):
+    models = [ctx.model_index[m] for m in cap.model_refs if m in ctx.model_index]
+    prov_ids = {m.provider_id for m in models}
+    return [_ser_llm_provider(ctx.llm_provider_index[p]) for p in prov_ids
+            if p in ctx.llm_provider_index]
+
+
+def _cap_models(cap, ctx):
+    return [_ser_llm_model(ctx.model_index[m]) for m in cap.model_refs
+            if m in ctx.model_index]
+
+
+def _op_llm_providers(op, ctx):
+    cap_id = getattr(op, "capability_id", None)
+    if not cap_id:
+        return []
+    cap = ctx.cap_index.get(cap_id)
+    if not cap:
+        return []
+    models = [ctx.model_index[m] for m in cap.model_refs if m in ctx.model_index]
+    prov_ids = {m.provider_id for m in models}
+    return [_ser_llm_provider(ctx.llm_provider_index[p]) for p in prov_ids
+            if p in ctx.llm_provider_index]
+
+
+def _op_models(op, ctx):
+    cap_id = getattr(op, "capability_id", None)
+    if not cap_id:
+        return []
+    cap = ctx.cap_index.get(cap_id)
+    if not cap:
+        return []
+    return [_ser_llm_model(ctx.model_index[m]) for m in cap.model_refs
+            if m in ctx.model_index]
+
+
+def _repo_llm_providers(repo, ctx):
+    caps = [c for c in ctx.all_capabilities if repo.id in c.repository_refs]
+    models = _find_models_by_cap_refs(caps, ctx)
+    mdl_ids = {m["id"] for m in models}
+    return _find_llm_providers_for_models(mdl_ids, ctx)
+
+
+def _repo_models(repo, ctx):
+    caps = [c for c in ctx.all_capabilities if repo.id in c.repository_refs]
+    return _find_models_by_cap_refs(caps, ctx)
+
+
+def _service_llm_providers(svc, ctx):
+    if not svc.repository_ref:
+        return []
+    caps = [c for c in ctx.all_capabilities if svc.repository_ref in c.repository_refs]
+    models = _find_models_by_cap_refs(caps, ctx)
+    mdl_ids = {m["id"] for m in models}
+    return _find_llm_providers_for_models(mdl_ids, ctx)
+
+
+def _service_models(svc, ctx):
+    if not svc.repository_ref:
+        return []
+    caps = [c for c in ctx.all_capabilities if svc.repository_ref in c.repository_refs]
+    return _find_models_by_cap_refs(caps, ctx)
+
+
+def _workflow_llm_providers(wf, ctx):
+    caps = [c for c in ctx.all_capabilities if wf.id in c.workflow_refs]
+    models = _find_models_by_cap_refs(caps, ctx)
+    mdl_ids = {m["id"] for m in models}
+    return _find_llm_providers_for_models(mdl_ids, ctx)
+
+
+def _workflow_models(wf, ctx):
+    caps = [c for c in ctx.all_capabilities if wf.id in c.workflow_refs]
+    return _find_models_by_cap_refs(caps, ctx)
+
+
+def _database_llm_providers(db, ctx):
+    table_ids = {t.id for t in ctx.tables if t.database_id == db.id}
+    caps = [c for c in ctx.all_capabilities if any(tr in table_ids for tr in c.table_refs)]
+    models = _find_models_by_cap_refs(caps, ctx)
+    mdl_ids = {m["id"] for m in models}
+    return _find_llm_providers_for_models(mdl_ids, ctx)
+
+
+def _database_models(db, ctx):
+    table_ids = {t.id for t in ctx.tables if t.database_id == db.id}
+    caps = [c for c in ctx.all_capabilities if any(tr in table_ids for tr in c.table_refs)]
+    return _find_models_by_cap_refs(caps, ctx)
+
+
+def _table_llm_providers(tbl, ctx):
+    caps = [c for c in ctx.all_capabilities if tbl.id in c.table_refs]
+    models = _find_models_by_cap_refs(caps, ctx)
+    mdl_ids = {m["id"] for m in models}
+    return _find_llm_providers_for_models(mdl_ids, ctx)
+
+
+def _table_models(tbl, ctx):
+    caps = [c for c in ctx.all_capabilities if tbl.id in c.table_refs]
+    return _find_models_by_cap_refs(caps, ctx)
+
+
 # -- Declarative edge registry (Amendment 2) -----------------------------------
 
 
@@ -1127,6 +1462,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "operations": _goal_operations,
         "heartbeats": _goal_heartbeats,
         "notifications": _goal_notifications,
+        "llm_providers": _goal_llm_providers,
+        "models": _goal_models,
     },
     "person": {
         "departments": _person_departments,
@@ -1140,6 +1477,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "operations": _person_operations,
         "heartbeats": _person_heartbeats,
         "notifications": _person_notifications,
+        "llm_providers": _person_llm_providers,
+        "models": _person_models,
     },
     "department": {
         "people": _dept_people,
@@ -1152,6 +1491,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "goals": _dept_goals,
         "operations": _dept_operations,
         "sops": _dept_sops,
+        "llm_providers": _dept_llm_providers,
+        "models": _dept_models,
     },
     "capability": {
         "departments": _cap_departments,
@@ -1164,6 +1505,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "sops": _cap_sops,
         "goals": _cap_goals,
         "operations": _cap_operations,
+        "llm_providers": _cap_llm_providers,
+        "models": _cap_models,
     },
     "operation": {
         "decisions": _op_decisions,
@@ -1177,6 +1520,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "tables": _op_tables,
         "heartbeats": _op_heartbeats,
         "notifications": _op_notifications,
+        "llm_providers": _op_llm_providers,
+        "models": _op_models,
     },
     "decision": {
         "goals": _dec_goals,
@@ -1203,6 +1548,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "workflows": _repo_workflows,
         "databases": _repo_databases,
         "tables": _repo_tables,
+        "llm_providers": _repo_llm_providers,
+        "models": _repo_models,
     },
     "service": {
         "repositories": _service_repositories,
@@ -1215,6 +1562,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "databases": _service_databases,
         "tables": _service_tables,
         "notifications": _service_notifications,
+        "llm_providers": _service_llm_providers,
+        "models": _service_models,
     },
     "workflow": {
         "capabilities": _workflow_capabilities,
@@ -1227,6 +1576,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "databases": _workflow_databases,
         "tables": _workflow_tables,
         "notifications": _workflow_notifications,
+        "llm_providers": _workflow_llm_providers,
+        "models": _workflow_models,
     },
     "database": {
         "tables": _database_tables,
@@ -1238,6 +1589,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "departments": _database_departments,
         "goals": _database_goals,
         "notifications": _database_notifications,
+        "llm_providers": _database_llm_providers,
+        "models": _database_models,
     },
     "table": {
         "databases": _table_databases,
@@ -1250,6 +1603,31 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "departments": _table_departments,
         "goals": _table_goals,
         "notifications": _table_notifications,
+        "llm_providers": _table_llm_providers,
+        "models": _table_models,
+    },
+    "llm_provider": {
+        "models": _llmprov_models,
+        "capabilities": _llmprov_capabilities,
+        "workflows": _llmprov_workflows,
+        "repositories": _llmprov_repositories,
+        "services": _llmprov_services,
+        "people": _llmprov_people,
+        "departments": _llmprov_departments,
+        "goals": _llmprov_goals,
+        "notifications": _llmprov_notifications,
+    },
+    "model": {
+        "llm_providers": _model_providers,
+        "capabilities": _model_capabilities,
+        "workflows": _model_workflows,
+        "repositories": _model_repositories,
+        "services": _model_services,
+        "operations": _model_operations,
+        "people": _model_people,
+        "departments": _model_departments,
+        "goals": _model_goals,
+        "notifications": _model_notifications,
     },
 }
 
@@ -1257,6 +1635,7 @@ ALL_RELATION_KEYS = frozenset({
     "goals", "people", "departments", "capabilities",
     "repositories", "services", "workflows", "databases", "tables",
     "operations", "decisions", "kpis", "sops", "heartbeats", "notifications",
+    "llm_providers", "models",
 })
 
 SUPPORTED_TYPES = frozenset(_EDGES.keys())
@@ -1387,4 +1766,8 @@ class ContextGraph:
             database_index={db.id: db for db in data.databases},
             tables=data.tables,
             table_index={t.id: t for t in data.tables},
+            llm_providers=data.llm_providers,
+            llm_provider_index={p.id: p for p in data.llm_providers},
+            models=data.models,
+            model_index={m.id: m for m in data.models},
         )

@@ -69,3 +69,31 @@ def nocodb_url() -> str:
 
 def nocodb_token() -> str:
     return os.environ.get("HERMES_NOCODB_TOKEN", "")
+
+
+def ollama_url() -> str:
+    return os.environ.get("HERMES_OLLAMA_URL", "")
+
+
+def openai_api_key() -> str:
+    return os.environ.get("HERMES_OPENAI_API_KEY", "")
+
+
+def anthropic_api_key() -> str:
+    return os.environ.get("HERMES_ANTHROPIC_API_KEY", "")
+
+
+def openrouter_api_key() -> str:
+    return os.environ.get("HERMES_OPENROUTER_API_KEY", "")
+
+
+def gemini_api_key() -> str:
+    return os.environ.get("HERMES_GEMINI_API_KEY", "")
+
+
+def llm_default_provider() -> str:
+    return os.environ.get("HERMES_LLM_DEFAULT_PROVIDER", "")
+
+
+def llm_default_model() -> str:
+    return os.environ.get("HERMES_LLM_DEFAULT_MODEL", "")

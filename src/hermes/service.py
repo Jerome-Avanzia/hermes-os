@@ -63,6 +63,12 @@ from hermes.runtime.n8n_provider import N8nProvider
 from hermes.runtime.n8n_runtime import N8nRuntime
 from hermes.runtime.nocodb_provider import NocodbProvider
 from hermes.runtime.nocodb_runtime import NocodbRuntime
+from hermes.runtime.llm_runtime import LlmRuntime
+from hermes.runtime.ollama_provider import OllamaProvider
+from hermes.runtime.openai_provider import OpenAIProvider
+from hermes.runtime.anthropic_provider import AnthropicProvider
+from hermes.runtime.openrouter_provider import OpenRouterProvider
+from hermes.runtime.gemini_provider import GeminiProvider
 from hermes.runtime.traefik_provider import TraefikProvider
 
 logger = logging.getLogger(__name__)
@@ -125,6 +131,7 @@ class HermesService:
         self._infrastructure_runtime: InfrastructureRuntime | None = None
         self._n8n_runtime: N8nRuntime | None = None
         self._nocodb_runtime: NocodbRuntime | None = None
+        self._llm_runtime: LlmRuntime | None = None
 
     # -- Workspace validation --------------------------------------------------
 
@@ -1456,6 +1463,115 @@ class HermesService:
             "attention_state": t.attention_state,
         }
 
+    # -- LLM Runtime (Sprint 45) --------------------------------------------------
+
+    def _get_llm_runtime(self) -> LlmRuntime:
+        """Lazily build the LlmRuntime from config."""
+        if self._llm_runtime is None:
+            providers = [
+                OllamaProvider(api_url=config.ollama_url()),
+                OpenAIProvider(api_key=config.openai_api_key()),
+                AnthropicProvider(api_key=config.anthropic_api_key()),
+                OpenRouterProvider(api_key=config.openrouter_api_key()),
+                GeminiProvider(api_key=config.gemini_api_key()),
+            ]
+            self._llm_runtime = LlmRuntime(
+                providers=providers,
+                default_provider=config.llm_default_provider(),
+                default_model=config.llm_default_model(),
+            )
+        return self._llm_runtime
+
+    def llm_health(self) -> dict:
+        """Return LLM integration health status."""
+        runtime = self._get_llm_runtime()
+        h = runtime.health()
+        return {
+            "configured": h.configured,
+            "provider_count": h.provider_count,
+            "healthy_count": h.healthy_count,
+            "model_count": h.model_count,
+            "default_provider": h.default_provider,
+            "default_model": h.default_model,
+            "providers": [
+                {"id": p.id, "name": p.name, "health_state": p.health_state}
+                for p in h.providers
+            ],
+            "last_sync": h.last_sync,
+            "refresh_duration_ms": h.refresh_duration_ms,
+        }
+
+    def list_llm_providers(self) -> list[dict]:
+        """Return all LLM providers as serialized dicts."""
+        runtime = self._get_llm_runtime()
+        providers = runtime.list_providers()
+        return [self._serialize_llm_provider(p) for p in providers]
+
+    def get_llm_provider(self, provider_id: str) -> dict | None:
+        """Return a single LLM provider by Hermes ID with models, or None."""
+        runtime = self._get_llm_runtime()
+        info = runtime.get_provider(provider_id)
+        if info is None:
+            return None
+        result = self._serialize_llm_provider(info)
+        # Find the underlying provider to get its models
+        for p in runtime._providers:
+            if p.name == provider_id and p.configured:
+                models = runtime.list_models_for_provider(p)
+                result["models"] = [self._serialize_llm_model(m) for m in models]
+                break
+        else:
+            result["models"] = []
+        return result
+
+    def list_llm_models(self) -> list[dict]:
+        """Return all LLM models across all providers as serialized dicts."""
+        runtime = self._get_llm_runtime()
+        models = runtime.list_models()
+        return [self._serialize_llm_model(m) for m in models]
+
+    def get_llm_model(self, model_id: str) -> dict | None:
+        """Return a single LLM model by Hermes ID, or None."""
+        runtime = self._get_llm_runtime()
+        model = runtime.get_model(model_id)
+        if model is None:
+            return None
+        return self._serialize_llm_model(model)
+
+    @staticmethod
+    def _serialize_llm_provider(p) -> dict:
+        return {
+            "id": p.id,
+            "name": p.name,
+            "provider_type": p.provider_type,
+            "configured": p.configured,
+            "authenticated": p.authenticated,
+            "reachable": p.reachable,
+            "default_model": p.default_model,
+            "model_count": p.model_count,
+            "health_state": p.health_state,
+            "priority": p.priority,
+        }
+
+    @staticmethod
+    def _serialize_llm_model(m) -> dict:
+        return {
+            "id": m.id,
+            "name": m.name,
+            "provider_id": m.provider_id,
+            "provider": m.provider,
+            "family": m.family,
+            "context_window": m.context_window,
+            "capabilities": {
+                "streaming": m.capabilities.streaming,
+                "tools": m.capabilities.tools,
+                "reasoning": m.capabilities.reasoning,
+                "vision": m.capabilities.vision,
+            },
+            "status": m.status,
+            "attention_state": m.attention_state,
+        }
+
     # -- Context Graph (Sprint 40) ---------------------------------------------
 
     def _get_context_graph(self) -> ContextGraph:
@@ -1513,6 +1629,11 @@ class HermesService:
         databases = nocodb_runtime.list_databases() if nocodb_runtime.configured else []
         tables = nocodb_runtime.list_tables() if nocodb_runtime.configured else []
 
+        # Fetch LLM providers and models for context graph (Sprint 45)
+        llm_runtime = self._get_llm_runtime()
+        llm_providers = llm_runtime.list_providers() if llm_runtime.configured else []
+        llm_models = llm_runtime.list_models() if llm_runtime.configured else []
+
         data = GraphData(
             workspace_id=workspace_id,
             operations=ops,
@@ -1525,6 +1646,8 @@ class HermesService:
             workflows=workflows,
             databases=databases,
             tables=tables,
+            llm_providers=llm_providers,
+            models=llm_models,
         )
 
         return self._get_context_graph().resolve(object_type, object_id, data)
@@ -1750,6 +1873,23 @@ class HermesService:
             except Exception:
                 pass
         result["data"] = data_summary
+
+        # LLM / AI (Sprint 45)
+        llm_runtime = self._get_llm_runtime()
+        ai_summary: dict = {"configured": False, "name": "AI", "providers": 0, "healthy": 0, "models": 0, "default_provider": "", "default_model": ""}
+        if llm_runtime.configured:
+            try:
+                providers = llm_runtime.list_providers()
+                models = llm_runtime.list_models()
+                ai_summary["configured"] = True
+                ai_summary["providers"] = len(providers)
+                ai_summary["healthy"] = sum(1 for p in providers if p.health_state == "healthy")
+                ai_summary["models"] = len(models)
+                ai_summary["default_provider"] = config.llm_default_provider()
+                ai_summary["default_model"] = config.llm_default_model()
+            except Exception:
+                pass
+        result["ai"] = ai_summary
 
         return result
 

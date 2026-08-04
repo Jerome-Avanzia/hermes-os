@@ -1177,6 +1177,7 @@
       <div class="nav-item" data-view="infrastructure">Infrastructure</div>
       <div class="nav-item" data-view="automation">Automation</div>
       <div class="nav-item" data-view="data">Data</div>
+      <div class="nav-item" data-view="ai">AI</div>
       <div class="nav-item" data-view="journal">Journal</div>
       <div class="nav-item" data-view="jobs">Jobs</div>
     </div>
@@ -1285,6 +1286,10 @@
         <div id="data-list" class="list-view"></div>
         <div id="data-detail" class="detail-view" style="display:none"></div>
       </div>
+      <div id="view-ai" class="view">
+        <div id="ai-list" class="list-view"></div>
+        <div id="ai-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-jobs" class="view">
         <div id="jobs-list" class="list-view"></div>
         <div id="jobs-detail" class="detail-view" style="display:none"></div>
@@ -1385,6 +1390,7 @@
     if (name === "infrastructure") loadInfrastructure();
     if (name === "automation") loadAutomation();
     if (name === "data") loadData();
+    if (name === "ai") loadAI();
     if (name === "notifications") loadNotifications();
   }
 
@@ -1539,6 +1545,22 @@
       html += '</div>';
     }
 
+    var aiRt = runtimeHealth.ai || {};
+    if (aiRt.configured) {
+      html += '<div class="dash-card" id="home-ai-card">';
+      html += '<div class="widget-title">AI</div>';
+      var aiUnreachable = (aiRt.providers_configured || 0) - (aiRt.providers_reachable || 0);
+      if (aiUnreachable > 0) {
+        html += '<div class="widget-value" style="color:#fca5a5">' + aiUnreachable + '</div>';
+        html += '<div class="widget-sub" style="color:#fca5a5">unreachable</div>';
+      } else {
+        html += '<div class="widget-value" style="color:#6ee7b7">' + (aiRt.providers_reachable || 0) + '</div>';
+        html += '<div class="widget-sub">providers reachable</div>';
+      }
+      html += '<div class="widget-sub">' + (aiRt.total_models || 0) + ' models</div>';
+      html += '</div>';
+    }
+
     html += '</div>';
 
     // ── What changed? ─────────────────────────────────
@@ -1630,6 +1652,9 @@
 
     var dataCard = document.getElementById("home-data-card");
     if (dataCard) dataCard.addEventListener("click", function () { switchView("data"); });
+
+    var aiCard = document.getElementById("home-ai-card");
+    if (aiCard) aiCard.addEventListener("click", function () { switchView("ai"); });
   }
 
   // ── Executive Brief ───────────────────────────────
@@ -2220,6 +2245,8 @@
       { key: "workflows", label: "Related Workflows", idField: "id", nameField: "name", type: "workflows", navFn: "loadWorkflowDetail" },
       { key: "databases", label: "Related Databases", idField: "id", nameField: "name", type: "databases", navFn: "loadDatabaseDetail" },
       { key: "tables", label: "Related Tables", idField: "id", nameField: "name", type: "tables", navFn: "loadTableDetail" },
+      { key: "llm_providers", label: "Related AI Providers", idField: "id", nameField: "name", type: "llm_providers", navFn: "loadLlmProviderDetail" },
+      { key: "models", label: "Related AI Models", idField: "id", nameField: "name", type: "models", navFn: "loadLlmModelDetail" },
       { key: "sops", label: "Related SOPs", idField: "id", nameField: "title", type: "sops", navFn: null },
       { key: "heartbeats", label: "Related Heartbeats", idField: "id", nameField: "summary", type: "heartbeats", navFn: null },
       { key: "notifications", label: "Related Notifications", idField: "id", nameField: "title", type: "notifications", navFn: null },
@@ -2272,6 +2299,8 @@
         else if (nav === "workflows") { switchView("automation"); loadWorkflowDetail(id); }
         else if (nav === "databases") { switchView("data"); loadDatabaseDetail(id); }
         else if (nav === "tables") { switchView("data"); loadTableDetail(id); }
+        else if (nav === "llm_providers") { switchView("ai"); loadLlmProviderDetail(id); }
+        else if (nav === "models") { switchView("ai"); loadLlmModelDetail(id); }
       });
     });
   }
@@ -3429,6 +3458,214 @@
     if (activeWorkspaceId) {
       var ctxEl = document.getElementById("table-context");
       loadContext("table", tbl.id, ctxEl);
+    }
+  }
+
+  // ── AI ────────────────────────────────────────────
+
+  var aiListEl   = document.getElementById("ai-list");
+  var aiDetailEl = document.getElementById("ai-detail");
+
+  function loadAI() {
+    aiListEl.style.display = "";
+    aiDetailEl.style.display = "none";
+    aiListEl.innerHTML = '<div class="list-empty">Loading AI providers...</div>';
+
+    fetch(GATEWAY + "/v1/llm-providers")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (providers) { renderAIList(providers); })
+      .catch(function () { aiListEl.innerHTML = '<div class="list-empty">Cannot load AI providers.</div>'; });
+  }
+
+  function llmHealthColor(h) {
+    if (h === "healthy") return "var(--accent)";
+    if (h === "degraded") return "#fcd34d";
+    if (h === "unreachable") return "var(--red)";
+    return "var(--text-dim)";
+  }
+
+  function modelAttentionBadge(state) {
+    if (state === "critical") return '<span class="status-badge" style="background:#991b1b;color:#fca5a5;font-size:10px">critical</span>';
+    if (state === "warning") return '<span class="status-badge" style="background:#78350f;color:#fcd34d;font-size:10px">warning</span>';
+    return "";
+  }
+
+  function renderAIList(providers) {
+    if (providers.length === 0) {
+      aiListEl.innerHTML = '<div class="list-empty">No AI providers configured. Set API keys for Ollama, OpenAI, Anthropic, OpenRouter, or Gemini.</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < providers.length; i++) {
+      var p = providers[i];
+      html += '<div class="list-item" data-provider-id="' + esc(p.id) + '" style="cursor:pointer">';
+      html += '  <div class="list-item-main">';
+      html += '    <div class="list-item-title">' + esc(p.name) + '</div>';
+      html += '    <div class="list-item-meta">';
+      html += '      <span style="color:' + llmHealthColor(p.health_state) + '">' + esc(p.health_state) + '</span>';
+      html += '      &middot; ' + esc(p.provider_type);
+      html += '      &middot; ' + p.model_count + ' models';
+      html += '    </div>';
+      html += '  </div>';
+      html += '  <div>';
+      html += '  <span class="status-badge ' + (p.health_state === "healthy" ? "active" : "completed") + '">' + esc(p.health_state) + '</span>';
+      html += '  </div>';
+      html += '</div>';
+    }
+    aiListEl.innerHTML = html;
+    aiListEl.querySelectorAll("[data-provider-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadLlmProviderDetail(el.dataset.providerId); });
+    });
+  }
+
+  function loadLlmProviderDetail(providerId) {
+    aiListEl.style.display = "none";
+    aiDetailEl.style.display = "";
+    aiDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(GATEWAY + "/v1/llm-providers/" + encodeURIComponent(providerId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (p) {
+        if (!p) { aiDetailEl.innerHTML = '<div class="list-empty">Provider not found.</div>'; return; }
+        renderLlmProviderDetail(p);
+      })
+      .catch(function () { aiDetailEl.innerHTML = '<div class="list-empty">Cannot load provider.</div>'; });
+  }
+
+  function renderLlmProviderDetail(p) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(p.name) + '</div>';
+    html += '  <div class="detail-meta">';
+    html += '    <span style="color:' + llmHealthColor(p.health_state) + '">' + esc(p.health_state) + '</span>';
+    html += '    &middot; ' + esc(p.provider_type);
+    html += '    &middot; ' + p.model_count + ' models';
+    html += '  </div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="ai-back">Back</button>';
+    html += '</div>';
+
+    // Metadata
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Metadata</div>';
+    html += '  <div class="list-item-meta">Hermes ID: ' + esc(p.id) + '</div>';
+    html += '  <div class="list-item-meta">Provider Type: ' + esc(p.provider_type) + '</div>';
+    html += '  <div class="list-item-meta">Configured: ' + (p.configured ? "Yes" : "No") + '</div>';
+    html += '  <div class="list-item-meta">Authenticated: ' + (p.authenticated ? "Yes" : "No") + '</div>';
+    html += '  <div class="list-item-meta">Reachable: ' + (p.reachable ? "Yes" : "No") + '</div>';
+    if (p.default_model) html += '  <div class="list-item-meta">Default Model: ' + esc(p.default_model) + '</div>';
+    if (typeof p.priority === "number") html += '  <div class="list-item-meta">Priority: ' + p.priority + '</div>';
+    html += '</div>';
+
+    // Models
+    var models = p.models || [];
+    if (models.length > 0) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Models (' + models.length + ')</div>';
+      for (var i = 0; i < models.length; i++) {
+        var m = models[i];
+        html += '<div class="list-item" data-model-id="' + esc(m.id) + '" style="cursor:pointer;padding:6px 8px">';
+        html += '  <div class="list-item-main">';
+        html += '    <div class="list-item-title" style="font-size:12px">' + esc(m.name) + '</div>';
+        html += '    <div class="list-item-meta">' + esc(m.family || "unknown") + ' &middot; ' + esc(m.status || "available") + '</div>';
+        html += '  </div>';
+        html += '  <div>' + modelAttentionBadge(m.attention_state) + '</div>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Context panel
+    if (activeWorkspaceId) {
+      html += '<div id="llm-provider-context" style="margin-top:16px"></div>';
+    }
+
+    aiDetailEl.innerHTML = html;
+    document.getElementById("ai-back").addEventListener("click", function () { loadAI(); });
+
+    // Model click-through
+    aiDetailEl.querySelectorAll("[data-model-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadLlmModelDetail(el.dataset.modelId); });
+    });
+
+    // Load context
+    if (activeWorkspaceId) {
+      var ctxEl = document.getElementById("llm-provider-context");
+      loadContext("llm_provider", p.id, ctxEl);
+    }
+  }
+
+  function loadLlmModelDetail(modelId) {
+    aiListEl.style.display = "none";
+    aiDetailEl.style.display = "";
+    aiDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(GATEWAY + "/v1/llm-models/" + encodeURIComponent(modelId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (m) {
+        if (!m) { aiDetailEl.innerHTML = '<div class="list-empty">Model not found.</div>'; return; }
+        renderLlmModelDetail(m);
+      })
+      .catch(function () { aiDetailEl.innerHTML = '<div class="list-empty">Cannot load model.</div>'; });
+  }
+
+  function renderLlmModelDetail(m) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(m.name) + '</div>';
+    html += '  <div class="detail-meta">';
+    html += '    ' + esc(m.family || "unknown");
+    html += '    &middot; ' + esc(m.status || "available");
+    if (m.attention_state !== "ok") html += ' &middot; ' + modelAttentionBadge(m.attention_state);
+    html += '  </div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="model-back">Back</button>';
+    html += '</div>';
+
+    // Metadata
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Metadata</div>';
+    html += '  <div class="list-item-meta">Hermes ID: ' + esc(m.id) + '</div>';
+    html += '  <div class="list-item-meta">Provider: ' + esc(m.provider_id) + '</div>';
+    html += '  <div class="list-item-meta">Family: ' + esc(m.family || "unknown") + '</div>';
+    if (m.context_window) html += '  <div class="list-item-meta">Context Window: ' + m.context_window.toLocaleString() + '</div>';
+    html += '</div>';
+
+    // Capabilities
+    var caps = m.capabilities || {};
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Capabilities</div>';
+    var capEntries = Object.keys(caps);
+    if (capEntries.length > 0) {
+      for (var i = 0; i < capEntries.length; i++) {
+        var ck = capEntries[i];
+        var cv = caps[ck];
+        html += '<div class="list-item" style="padding:4px 8px;font-size:12px">';
+        html += '  <div class="list-item-main"><div class="list-item-title" style="font-size:12px">' + esc(ck) + '</div></div>';
+        html += '  <span style="color:' + (cv ? "var(--accent)" : "var(--text-dim)") + '">' + (cv ? "Yes" : "No") + '</span>';
+        html += '</div>';
+      }
+    } else {
+      html += '<div class="list-item-meta">No capability data</div>';
+    }
+    html += '</div>';
+
+    // Context panel
+    if (activeWorkspaceId) {
+      html += '<div id="model-context" style="margin-top:16px"></div>';
+    }
+
+    aiDetailEl.innerHTML = html;
+    document.getElementById("model-back").addEventListener("click", function () {
+      loadLlmProviderDetail(m.provider_id);
+    });
+
+    // Load context
+    if (activeWorkspaceId) {
+      var ctxEl = document.getElementById("model-context");
+      loadContext("model", m.id, ctxEl);
     }
   }
 
