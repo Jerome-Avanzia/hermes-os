@@ -54,6 +54,8 @@ class GraphData:
     repositories: list = field(default_factory=list)
     services: list = field(default_factory=list)
     workflows: list = field(default_factory=list)
+    databases: list = field(default_factory=list)
+    tables: list = field(default_factory=list)
 
 
 # -- Internal resolution context -----------------------------------------------
@@ -85,6 +87,10 @@ class _Ctx:
     service_index: dict
     workflows: list
     workflow_index: dict
+    databases: list
+    database_index: dict
+    tables: list
+    table_index: dict
 
 
 # -- Serializers ---------------------------------------------------------------
@@ -151,6 +157,18 @@ def _ser_workflow(w) -> dict:
             "status": w.status, "attention_state": w.attention_state}
 
 
+def _ser_database(db) -> dict:
+    return {"id": db.id, "name": db.name, "provider": db.provider,
+            "table_count": db.table_count, "record_count": db.record_count,
+            "health_state": db.health_state}
+
+
+def _ser_table(t) -> dict:
+    return {"id": t.id, "name": t.name, "database_id": t.database_id,
+            "record_count": t.record_count, "column_count": t.column_count,
+            "attention_state": t.attention_state}
+
+
 # -- Object finders ------------------------------------------------------------
 
 
@@ -166,6 +184,8 @@ _FINDERS: dict[str, Callable] = {
     "repository": lambda ctx, oid: ctx.repo_index.get(oid),
     "service":    lambda ctx, oid: ctx.service_index.get(oid),
     "workflow":   lambda ctx, oid: ctx.workflow_index.get(oid),
+    "database":   lambda ctx, oid: ctx.database_index.get(oid),
+    "table":      lambda ctx, oid: ctx.table_index.get(oid),
 }
 
 _SUMMARIZERS: dict[str, Callable] = {
@@ -180,6 +200,8 @@ _SUMMARIZERS: dict[str, Callable] = {
     "repository": _ser_repo,
     "service":    _ser_service,
     "workflow":   _ser_workflow,
+    "database":   _ser_database,
+    "table":      _ser_table,
 }
 
 
@@ -792,6 +814,301 @@ def _op_workflows(op, ctx):
     return [_ser_workflow(wf)] if wf else []
 
 
+# -- Database edge resolvers (Sprint 44) ----------------------------------------
+
+
+def _database_tables(db, ctx):
+    return [_ser_table(t) for t in ctx.tables if t.database_id == db.id]
+
+
+def _database_capabilities(db, ctx):
+    table_ids = {t.id for t in ctx.tables if t.database_id == db.id}
+    return [_ser_cap(c) for c in ctx.all_capabilities
+            if any(tr in table_ids for tr in c.table_refs)]
+
+
+def _database_workflows(db, ctx):
+    table_ids = {t.id for t in ctx.tables if t.database_id == db.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(tr in table_ids for tr in c.table_refs)]
+    return _find_workflows_by_cap_refs(caps, ctx)
+
+
+def _database_repositories(db, ctx):
+    table_ids = {t.id for t in ctx.tables if t.database_id == db.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(tr in table_ids for tr in c.table_refs)]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_repo(ctx.repo_index[r]) for r in repo_ids
+            if r in ctx.repo_index]
+
+
+def _database_services(db, ctx):
+    table_ids = {t.id for t in ctx.tables if t.database_id == db.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(tr in table_ids for tr in c.table_refs)]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_service(s) for s in ctx.services
+            if s.repository_ref and s.repository_ref in repo_ids]
+
+
+def _database_people(db, ctx):
+    table_ids = {t.id for t in ctx.tables if t.database_id == db.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(tr in table_ids for tr in c.table_refs)]
+    seen: set[str] = set()
+    result = []
+    for cap in caps:
+        for p in ctx.all_people:
+            if p.id not in seen and _owner_matches(cap.owner, p):
+                seen.add(p.id)
+                result.append(_ser_person(p))
+    return result
+
+
+def _database_departments(db, ctx):
+    table_ids = {t.id for t in ctx.tables if t.database_id == db.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(tr in table_ids for tr in c.table_refs)]
+    dept_ids = {c.department_id for c in caps if c.department_id}
+    return [_ser_dept(ctx.dept_index[d]) for d in dept_ids
+            if d in ctx.dept_index]
+
+
+def _database_goals(db, ctx):
+    table_ids = {t.id for t in ctx.tables if t.database_id == db.id}
+    caps = [c for c in ctx.all_capabilities
+            if any(tr in table_ids for tr in c.table_refs)]
+    if not caps:
+        return []
+    cap_owners = {c.owner.strip().lower() for c in caps if c.owner}
+    return [_ser_goal(g) for g in ctx.all_goals
+            if g.owner and g.owner.strip().lower() in cap_owners]
+
+
+def _database_notifications(db, ctx):
+    return _notifs_for_ids([db.id], ctx)
+
+
+# -- Table edge resolvers (Sprint 44) ------------------------------------------
+
+
+def _table_databases(tbl, ctx):
+    db = ctx.database_index.get(tbl.database_id)
+    return [_ser_database(db)] if db else []
+
+
+def _table_capabilities(tbl, ctx):
+    return [_ser_cap(c) for c in ctx.all_capabilities
+            if tbl.id in c.table_refs]
+
+
+def _table_workflows(tbl, ctx):
+    caps = [c for c in ctx.all_capabilities if tbl.id in c.table_refs]
+    return _find_workflows_by_cap_refs(caps, ctx)
+
+
+def _table_repositories(tbl, ctx):
+    caps = [c for c in ctx.all_capabilities if tbl.id in c.table_refs]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_repo(ctx.repo_index[r]) for r in repo_ids
+            if r in ctx.repo_index]
+
+
+def _table_services(tbl, ctx):
+    caps = [c for c in ctx.all_capabilities if tbl.id in c.table_refs]
+    repo_ids: set[str] = set()
+    for c in caps:
+        repo_ids.update(c.repository_refs)
+    return [_ser_service(s) for s in ctx.services
+            if s.repository_ref and s.repository_ref in repo_ids]
+
+
+def _table_operations(tbl, ctx):
+    caps = [c for c in ctx.all_capabilities if tbl.id in c.table_refs]
+    cap_ids = {c.id for c in caps}
+    return [_ser_op(o) for o in ctx.operations
+            if getattr(o, "capability_id", None) in cap_ids]
+
+
+def _table_people(tbl, ctx):
+    caps = [c for c in ctx.all_capabilities if tbl.id in c.table_refs]
+    seen: set[str] = set()
+    result = []
+    for cap in caps:
+        for p in ctx.all_people:
+            if p.id not in seen and _owner_matches(cap.owner, p):
+                seen.add(p.id)
+                result.append(_ser_person(p))
+    return result
+
+
+def _table_departments(tbl, ctx):
+    caps = [c for c in ctx.all_capabilities if tbl.id in c.table_refs]
+    dept_ids = {c.department_id for c in caps if c.department_id}
+    return [_ser_dept(ctx.dept_index[d]) for d in dept_ids
+            if d in ctx.dept_index]
+
+
+def _table_goals(tbl, ctx):
+    caps = [c for c in ctx.all_capabilities if tbl.id in c.table_refs]
+    if not caps:
+        return []
+    cap_owners = {c.owner.strip().lower() for c in caps if c.owner}
+    return [_ser_goal(g) for g in ctx.all_goals
+            if g.owner and g.owner.strip().lower() in cap_owners]
+
+
+def _table_notifications(tbl, ctx):
+    return _notifs_for_ids([tbl.id], ctx)
+
+
+# -- Database/Table edges on existing types (Sprint 44) ------------------------
+
+
+def _find_tables_by_cap_refs(cap_list, ctx):
+    """Find tables referenced by any capability in the list."""
+    tbl_ids: set[str] = set()
+    for c in cap_list:
+        tbl_ids.update(c.table_refs)
+    return [_ser_table(ctx.table_index[t]) for t in tbl_ids
+            if t in ctx.table_index]
+
+
+def _find_databases_for_tables(table_ids, ctx):
+    """Find databases that contain any of the given table IDs."""
+    db_ids: set[str] = set()
+    for t in ctx.tables:
+        if t.id in table_ids:
+            db_ids.add(t.database_id)
+    return [_ser_database(ctx.database_index[d]) for d in db_ids
+            if d in ctx.database_index]
+
+
+def _goal_databases(goal, ctx):
+    goal_caps = [c for c in ctx.all_capabilities
+                 if c.owner and goal.owner
+                 and c.owner.strip().lower() == goal.owner.strip().lower()]
+    tables = _find_tables_by_cap_refs(goal_caps, ctx)
+    tbl_ids = {t["id"] for t in tables}
+    return _find_databases_for_tables(tbl_ids, ctx)
+
+
+def _goal_tables(goal, ctx):
+    goal_caps = [c for c in ctx.all_capabilities
+                 if c.owner and goal.owner
+                 and c.owner.strip().lower() == goal.owner.strip().lower()]
+    return _find_tables_by_cap_refs(goal_caps, ctx)
+
+
+def _person_databases(person, ctx):
+    caps = [c for c in ctx.all_capabilities if _owner_matches(c.owner, person)]
+    tables = _find_tables_by_cap_refs(caps, ctx)
+    tbl_ids = {t["id"] for t in tables}
+    return _find_databases_for_tables(tbl_ids, ctx)
+
+
+def _person_tables(person, ctx):
+    caps = [c for c in ctx.all_capabilities if _owner_matches(c.owner, person)]
+    return _find_tables_by_cap_refs(caps, ctx)
+
+
+def _dept_databases(dept, ctx):
+    caps = [c for c in ctx.all_capabilities if c.department_id == dept.id]
+    tables = _find_tables_by_cap_refs(caps, ctx)
+    tbl_ids = {t["id"] for t in tables}
+    return _find_databases_for_tables(tbl_ids, ctx)
+
+
+def _dept_tables(dept, ctx):
+    caps = [c for c in ctx.all_capabilities if c.department_id == dept.id]
+    return _find_tables_by_cap_refs(caps, ctx)
+
+
+def _cap_databases(cap, ctx):
+    tables = [ctx.table_index[t] for t in cap.table_refs if t in ctx.table_index]
+    db_ids = {t.database_id for t in tables}
+    return [_ser_database(ctx.database_index[d]) for d in db_ids
+            if d in ctx.database_index]
+
+
+def _cap_tables(cap, ctx):
+    return [_ser_table(ctx.table_index[t]) for t in cap.table_refs
+            if t in ctx.table_index]
+
+
+def _op_databases(op, ctx):
+    cap_id = getattr(op, "capability_id", None)
+    if not cap_id:
+        return []
+    cap = ctx.cap_index.get(cap_id)
+    if not cap:
+        return []
+    tables = [ctx.table_index[t] for t in cap.table_refs if t in ctx.table_index]
+    db_ids = {t.database_id for t in tables}
+    return [_ser_database(ctx.database_index[d]) for d in db_ids
+            if d in ctx.database_index]
+
+
+def _op_tables(op, ctx):
+    cap_id = getattr(op, "capability_id", None)
+    if not cap_id:
+        return []
+    cap = ctx.cap_index.get(cap_id)
+    if not cap:
+        return []
+    return [_ser_table(ctx.table_index[t]) for t in cap.table_refs
+            if t in ctx.table_index]
+
+
+def _repo_databases(repo, ctx):
+    caps = [c for c in ctx.all_capabilities if repo.id in c.repository_refs]
+    tables = _find_tables_by_cap_refs(caps, ctx)
+    tbl_ids = {t["id"] for t in tables}
+    return _find_databases_for_tables(tbl_ids, ctx)
+
+
+def _repo_tables(repo, ctx):
+    caps = [c for c in ctx.all_capabilities if repo.id in c.repository_refs]
+    return _find_tables_by_cap_refs(caps, ctx)
+
+
+def _service_databases(svc, ctx):
+    if not svc.repository_ref:
+        return []
+    caps = [c for c in ctx.all_capabilities
+            if svc.repository_ref in c.repository_refs]
+    tables = _find_tables_by_cap_refs(caps, ctx)
+    tbl_ids = {t["id"] for t in tables}
+    return _find_databases_for_tables(tbl_ids, ctx)
+
+
+def _service_tables(svc, ctx):
+    if not svc.repository_ref:
+        return []
+    caps = [c for c in ctx.all_capabilities
+            if svc.repository_ref in c.repository_refs]
+    return _find_tables_by_cap_refs(caps, ctx)
+
+
+def _workflow_databases(wf, ctx):
+    caps = [c for c in ctx.all_capabilities if wf.id in c.workflow_refs]
+    tables = _find_tables_by_cap_refs(caps, ctx)
+    tbl_ids = {t["id"] for t in tables}
+    return _find_databases_for_tables(tbl_ids, ctx)
+
+
+def _workflow_tables(wf, ctx):
+    caps = [c for c in ctx.all_capabilities if wf.id in c.workflow_refs]
+    return _find_tables_by_cap_refs(caps, ctx)
+
+
 # -- Declarative edge registry (Amendment 2) -----------------------------------
 
 
@@ -803,6 +1120,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "repositories": _goal_repositories,
         "services": _goal_services,
         "workflows": _goal_workflows,
+        "databases": _goal_databases,
+        "tables": _goal_tables,
         "kpis": _goal_kpis,
         "decisions": _goal_decisions,
         "operations": _goal_operations,
@@ -815,6 +1134,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "repositories": _person_repositories,
         "services": _person_services,
         "workflows": _person_workflows,
+        "databases": _person_databases,
+        "tables": _person_tables,
         "goals": _person_goals,
         "operations": _person_operations,
         "heartbeats": _person_heartbeats,
@@ -826,6 +1147,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "repositories": _dept_repositories,
         "services": _dept_services,
         "workflows": _dept_workflows,
+        "databases": _dept_databases,
+        "tables": _dept_tables,
         "goals": _dept_goals,
         "operations": _dept_operations,
         "sops": _dept_sops,
@@ -836,6 +1159,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "repositories": _cap_repositories,
         "services": _cap_services,
         "workflows": _cap_workflows,
+        "databases": _cap_databases,
+        "tables": _cap_tables,
         "sops": _cap_sops,
         "goals": _cap_goals,
         "operations": _cap_operations,
@@ -848,6 +1173,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "people": _op_people,
         "sops": _op_sops,
         "workflows": _op_workflows,
+        "databases": _op_databases,
+        "tables": _op_tables,
         "heartbeats": _op_heartbeats,
         "notifications": _op_notifications,
     },
@@ -874,6 +1201,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "goals": _repo_goals,
         "services": _repo_services,
         "workflows": _repo_workflows,
+        "databases": _repo_databases,
+        "tables": _repo_tables,
     },
     "service": {
         "repositories": _service_repositories,
@@ -883,6 +1212,8 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "goals": _service_goals,
         "operations": _service_operations,
         "workflows": _service_workflows,
+        "databases": _service_databases,
+        "tables": _service_tables,
         "notifications": _service_notifications,
     },
     "workflow": {
@@ -893,14 +1224,39 @@ _EDGES: dict[str, dict[str, Callable]] = {
         "people": _workflow_people,
         "departments": _workflow_departments,
         "goals": _workflow_goals,
+        "databases": _workflow_databases,
+        "tables": _workflow_tables,
         "notifications": _workflow_notifications,
+    },
+    "database": {
+        "tables": _database_tables,
+        "capabilities": _database_capabilities,
+        "workflows": _database_workflows,
+        "repositories": _database_repositories,
+        "services": _database_services,
+        "people": _database_people,
+        "departments": _database_departments,
+        "goals": _database_goals,
+        "notifications": _database_notifications,
+    },
+    "table": {
+        "databases": _table_databases,
+        "capabilities": _table_capabilities,
+        "workflows": _table_workflows,
+        "repositories": _table_repositories,
+        "services": _table_services,
+        "operations": _table_operations,
+        "people": _table_people,
+        "departments": _table_departments,
+        "goals": _table_goals,
+        "notifications": _table_notifications,
     },
 }
 
 ALL_RELATION_KEYS = frozenset({
     "goals", "people", "departments", "capabilities",
-    "repositories", "services", "workflows", "operations", "decisions",
-    "kpis", "sops", "heartbeats", "notifications",
+    "repositories", "services", "workflows", "databases", "tables",
+    "operations", "decisions", "kpis", "sops", "heartbeats", "notifications",
 })
 
 SUPPORTED_TYPES = frozenset(_EDGES.keys())
@@ -1027,4 +1383,8 @@ class ContextGraph:
             repo_index={r.id: r for r in data.repositories},
             service_index={s.id: s for s in data.services},
             workflow_index={w.id: w for w in data.workflows},
+            databases=data.databases,
+            database_index={db.id: db for db in data.databases},
+            tables=data.tables,
+            table_index={t.id: t for t in data.tables},
         )

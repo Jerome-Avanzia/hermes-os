@@ -61,6 +61,8 @@ from hermes.runtime.host_provider import HostProvider
 from hermes.runtime.infrastructure_runtime import InfrastructureRuntime
 from hermes.runtime.n8n_provider import N8nProvider
 from hermes.runtime.n8n_runtime import N8nRuntime
+from hermes.runtime.nocodb_provider import NocodbProvider
+from hermes.runtime.nocodb_runtime import NocodbRuntime
 from hermes.runtime.traefik_provider import TraefikProvider
 
 logger = logging.getLogger(__name__)
@@ -122,6 +124,7 @@ class HermesService:
         self._github_runtime: GitHubRuntime | None = None
         self._infrastructure_runtime: InfrastructureRuntime | None = None
         self._n8n_runtime: N8nRuntime | None = None
+        self._nocodb_runtime: NocodbRuntime | None = None
 
     # -- Workspace validation --------------------------------------------------
 
@@ -1364,6 +1367,95 @@ class HermesService:
             "updated_at": w.updated_at,
         }
 
+    # -- NocoDB Runtime (Sprint 44) -----------------------------------------------
+
+    def _get_nocodb_runtime(self) -> NocodbRuntime:
+        """Lazily build the NocodbRuntime from config."""
+        if self._nocodb_runtime is None:
+            provider = NocodbProvider(
+                api_url=config.nocodb_url(),
+                api_token=config.nocodb_token(),
+            )
+            self._nocodb_runtime = NocodbRuntime(provider)
+        return self._nocodb_runtime
+
+    def nocodb_health(self) -> dict:
+        """Return NocoDB integration health status."""
+        runtime = self._get_nocodb_runtime()
+        h = runtime.health()
+        return {
+            "configured": h.configured,
+            "authenticated": h.authenticated,
+            "reachable": h.reachable,
+            "database_count": h.database_count,
+            "table_count": h.table_count,
+            "record_count": h.record_count,
+            "last_sync": h.last_sync,
+            "refresh_duration_ms": h.refresh_duration_ms,
+        }
+
+    def list_databases(self) -> list[dict]:
+        """Return all databases as serialized dicts."""
+        runtime = self._get_nocodb_runtime()
+        databases = runtime.list_databases()
+        return [self._serialize_database(db) for db in databases]
+
+    def get_database(self, database_id: str) -> dict | None:
+        """Return a single database by Hermes ID with tables, or None."""
+        runtime = self._get_nocodb_runtime()
+        db = runtime.get_database(database_id)
+        if db is None:
+            return None
+        result = self._serialize_database(db)
+        # Include tables when fetching a single database
+        tables = runtime.list_tables_for_database(db)
+        result["tables"] = [self._serialize_table(t) for t in tables]
+        return result
+
+    def list_tables(self) -> list[dict]:
+        """Return all tables across all databases as serialized dicts."""
+        runtime = self._get_nocodb_runtime()
+        tables = runtime.list_tables()
+        return [self._serialize_table(t) for t in tables]
+
+    def get_table(self, table_id: str) -> dict | None:
+        """Return a single table by Hermes ID, or None."""
+        runtime = self._get_nocodb_runtime()
+        tbl = runtime.get_table(table_id)
+        if tbl is None:
+            return None
+        return self._serialize_table(tbl)
+
+    @staticmethod
+    def _serialize_database(db) -> dict:
+        return {
+            "id": db.id,
+            "name": db.name,
+            "provider_id": db.provider_id,
+            "provider": db.provider,
+            "table_count": db.table_count,
+            "record_count": db.record_count,
+            "health_state": db.health_state,
+        }
+
+    @staticmethod
+    def _serialize_table(t) -> dict:
+        return {
+            "id": t.id,
+            "name": t.name,
+            "provider_id": t.provider_id,
+            "database_id": t.database_id,
+            "record_count": t.record_count,
+            "column_count": t.column_count,
+            "columns": [
+                {"name": c.name, "type": c.type, "nullable": c.nullable, "primary": c.primary}
+                for c in t.columns
+            ],
+            "primary_key": t.primary_key,
+            "last_updated": t.last_updated,
+            "attention_state": t.attention_state,
+        }
+
     # -- Context Graph (Sprint 40) ---------------------------------------------
 
     def _get_context_graph(self) -> ContextGraph:
@@ -1416,6 +1508,11 @@ class HermesService:
         n8n_runtime = self._get_n8n_runtime()
         workflows = n8n_runtime.list_workflows() if n8n_runtime.configured else []
 
+        # Fetch databases and tables for context graph (Sprint 44)
+        nocodb_runtime = self._get_nocodb_runtime()
+        databases = nocodb_runtime.list_databases() if nocodb_runtime.configured else []
+        tables = nocodb_runtime.list_tables() if nocodb_runtime.configured else []
+
         data = GraphData(
             workspace_id=workspace_id,
             operations=ops,
@@ -1426,6 +1523,8 @@ class HermesService:
             repositories=repos,
             services=services,
             workflows=workflows,
+            databases=databases,
+            tables=tables,
         )
 
         return self._get_context_graph().resolve(object_type, object_id, data)
@@ -1637,6 +1736,20 @@ class HermesService:
             except Exception:
                 pass
         result["automation"] = auto_summary
+
+        # NocoDB / Data (Sprint 44)
+        nocodb_runtime = self._get_nocodb_runtime()
+        data_summary: dict = {"configured": False, "name": "Data", "total_databases": 0, "total_tables": 0, "total_records": 0}
+        if nocodb_runtime.configured:
+            try:
+                databases = nocodb_runtime.list_databases()
+                data_summary["configured"] = True
+                data_summary["total_databases"] = len(databases)
+                data_summary["total_tables"] = sum(db.table_count for db in databases)
+                data_summary["total_records"] = sum(db.record_count for db in databases)
+            except Exception:
+                pass
+        result["data"] = data_summary
 
         return result
 

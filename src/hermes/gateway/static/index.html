@@ -1176,6 +1176,7 @@
       <div class="nav-item" data-view="operations">Operations</div>
       <div class="nav-item" data-view="infrastructure">Infrastructure</div>
       <div class="nav-item" data-view="automation">Automation</div>
+      <div class="nav-item" data-view="data">Data</div>
       <div class="nav-item" data-view="journal">Journal</div>
       <div class="nav-item" data-view="jobs">Jobs</div>
     </div>
@@ -1280,6 +1281,10 @@
         <div id="automation-list" class="list-view"></div>
         <div id="automation-detail" class="detail-view" style="display:none"></div>
       </div>
+      <div id="view-data" class="view">
+        <div id="data-list" class="list-view"></div>
+        <div id="data-detail" class="detail-view" style="display:none"></div>
+      </div>
       <div id="view-jobs" class="view">
         <div id="jobs-list" class="list-view"></div>
         <div id="jobs-detail" class="detail-view" style="display:none"></div>
@@ -1379,6 +1384,7 @@
     if (name === "repositories") loadRepositories();
     if (name === "infrastructure") loadInfrastructure();
     if (name === "automation") loadAutomation();
+    if (name === "data") loadData();
     if (name === "notifications") loadNotifications();
   }
 
@@ -1523,6 +1529,16 @@
       html += '</div>';
     }
 
+    var dataRt = runtimeHealth.data || {};
+    if (dataRt.configured) {
+      html += '<div class="dash-card" id="home-data-card">';
+      html += '<div class="widget-title">Data</div>';
+      html += '<div class="widget-value" style="color:#6ee7b7">' + dataRt.total_databases + '</div>';
+      html += '<div class="widget-sub">databases</div>';
+      html += '<div class="widget-sub">' + dataRt.total_tables + ' tables &middot; ' + dataRt.total_records + ' records</div>';
+      html += '</div>';
+    }
+
     html += '</div>';
 
     // ── What changed? ─────────────────────────────────
@@ -1611,6 +1627,9 @@
 
     var autoCard = document.getElementById("home-auto-card");
     if (autoCard) autoCard.addEventListener("click", function () { switchView("automation"); });
+
+    var dataCard = document.getElementById("home-data-card");
+    if (dataCard) dataCard.addEventListener("click", function () { switchView("data"); });
   }
 
   // ── Executive Brief ───────────────────────────────
@@ -2199,6 +2218,8 @@
       { key: "repositories", label: "Related Repositories", idField: "id", nameField: "name", type: "repositories", navFn: "loadRepositoryDetail" },
       { key: "services", label: "Related Services", idField: "id", nameField: "name", type: "services", navFn: "loadServiceDetail" },
       { key: "workflows", label: "Related Workflows", idField: "id", nameField: "name", type: "workflows", navFn: "loadWorkflowDetail" },
+      { key: "databases", label: "Related Databases", idField: "id", nameField: "name", type: "databases", navFn: "loadDatabaseDetail" },
+      { key: "tables", label: "Related Tables", idField: "id", nameField: "name", type: "tables", navFn: "loadTableDetail" },
       { key: "sops", label: "Related SOPs", idField: "id", nameField: "title", type: "sops", navFn: null },
       { key: "heartbeats", label: "Related Heartbeats", idField: "id", nameField: "summary", type: "heartbeats", navFn: null },
       { key: "notifications", label: "Related Notifications", idField: "id", nameField: "title", type: "notifications", navFn: null },
@@ -2249,6 +2270,8 @@
         else if (nav === "repositories") { switchView("repositories"); loadRepositoryDetail(id); }
         else if (nav === "services") { switchView("infrastructure"); loadServiceDetail(id); }
         else if (nav === "workflows") { switchView("automation"); loadWorkflowDetail(id); }
+        else if (nav === "databases") { switchView("data"); loadDatabaseDetail(id); }
+        else if (nav === "tables") { switchView("data"); loadTableDetail(id); }
       });
     });
   }
@@ -3198,6 +3221,214 @@
     if (activeWorkspaceId) {
       var ctxEl = document.getElementById("workflow-context");
       loadContext("workflow", wf.id, ctxEl);
+    }
+  }
+
+  // ── Data ───────────────────────────────────────────
+
+  var dataListEl = document.getElementById("data-list");
+  var dataDetailEl = document.getElementById("data-detail");
+
+  function loadData() {
+    dataListEl.style.display = "";
+    dataDetailEl.style.display = "none";
+    dataListEl.innerHTML = '<div class="list-empty">Loading databases...</div>';
+
+    fetch(GATEWAY + "/v1/databases")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (databases) { renderDataList(databases); })
+      .catch(function () { dataListEl.innerHTML = '<div class="list-empty">Cannot load databases.</div>'; });
+  }
+
+  function dataHealthColor(h) {
+    if (h === "healthy") return "var(--accent)";
+    if (h === "degraded") return "#fcd34d";
+    return "var(--text-dim)";
+  }
+
+  function tableAttentionBadge(state) {
+    if (state === "critical") return '<span class="status-badge" style="background:#991b1b;color:#fca5a5;font-size:10px">critical</span>';
+    if (state === "warning") return '<span class="status-badge" style="background:#78350f;color:#fcd34d;font-size:10px">warning</span>';
+    return "";
+  }
+
+  function renderDataList(databases) {
+    if (databases.length === 0) {
+      dataListEl.innerHTML = '<div class="list-empty">No databases discovered. Configure HERMES_NOCODB_URL and HERMES_NOCODB_TOKEN.</div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < databases.length; i++) {
+      var db = databases[i];
+      html += '<div class="list-item" data-database-id="' + esc(db.id) + '" style="cursor:pointer">';
+      html += '  <div class="list-item-main">';
+      html += '    <div class="list-item-title">' + esc(db.name) + '</div>';
+      html += '    <div class="list-item-meta">';
+      html += '      <span style="color:' + dataHealthColor(db.health_state) + '">' + esc(db.health_state) + '</span>';
+      html += '      &middot; ' + db.table_count + ' tables';
+      html += '      &middot; ' + db.record_count + ' records';
+      html += '      &middot; ' + esc(db.provider);
+      html += '    </div>';
+      html += '  </div>';
+      html += '  <div>';
+      html += '  <span class="status-badge ' + (db.health_state === "healthy" ? "active" : "completed") + '">' + esc(db.health_state) + '</span>';
+      html += '  </div>';
+      html += '</div>';
+    }
+    dataListEl.innerHTML = html;
+    dataListEl.querySelectorAll("[data-database-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadDatabaseDetail(el.dataset.databaseId); });
+    });
+  }
+
+  function loadDatabaseDetail(databaseId) {
+    dataListEl.style.display = "none";
+    dataDetailEl.style.display = "";
+    dataDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(GATEWAY + "/v1/databases/" + encodeURIComponent(databaseId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (db) {
+        if (!db) { dataDetailEl.innerHTML = '<div class="list-empty">Database not found.</div>'; return; }
+        renderDatabaseDetail(db);
+      })
+      .catch(function () { dataDetailEl.innerHTML = '<div class="list-empty">Cannot load database.</div>'; });
+  }
+
+  function renderDatabaseDetail(db) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(db.name) + '</div>';
+    html += '  <div class="detail-meta">';
+    html += '    <span style="color:' + dataHealthColor(db.health_state) + '">' + esc(db.health_state) + '</span>';
+    html += '    &middot; ' + esc(db.provider);
+    html += '    &middot; ' + db.table_count + ' tables';
+    html += '    &middot; ' + db.record_count + ' records';
+    html += '  </div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="data-back">Back</button>';
+    html += '</div>';
+
+    // Metadata
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Metadata</div>';
+    html += '  <div class="list-item-meta">Hermes ID: ' + esc(db.id) + '</div>';
+    html += '  <div class="list-item-meta">Provider ID: ' + esc(db.provider_id || "—") + '</div>';
+    html += '  <div class="list-item-meta">Provider: ' + esc(db.provider) + '</div>';
+    html += '</div>';
+
+    // Tables
+    var tables = db.tables || [];
+    if (tables.length > 0) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Tables (' + tables.length + ')</div>';
+      for (var i = 0; i < tables.length; i++) {
+        var t = tables[i];
+        html += '<div class="list-item" data-table-id="' + esc(t.id) + '" style="cursor:pointer;padding:6px 8px">';
+        html += '  <div class="list-item-main">';
+        html += '    <div class="list-item-title" style="font-size:12px">' + esc(t.name) + '</div>';
+        html += '    <div class="list-item-meta">' + t.record_count + ' records &middot; ' + t.column_count + ' columns</div>';
+        html += '  </div>';
+        html += '  <div>' + tableAttentionBadge(t.attention_state) + '</div>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Context panel
+    if (activeWorkspaceId) {
+      html += '<div id="database-context" style="margin-top:16px"></div>';
+    }
+
+    dataDetailEl.innerHTML = html;
+    document.getElementById("data-back").addEventListener("click", function () { loadData(); });
+
+    // Table click-through
+    dataDetailEl.querySelectorAll("[data-table-id]").forEach(function (el) {
+      el.addEventListener("click", function () { loadTableDetail(el.dataset.tableId); });
+    });
+
+    // Load context
+    if (activeWorkspaceId) {
+      var ctxEl = document.getElementById("database-context");
+      loadContext("database", db.id, ctxEl);
+    }
+  }
+
+  function loadTableDetail(tableId) {
+    dataListEl.style.display = "none";
+    dataDetailEl.style.display = "";
+    dataDetailEl.innerHTML = '<div class="list-empty">Loading...</div>';
+
+    fetch(GATEWAY + "/v1/tables/" + encodeURIComponent(tableId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (tbl) {
+        if (!tbl) { dataDetailEl.innerHTML = '<div class="list-empty">Table not found.</div>'; return; }
+        renderTableDetail(tbl);
+      })
+      .catch(function () { dataDetailEl.innerHTML = '<div class="list-empty">Cannot load table.</div>'; });
+  }
+
+  function renderTableDetail(tbl) {
+    var html = '<div class="detail-header">';
+    html += '  <div class="detail-title">' + esc(tbl.name) + '</div>';
+    html += '  <div class="detail-meta">';
+    html += '    ' + tbl.record_count + ' records';
+    html += '    &middot; ' + tbl.column_count + ' columns';
+    if (tbl.primary_key) html += ' &middot; PK: ' + esc(tbl.primary_key);
+    if (tbl.attention_state !== "ok") html += ' &middot; ' + tableAttentionBadge(tbl.attention_state);
+    html += '  </div>';
+    html += '</div>';
+
+    html += '<div class="detail-actions">';
+    html += '  <button class="detail-btn" id="table-back">Back</button>';
+    html += '</div>';
+
+    // Metadata
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title">Metadata</div>';
+    html += '  <div class="list-item-meta">Hermes ID: ' + esc(tbl.id) + '</div>';
+    html += '  <div class="list-item-meta">Provider ID: ' + esc(tbl.provider_id || "—") + '</div>';
+    html += '  <div class="list-item-meta">Database: ' + esc(tbl.database_id) + '</div>';
+    if (tbl.last_updated) html += '  <div class="list-item-meta">Last updated: ' + esc(tbl.last_updated) + '</div>';
+    html += '</div>';
+
+    // Columns
+    var cols = tbl.columns || [];
+    if (cols.length > 0) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Columns (' + cols.length + ')</div>';
+      for (var i = 0; i < cols.length; i++) {
+        var col = cols[i];
+        html += '<div class="list-item" style="padding:4px 8px;font-size:12px">';
+        html += '  <div class="list-item-main">';
+        html += '    <div class="list-item-title" style="font-size:12px">' + esc(col.name);
+        if (col.primary) html += ' <span style="color:var(--accent);font-size:10px">PK</span>';
+        html += '</div>';
+        html += '    <div class="list-item-meta">' + esc(col.type || "unknown");
+        if (!col.nullable) html += ' &middot; NOT NULL';
+        html += '</div>';
+        html += '  </div>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Context panel
+    if (activeWorkspaceId) {
+      html += '<div id="table-context" style="margin-top:16px"></div>';
+    }
+
+    dataDetailEl.innerHTML = html;
+    document.getElementById("table-back").addEventListener("click", function () {
+      loadDatabaseDetail(tbl.database_id);
+    });
+
+    // Load context
+    if (activeWorkspaceId) {
+      var ctxEl = document.getElementById("table-context");
+      loadContext("table", tbl.id, ctxEl);
     }
   }
 

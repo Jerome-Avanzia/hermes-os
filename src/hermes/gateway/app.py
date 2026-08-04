@@ -780,6 +780,45 @@ async def n8n_health() -> dict:
     return _hermes_service.n8n_health()
 
 
+# -- NocoDB Runtime (Sprint 44) ------------------------------------------------
+
+
+@app.get("/v1/databases")
+async def list_databases() -> list[dict]:
+    """List all databases."""
+    return _hermes_service.list_databases()
+
+
+@app.get("/v1/databases/{database_id}")
+async def get_database(database_id: str) -> JSONResponse:
+    """Get a single database by Hermes ID."""
+    result = _hermes_service.get_database(database_id)
+    if result is None:
+        return JSONResponse({"error": "Database not found"}, status_code=404)
+    return JSONResponse(result)
+
+
+@app.get("/v1/tables")
+async def list_tables() -> list[dict]:
+    """List all tables across all databases."""
+    return _hermes_service.list_tables()
+
+
+@app.get("/v1/tables/{table_id:path}")
+async def get_table(table_id: str) -> JSONResponse:
+    """Get a single table by Hermes ID."""
+    result = _hermes_service.get_table(table_id)
+    if result is None:
+        return JSONResponse({"error": "Table not found"}, status_code=404)
+    return JSONResponse(result)
+
+
+@app.get("/health/nocodb")
+async def nocodb_health() -> dict:
+    """NocoDB runtime health check (Sprint 44)."""
+    return _hermes_service.nocodb_health()
+
+
 # -- Static UI (must be mounted last so API routes take precedence) ---------
 
 _static_dir = Path(__file__).parent / "static"

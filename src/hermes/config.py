@@ -61,3 +61,11 @@ def n8n_url() -> str:
 
 def n8n_api_key() -> str:
     return os.environ.get("HERMES_N8N_API_KEY", "")
+
+
+def nocodb_url() -> str:
+    return os.environ.get("HERMES_NOCODB_URL", "")
+
+
+def nocodb_token() -> str:
+    return os.environ.get("HERMES_NOCODB_TOKEN", "")
