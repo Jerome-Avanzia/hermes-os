@@ -3,6 +3,7 @@ import logging
 from hermes.kernel.capability_engine import CapabilityEngine
 from hermes.kernel.context_manager import ContextManager
 from hermes.kernel.knowledge_engine import KnowledgeEngine
+from hermes.kernel.model_router import ModelRouter
 from hermes.kernel.profile_loader import ProfileLoader
 from hermes.kernel.prompt_compression import PromptCompression
 from hermes.kernel.project_resolver import ProjectResolver
@@ -10,6 +11,11 @@ from hermes.kernel.workspace_engine import WorkspaceEngine
 from hermes.models import Context, KnowledgeContext, KnowledgeDocument, Project, Task
 from hermes.models.context_package import ContextPackage
 from hermes.models.prompt_package import PromptPackage
+from hermes.models.routing_decision import (
+    ModelEntry,
+    RoutingDecision,
+    RoutingPolicy,
+)
 
 logger = logging.getLogger(__name__)
 
