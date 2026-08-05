@@ -59,6 +59,17 @@ from hermes.models.knowledge_document import KnowledgeDocument
 from hermes.models.lesson import Lesson
 from hermes.models.notification import Notification
 from hermes.models.loaded_skill import LoadedSkill
+from hermes.models.skill import (
+    ExecutionDeclaration,
+    InstalledSkill,
+    SkillCapability,
+    SkillCompatibility,
+    SkillDependency,
+    SkillManifest,
+    SkillMetadata,
+    SkillStatus,
+    SkillVersion,
+)
 from hermes.models.operation import InvalidTransitionError, Operation, transition_operation
 from hermes.models.operation_progress import OperationProgress
 from hermes.models.opportunity import Opportunity
@@ -113,7 +124,16 @@ __all__ = [
     "LatencyTier",
     "Lesson",
     "Locality",
+    "ExecutionDeclaration",
+    "InstalledSkill",
     "LoadedSkill",
+    "SkillCapability",
+    "SkillCompatibility",
+    "SkillDependency",
+    "SkillManifest",
+    "SkillMetadata",
+    "SkillStatus",
+    "SkillVersion",
     "ModelEntry",
     "Notification",
     "OmissionReason",
