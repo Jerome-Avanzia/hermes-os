@@ -30,6 +30,19 @@ from hermes.models.routing_decision import (
     RoutingReason,
     SelectedModel,
 )
+from hermes.models.founder_workflow import (
+    ApprovalDecision,
+    ApprovalStatus,
+    FounderWorkflow,
+    StageTransition,
+    TransitionCondition,
+    TransitionTarget,
+    WorkflowAction,
+    WorkflowAudit,
+    WorkflowIntent,
+    WorkflowReason,
+    WorkflowStage,
+)
 from hermes.models.decision import Decision
 from hermes.models.diagnostics_report import DiagnosticsReport
 from hermes.models.execution_plan import ExecutionPlan
@@ -68,6 +81,8 @@ from hermes.models.workspace_file import WorkspaceFile
 from hermes.models.workspace_snapshot import WorkspaceSnapshot
 
 __all__ = [
+    "ApprovalDecision",
+    "ApprovalStatus",
     "Bottleneck",
     "Business",
     "Capability",
@@ -86,6 +101,7 @@ __all__ = [
     "ExecutiveBrief",
     "Experiment",
     "FileContent",
+    "FounderWorkflow",
     "Goal",
     "Heartbeat",
     "InvalidTransitionError",
@@ -121,13 +137,21 @@ __all__ = [
     "SOP",
     "SOPStep",
     "SelectedModel",
+    "StageTransition",
     "StaleOperation",
     "Strategy",
     "Task",
     "TokenBudget",
+    "TransitionCondition",
     "TransitionRecord",
+    "TransitionTarget",
     "TruncationReport",
     "Workspace",
+    "WorkflowAction",
+    "WorkflowAudit",
+    "WorkflowIntent",
+    "WorkflowReason",
+    "WorkflowStage",
     "WorkspaceContext",
     "WorkspaceFile",
     "WorkspaceSnapshot",
