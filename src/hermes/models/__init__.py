@@ -1,3 +1,13 @@
+from hermes.models.execution_gateway import (
+    AdapterRegistration,
+    DispatchDecision,
+    ExecutionAdapter,
+    ExecutionRequest,
+    ExecutionResult,
+    ExecutionStatus,
+    GatewayAudit,
+    GatewayValidationResult,
+)
 from hermes.models.conductor import (
     ConductorAudit,
     ConductorDecision,
@@ -144,6 +154,14 @@ from hermes.models.workspace_file import WorkspaceFile
 from hermes.models.workspace_snapshot import WorkspaceSnapshot
 
 __all__ = [
+    "AdapterRegistration",
+    "DispatchDecision",
+    "ExecutionAdapter",
+    "ExecutionRequest",
+    "ExecutionResult",
+    "ExecutionStatus",
+    "GatewayAudit",
+    "GatewayValidationResult",
     "ConductorAudit",
     "ConductorDecision",
     "ConductorRequest",
