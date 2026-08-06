@@ -70,6 +70,16 @@ from hermes.models.skill import (
     SkillStatus,
     SkillVersion,
 )
+from hermes.models.skill_registry import (
+    CapabilityEntry,
+    CapabilityIndex,
+    DependencyEdge,
+    DependencyGraph,
+    RegistrationResult,
+    RegistrationStatus,
+    RegistryEntry,
+    RegistryStatistics,
+)
 from hermes.models.operation import InvalidTransitionError, Operation, transition_operation
 from hermes.models.operation_progress import OperationProgress
 from hermes.models.opportunity import Opportunity
@@ -126,7 +136,15 @@ __all__ = [
     "Locality",
     "ExecutionDeclaration",
     "InstalledSkill",
+    "CapabilityEntry",
+    "CapabilityIndex",
+    "DependencyEdge",
+    "DependencyGraph",
     "LoadedSkill",
+    "RegistrationResult",
+    "RegistrationStatus",
+    "RegistryEntry",
+    "RegistryStatistics",
     "SkillCapability",
     "SkillCompatibility",
     "SkillDependency",
