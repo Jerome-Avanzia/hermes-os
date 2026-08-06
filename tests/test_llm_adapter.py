@@ -590,10 +590,16 @@ class TestOllamaPayloadBuilding:
         roles = [m["role"] for m in payload["messages"]]
         assert "system" not in roles
 
-    def test_stream_is_false(self) -> None:
-        """Streaming disabled in payload regardless of config flag."""
+    def test_stream_reflects_request_flag(self) -> None:
+        """Sprint 66: payload stream flag reflects config.streaming."""
         config = _make_config(streaming=True)
         req = self._make_llm_request(streaming=True)
+        payload = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
+        assert payload["stream"] is True
+
+    def test_stream_false_when_not_requested(self) -> None:
+        config = _make_config(streaming=False)
+        req = self._make_llm_request(streaming=False)
         payload = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
         assert payload["stream"] is False
 
@@ -1306,16 +1312,16 @@ class TestStreamingAndStructuredOutput:
         assert result.success is True
         assert result.llm_response.structured_output_used is True
 
-    def test_streaming_metadata_in_response_is_false_sprint61(self) -> None:
-        """Sprint 61: streaming is not invoked; streaming_used is always False."""
+    def test_streaming_used_reflects_request_flag_sprint66(self) -> None:
+        """Sprint 66: streaming_used reflects whether streaming was requested."""
         raw = _make_ollama_raw_response()
         adapter = _make_ollama_adapter(raw_response=raw)
         request = _make_gateway_request()
-        config = _make_config(streaming=True)  # requested but not executed
+        config = _make_config(streaming=True)
 
         result = adapter.execute(request, config)
 
-        assert result.llm_response.streaming_used is False
+        assert result.llm_response.streaming_used is True
 
     def test_non_streaming_config_gives_streaming_false(self) -> None:
         raw = _make_ollama_raw_response()
