@@ -25,6 +25,14 @@ from hermes.models.filesystem_adapter import (
     FilesystemTarget,
     FilesystemValidationResult,
 )
+from hermes.models.git_adapter import (
+    GitExecutionResult,
+    GitOperation,
+    GitRepository,
+    GitRequest,
+    GitResult,
+    GitValidationResult,
+)
 from hermes.models.conductor import (
     ConductorAudit,
     ConductorDecision,
@@ -218,6 +226,12 @@ __all__ = [
     "FilesystemResult",
     "FilesystemTarget",
     "FilesystemValidationResult",
+    "GitExecutionResult",
+    "GitOperation",
+    "GitRepository",
+    "GitRequest",
+    "GitResult",
+    "GitValidationResult",
     "FounderWorkflow",
     "Goal",
     "Heartbeat",
