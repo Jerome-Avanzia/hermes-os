@@ -52,7 +52,18 @@ from hermes.models.execution_result import ExecutionResult
 from hermes.models.execution_step import ExecutionStep
 from hermes.models.file_content import FileContent
 from hermes.models.goal import Goal
-from hermes.models.job import Job
+from hermes.models.job import (
+    Job,
+    JobCapabilityRequirement,
+    JobDefinition,
+    JobDependency,
+    JobOperationReference,
+    JobPriority,
+    JobResult,
+    JobStatus,
+    JobValidationError,
+    JobValidationResult,
+)
 from hermes.models.kpi import KPI
 from hermes.models.knowledge_context import KnowledgeContext
 from hermes.models.knowledge_document import KnowledgeDocument
@@ -127,6 +138,15 @@ __all__ = [
     "Heartbeat",
     "InvalidTransitionError",
     "Job",
+    "JobCapabilityRequirement",
+    "JobDefinition",
+    "JobDependency",
+    "JobOperationReference",
+    "JobPriority",
+    "JobResult",
+    "JobStatus",
+    "JobValidationError",
+    "JobValidationResult",
     "KPI",
     "KnowledgeContext",
     "KnowledgeDocument",
