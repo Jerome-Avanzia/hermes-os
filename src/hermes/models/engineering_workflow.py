@@ -116,6 +116,10 @@ class WorkflowConfig:
     llm_max_tokens       → maximum completion tokens
     llm_timeout_seconds  → HTTP timeout for LLM calls
     commit_message       → git commit message for the generated code
+    write_mode           → filesystem action for the write step: "create_file" (default,
+                           fails if file exists) or "overwrite_file" (create or replace).
+                           Bootstrap Phase 1 only — set by implement.py based on whether
+                           the target file already exists.
 
     Immutable after construction.
     """
@@ -127,6 +131,7 @@ class WorkflowConfig:
     llm_max_tokens: int
     llm_timeout_seconds: int
     commit_message: str
+    write_mode: str = "create_file"  # "create_file" or "overwrite_file" — Bootstrap Phase 1
 
 
 # ── StepExecutionRecord ────────────────────────────────────────────────────────

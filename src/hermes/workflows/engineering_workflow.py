@@ -232,7 +232,7 @@ class EngineeringWorkflow:
             depends_on=[OperationDependency(operation_id=op_generate_id)],
             execution_ref=OperationExecutionReference(
                 adapter_id="filesystem",
-                action_id="create_file",
+                action_id=self._config.write_mode,
             ),
         )
 
@@ -330,7 +330,7 @@ class EngineeringWorkflow:
                 ),
             }
 
-        if ref.adapter_id == "filesystem" and ref.action_id == "create_file":
+        if ref.adapter_id == "filesystem" and ref.action_id in ("create_file", "overwrite_file"):
             return {
                 "path": goal.output_path,
                 "content": context.get("generated_code", ""),

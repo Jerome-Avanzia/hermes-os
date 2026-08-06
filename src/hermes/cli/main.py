@@ -4,6 +4,7 @@ from hermes.cli.commands import (
     context,
     execute,
     generate,
+    implement,
     inspect,
     knowledge,
     plan,
@@ -24,6 +25,7 @@ app.command(name="skills")(skills.skills)
 app.command(name="execute")(execute.execute)
 app.command(name="read")(read.read)
 app.command(name="generate")(generate.generate)
+app.command(name="implement")(implement.implement)
 
 
 def main() -> None:
