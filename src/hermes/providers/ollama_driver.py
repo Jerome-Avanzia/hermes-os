@@ -39,7 +39,7 @@ Registering with the LLM Adapter::
 Environment variables (read by read_ollama_env() — infrastructure only):
     OLLAMA_MODE      → "local" or "cloud" (case-insensitive; default: "local")
     OLLAMA_LOCAL_URL → local endpoint     (default: http://localhost:11434)
-    OLLAMA_CLOUD_URL → cloud endpoint     (default: https://ollama.ai)
+    OLLAMA_CLOUD_URL → cloud endpoint     (default: https://ollama.com)
     OLLAMA_API_KEY   → Bearer token for authentication (default: "")
 
     Model selection belongs to the ModelRouter — not these environment variables.
@@ -79,7 +79,7 @@ logger = logging.getLogger(__name__)
 # ── Default endpoints ──────────────────────────────────────────────────────────
 
 _DEFAULT_LOCAL_URL: str = "http://localhost:11434"
-_DEFAULT_CLOUD_URL: str = "https://ollama.ai"
+_DEFAULT_CLOUD_URL: str = "https://ollama.com"
 
 
 # ── OllamaMode ─────────────────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ class OllamaMode(enum.Enum):
             api_key is empty for unauthenticated local instances; may be
             non-empty if the local instance has authentication enabled.
 
-    CLOUD → targets Ollama Cloud (https://ollama.ai by default)
+    CLOUD → targets Ollama Cloud (https://ollama.com by default)
             Structured output not supported (format:"json" is suppressed).
             Vision not supported. Tool calling supported.
             api_key is expected; absence will result in a 401 from the API.
@@ -136,7 +136,7 @@ def read_ollama_env() -> OllamaEnvConfig:
     Environment variables (Sprint 66):
         OLLAMA_MODE      → "local" or "cloud" (case-insensitive; default: "local")
         OLLAMA_LOCAL_URL → base URL for LOCAL mode (default: http://localhost:11434)
-        OLLAMA_CLOUD_URL → base URL for CLOUD mode (default: https://ollama.ai)
+        OLLAMA_CLOUD_URL → base URL for CLOUD mode (default: https://ollama.com)
         OLLAMA_API_KEY   → Bearer token for Authorization header (default: "")
 
     Returns:
@@ -323,7 +323,7 @@ def _call_ollama_streaming(
     content_parts: list[str] = []
     final_chunk: dict = {}
 
-    with httpx.Client(timeout=float(timeout)) as client:
+    with httpx.Client(timeout=float(timeout), follow_redirects=True) as client:
         with client.stream("POST", endpoint, json=payload, headers=headers) as response:
             response.raise_for_status()
             for line in response.iter_lines():
@@ -385,7 +385,7 @@ def _call_ollama(endpoint: str, payload: dict, timeout: int, api_key: str) -> di
         "yes" if api_key else "no",
     )
 
-    with httpx.Client(timeout=float(timeout)) as client:
+    with httpx.Client(timeout=float(timeout), follow_redirects=True) as client:
         response = client.post(endpoint, json=payload, headers=headers)
         response.raise_for_status()
         return response.json()

@@ -687,7 +687,7 @@ class TestCallOllama:
         mock_client = self._mock_client(raw)
         with patch("hermes.providers.ollama_driver.httpx.Client", return_value=mock_client) as MockClient:
             _call_ollama("http://localhost:11434/api/chat", {"model": "x"}, 60, "")
-        MockClient.assert_called_once_with(timeout=60.0)
+        MockClient.assert_called_once_with(timeout=60.0, follow_redirects=True)
 
     def test_raises_on_http_error(self):
         mock_client = self._mock_client({}, status=500)
@@ -1123,7 +1123,7 @@ class TestTimeoutHandling:
         ) as MockClient:
             _call_ollama("http://x/api/chat", {"stream": False}, 45, "")
 
-        MockClient.assert_called_once_with(timeout=45.0)
+        MockClient.assert_called_once_with(timeout=45.0, follow_redirects=True)
 
     def test_cloud_driver_uses_longer_timeout_when_configured(self):
         """Caller can pass any timeout; CLOUD mode typically uses 120s."""
