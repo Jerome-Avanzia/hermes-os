@@ -47,6 +47,7 @@ class FilesystemOperation(enum.Enum):
 
     CREATE_FILE      → create a new file; fail if the file already exists
     OVERWRITE_FILE   → write content to a file; create if not exists; replace if exists
+    MODIFY_FILE      → write content to an existing file; fail if the file does not exist
     APPEND_FILE      → append content to an existing file; fail if not exists
     READ_FILE        → read and return file contents as text
     DELETE_FILE      → delete a file; fail if not exists
@@ -57,6 +58,7 @@ class FilesystemOperation(enum.Enum):
 
     CREATE_FILE = "create_file"
     OVERWRITE_FILE = "overwrite_file"
+    MODIFY_FILE = "modify_file"
     APPEND_FILE = "append_file"
     READ_FILE = "read_file"
     DELETE_FILE = "delete_file"

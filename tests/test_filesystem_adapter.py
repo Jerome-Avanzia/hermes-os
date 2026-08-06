@@ -146,11 +146,12 @@ class TestTypedContracts:
         ]:
             assert hasattr(cls, "__slots__"), f"{cls.__name__} must use slots=True"
 
-    def test_all_eight_operations_declared(self) -> None:
+    def test_all_nine_operations_declared(self) -> None:
         values = {op.value for op in FilesystemOperation}
         assert values == {
-            "create_file", "overwrite_file", "append_file", "read_file",
-            "delete_file", "create_directory", "delete_directory", "exists",
+            "create_file", "overwrite_file", "modify_file", "append_file",
+            "read_file", "delete_file", "create_directory", "delete_directory",
+            "exists",
         }
 
 

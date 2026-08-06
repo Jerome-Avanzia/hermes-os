@@ -85,6 +85,7 @@ logger = logging.getLogger(__name__)
 _WRITE_OPERATIONS = frozenset({
     FilesystemOperation.CREATE_FILE,
     FilesystemOperation.OVERWRITE_FILE,
+    FilesystemOperation.MODIFY_FILE,
     FilesystemOperation.APPEND_FILE,
 })
 
@@ -92,6 +93,7 @@ _WRITE_OPERATIONS = frozenset({
 _FILE_OPERATIONS = frozenset({
     FilesystemOperation.CREATE_FILE,
     FilesystemOperation.OVERWRITE_FILE,
+    FilesystemOperation.MODIFY_FILE,
     FilesystemOperation.APPEND_FILE,
     FilesystemOperation.READ_FILE,
     FilesystemOperation.DELETE_FILE,
@@ -332,6 +334,26 @@ class FilesystemAdapter:
             metadata=(),
         )
 
+    def _modify_file(
+        self, resolved: Path, fs_request: FilesystemRequest
+    ) -> FilesystemResult:
+        """Write content to an existing file. Fails if the file does not exist."""
+        if not resolved.exists():
+            raise FileNotFoundError(
+                f"modify_file failed: file does not exist: {fs_request.path!r}"
+            )
+        encoded = fs_request.content.encode(fs_request.encoding)
+        resolved.write_bytes(encoded)
+        return FilesystemResult(
+            operation=FilesystemOperation.MODIFY_FILE,
+            path=fs_request.path,
+            content="",
+            exists=True,
+            bytes_written=len(encoded),
+            bytes_read=0,
+            metadata=(),
+        )
+
     def _append_file(
         self, resolved: Path, fs_request: FilesystemRequest
     ) -> FilesystemResult:
@@ -444,6 +466,7 @@ class FilesystemAdapter:
     _OPERATION_HANDLERS = {
         FilesystemOperation.CREATE_FILE: _create_file,
         FilesystemOperation.OVERWRITE_FILE: _overwrite_file,
+        FilesystemOperation.MODIFY_FILE: _modify_file,
         FilesystemOperation.APPEND_FILE: _append_file,
         FilesystemOperation.READ_FILE: _read_file,
         FilesystemOperation.DELETE_FILE: _delete_file,

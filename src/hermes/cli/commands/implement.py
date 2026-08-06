@@ -102,9 +102,9 @@ def implement(
         typer.echo(f"Error: failed to read Ollama configuration — {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    # ── 3. Select write mode: overwrite if file exists, create otherwise ───────
+    # ── 3. Select write mode: modify if file exists, create otherwise ──────────
     output_abs = workspace_root / output
-    write_mode = "overwrite_file" if output_abs.exists() else "create_file"
+    write_mode = "modify_file" if output_abs.exists() else "create_file"
 
     config = WorkflowConfig(
         llm_provider=LLMProvider.OLLAMA,

@@ -17,11 +17,25 @@ Every component used here already exists. The workflow's sole responsibility
 is composition: receiving a Founder Goal and orchestrating existing components
 to produce committed code.
 
-Execution sequence (invariant — never changes):
+Create mode (write_mode="create_file") — AT-1 path, 4 steps:
   1. LLM generates source code from the goal description
-  2. Filesystem writes the generated code to the output path
+  2. Filesystem creates the output file
   3. Git stages the output file
   4. Git commits the staged change
+
+Modify mode (write_mode="modify_file") — AT-2 path, 5 steps:
+  1. Filesystem reads the existing file content
+  2. (RepositoryManipulationPlan validation — deterministic gate, no LLM)
+  3. LLM generates the complete modified file (existing content in prompt)
+  4. Filesystem writes the modified file (fails if file missing)
+  5. Git stages the modified file
+  6. Git commits the staged change
+
+RepositoryManipulationPlan invariant (modify mode only):
+  Before any LLM token is consumed, the planned MODIFY_FILE operation is
+  validated against the live repository state. If the plan has conflicts
+  (e.g. target file no longer exists), the workflow terminates immediately
+  with success=False. No LLM call is made. No filesystem write occurs.
 
 Gateway invariant (enforced per step):
   gateway.dispatch() is called for every ExecutionRequest before any adapter
@@ -30,12 +44,6 @@ Gateway invariant (enforced per step):
 
 No adapter may bypass the Gateway. This is enforced structurally — the
 workflow calls gateway.dispatch() before every adapter call.
-
-Adding future adapters (Docker, HTTP, Database) to future workflow steps
-requires only:
-  1. Register the adapter with the Gateway (AdapterRegistration).
-  2. Add the workflow step with the appropriate OperationType.
-  No changes to the Gateway, JobEngine, OperationEngine, or existing adapters.
 
 Architecture invariants preserved:
   - The workflow never plans or routes — it orchestrates planning engines.
@@ -56,8 +64,14 @@ Sources of non-determinism introduced (explicit):
 Network calls introduced:
   - One LLM HTTP call (via LlmAdapter → ProviderDriver).
 
-Filesystem writes introduced:
+Filesystem writes introduced (create mode):
   - One file write (via FilesystemAdapter → create_file).
+  - One git add (via GitAdapter → _add).
+  - One git commit (via GitAdapter → _commit).
+
+Filesystem reads and writes introduced (modify mode):
+  - One file read (via FilesystemAdapter → read_file).
+  - One file write (via FilesystemAdapter → modify_file).
   - One git add (via GitAdapter → _add).
   - One git commit (via GitAdapter → _commit).
 """
@@ -72,6 +86,7 @@ from hermes.adapters.llm_adapter import LlmAdapter
 from hermes.kernel.execution_gateway import ExecutionGateway
 from hermes.kernel.job_engine import JobEngine
 from hermes.kernel.operation_engine import OperationEngine
+from hermes.kernel.repository_manipulation import RepositoryManipulation
 from hermes.models.engineering_workflow import (
     FounderGoal,
     StepExecutionRecord,
@@ -86,6 +101,10 @@ from hermes.models.operation import (
     OperationDependency,
     OperationExecutionReference,
     OperationType,
+)
+from hermes.models.repository_manipulation import (
+    RepositoryOperation,
+    RepositoryOperationKind,
 )
 
 logger = logging.getLogger(__name__)
@@ -182,26 +201,34 @@ class EngineeringWorkflow:
         goal: FounderGoal,
         job_id: str,
     ) -> tuple[OperationDefinition, ...]:
-        """Build the four-step operation plan from a FounderGoal.
+        """Build the operation plan from a FounderGoal.
 
-        Returns operations in definition order (not execution order — the
-        OperationEngine computes topological order separately).
+        Dispatches to the create-mode plan (4 steps) or modify-mode plan
+        (5 steps) based on WorkflowConfig.write_mode.
 
-        Step 1 — generate (LLM):
-          Uses OperationType.LLM. OperationExecutionReference declares
-          adapter_id="llm", action_id="generate".
+        Create mode (write_mode="create_file"):
+          generate → create_file → add → commit
 
-        Step 2 — write (Filesystem):
-          Uses OperationType.FILESYSTEM. Depends on generate.
-          adapter_id="filesystem", action_id="create_file".
+        Modify mode (write_mode="modify_file"):
+          read_file → generate → modify_file → add → commit
+          (RepositoryManipulationPlan gate runs between read_file and generate
+          in execute(), before any LLM token is consumed.)
+        """
+        if self._config.write_mode == "modify_file":
+            return self._build_modify_operations(goal, job_id)
+        return self._build_create_operations(goal, job_id)
 
-        Step 3 — add (Git):
-          Uses OperationType.GIT. Depends on write.
-          adapter_id="git", action_id="add".
+    def _build_create_operations(
+        self,
+        goal: FounderGoal,
+        job_id: str,
+    ) -> tuple[OperationDefinition, ...]:
+        """Build the four-step create-mode plan (AT-1 path — unchanged).
 
-        Step 4 — commit (Git):
-          Uses OperationType.GIT. Depends on add.
-          adapter_id="git", action_id="commit".
+        Step 1 — generate (LLM):   adapter_id="llm",        action_id="generate"
+        Step 2 — write (FS):        adapter_id="filesystem", action_id="create_file"
+        Step 3 — add (Git):         adapter_id="git",        action_id="add"
+        Step 4 — commit (Git):      adapter_id="git",        action_id="commit"
         """
         gid = goal.goal_id
         op_generate_id = f"op-generate-{gid}"
@@ -232,7 +259,7 @@ class EngineeringWorkflow:
             depends_on=[OperationDependency(operation_id=op_generate_id)],
             execution_ref=OperationExecutionReference(
                 adapter_id="filesystem",
-                action_id=self._config.write_mode,
+                action_id="create_file",
             ),
         )
 
@@ -264,6 +291,97 @@ class EngineeringWorkflow:
 
         return (op_generate, op_write, op_add, op_commit)
 
+    def _build_modify_operations(
+        self,
+        goal: FounderGoal,
+        job_id: str,
+    ) -> tuple[OperationDefinition, ...]:
+        """Build the five-step modify-mode plan (AT-2 path).
+
+        Step 1 — read_file (FS):    adapter_id="filesystem", action_id="read_file"
+        Step 2 — generate (LLM):    adapter_id="llm",        action_id="generate"
+                                    (RepositoryManipulationPlan gate runs before
+                                     this step in execute() — no LLM tokens
+                                     are consumed if the plan is invalid)
+        Step 3 — modify_file (FS):  adapter_id="filesystem", action_id="modify_file"
+        Step 4 — add (Git):         adapter_id="git",        action_id="add"
+        Step 5 — commit (Git):      adapter_id="git",        action_id="commit"
+        """
+        gid = goal.goal_id
+        op_read_id = f"op-read-{gid}"
+        op_generate_id = f"op-generate-{gid}"
+        op_write_id = f"op-write-{gid}"
+        op_add_id = f"op-add-{gid}"
+        op_commit_id = f"op-commit-{gid}"
+
+        engine = self._operation_engine
+
+        op_read = engine.build_operation(
+            id=op_read_id,
+            job_id=job_id,
+            goal=f"Read existing content of {goal.output_path}",
+            operation_type=OperationType.FILESYSTEM,
+            sequence_index=0,
+            execution_ref=OperationExecutionReference(
+                adapter_id="filesystem",
+                action_id="read_file",
+            ),
+        )
+
+        op_generate = engine.build_operation(
+            id=op_generate_id,
+            job_id=job_id,
+            goal=f"Generate modified source code for: {goal.description}",
+            operation_type=OperationType.LLM,
+            sequence_index=1,
+            depends_on=[OperationDependency(operation_id=op_read_id)],
+            execution_ref=OperationExecutionReference(
+                adapter_id="llm",
+                action_id="generate",
+            ),
+        )
+
+        op_write = engine.build_operation(
+            id=op_write_id,
+            job_id=job_id,
+            goal=f"Write modified code to {goal.output_path}",
+            operation_type=OperationType.FILESYSTEM,
+            sequence_index=2,
+            depends_on=[OperationDependency(operation_id=op_generate_id)],
+            execution_ref=OperationExecutionReference(
+                adapter_id="filesystem",
+                action_id="modify_file",
+            ),
+        )
+
+        op_add = engine.build_operation(
+            id=op_add_id,
+            job_id=job_id,
+            goal=f"Stage {goal.output_path} for commit",
+            operation_type=OperationType.GIT,
+            sequence_index=3,
+            depends_on=[OperationDependency(operation_id=op_write_id)],
+            execution_ref=OperationExecutionReference(
+                adapter_id="git",
+                action_id="add",
+            ),
+        )
+
+        op_commit = engine.build_operation(
+            id=op_commit_id,
+            job_id=job_id,
+            goal="Commit staged changes with goal description as context",
+            operation_type=OperationType.GIT,
+            sequence_index=4,
+            depends_on=[OperationDependency(operation_id=op_add_id)],
+            execution_ref=OperationExecutionReference(
+                adapter_id="git",
+                action_id="commit",
+            ),
+        )
+
+        return (op_read, op_generate, op_write, op_add, op_commit)
+
     def _build_llm_config(self) -> AdapterConfiguration:
         """Build the AdapterConfiguration from workflow config for LLM calls."""
         from hermes.models.llm_adapter import LLMProvider
@@ -277,6 +395,53 @@ class EngineeringWorkflow:
             temperature=0.0,
         )
 
+    def _run_modification_plan_gate(
+        self,
+        goal: FounderGoal,
+        operation_id: str,
+    ) -> str | None:
+        """Validate the planned MODIFY_FILE operation before consuming LLM tokens.
+
+        Builds a RepositoryManipulationPlan for the single MODIFY_FILE operation
+        and returns an error string if the plan has conflicts, or None if valid.
+
+        This gate enforces the invariant that Hermes never contacts the LLM
+        provider if the target file is not in a state that allows modification
+        (e.g. the file was deleted between mode detection and execution).
+
+        Args:
+            goal:         The FounderGoal containing workspace and file paths.
+            operation_id: The operation ID for the plan (used for conflict linking).
+
+        Returns:
+            None if the plan is valid and execution should proceed.
+            An error string starting with "manipulation_plan_conflict:" if invalid.
+        """
+        from pathlib import Path as _Path
+
+        try:
+            repo_relative = str(_Path(goal.output_path).relative_to(goal.repository_path))
+        except ValueError:
+            repo_relative = goal.output_path
+
+        operation = RepositoryOperation(
+            operation_id=operation_id,
+            kind=RepositoryOperationKind.MODIFY_FILE,
+            path=repo_relative,
+        )
+
+        try:
+            rm_engine = RepositoryManipulation(workspace_root=goal.workspace_path)
+            plan = rm_engine.plan(goal.repository_path, [operation])
+        except Exception as exc:
+            return f"manipulation_plan_error: {type(exc).__name__}: {exc}"
+
+        if not plan.valid:
+            detail = "; ".join(c.detail for c in plan.conflicts)
+            return f"manipulation_plan_conflict: {detail}"
+
+        return None
+
     # ── Step execution ─────────────────────────────────────────────────────────
 
     def _build_payload(
@@ -287,28 +452,25 @@ class EngineeringWorkflow:
     ) -> dict[str, str]:
         """Build the adapter-specific payload for an operation.
 
-        Each operation type has a fixed payload shape:
+        Create-mode payloads (write_mode="create_file"):
+          LLM generate:       prompt from goal description; create-mode system prompt
+          Filesystem create_file: path + generated code
+          Git add:            repository_path + repo-relative file path
+          Git commit:         repository_path + commit message
 
-          LLM generate:
-            prompt        → code generation instruction from goal description
-            system_prompt → developer persona
-
-          Filesystem create_file:
-            path    → goal.output_path (workspace-relative)
-            content → generated code from the LLM step (from context)
-
-          Git add:
-            repository_path → goal.repository_path
-            files           → goal.output_path (stage only the generated file)
-
-          Git commit:
-            repository_path → goal.repository_path
-            message         → config.commit_message
+        Modify-mode payloads (write_mode="modify_file"):
+          Filesystem read_file:   path only (content returned via adapter result)
+          LLM generate:       prompt includes existing file content from context;
+                              modify-mode system prompt instructs complete file return
+          Filesystem modify_file: path + generated code
+          Git add/commit:     identical to create mode
 
         Args:
             op:      The operation being executed.
             goal:    The Founder Goal containing paths and description.
-            context: Cross-step data; "generated_code" is set after the LLM step.
+            context: Cross-step data populated as steps complete:
+                     "existing_content" — set after filesystem read_file
+                     "generated_code"   — set after llm generate
 
         Returns:
             Payload dict for gateway.build_request().
@@ -316,7 +478,30 @@ class EngineeringWorkflow:
         ref = op.execution_ref
         assert ref is not None  # guaranteed by _build_operations
 
+        if ref.adapter_id == "filesystem" and ref.action_id == "read_file":
+            return {"path": goal.output_path}
+
         if ref.adapter_id == "llm" and ref.action_id == "generate":
+            if self._config.write_mode == "modify_file":
+                existing = context.get("existing_content", "")
+                return {
+                    "system_prompt": (
+                        "You are an expert software developer. "
+                        "Generate clean, production-quality source code. "
+                        "Return the complete modified file — preserve all existing content. "
+                        "Respond with code only — no explanation, no markdown fences."
+                    ),
+                    "prompt": (
+                        f"The following file exists:\n\n"
+                        f"--- {goal.output_path} ---\n"
+                        f"{existing}\n"
+                        f"--- end of file ---\n\n"
+                        f"Modify this file to accomplish the following task:\n\n"
+                        f"{goal.description}\n\n"
+                        f"Return the complete modified file. "
+                        f"Preserve all existing functions and content."
+                    ),
+                }
             return {
                 "system_prompt": (
                     "You are an expert software developer. "
@@ -330,7 +515,9 @@ class EngineeringWorkflow:
                 ),
             }
 
-        if ref.adapter_id == "filesystem" and ref.action_id in ("create_file", "overwrite_file"):
+        if ref.adapter_id == "filesystem" and ref.action_id in (
+            "create_file", "overwrite_file", "modify_file"
+        ):
             return {
                 "path": goal.output_path,
                 "content": context.get("generated_code", ""),
@@ -442,11 +629,16 @@ class EngineeringWorkflow:
                 adapter_result = self._filesystem_adapter.execute(request)
                 success = adapter_result.success
                 error = adapter_result.error
-                output = ""
+                # Return file content as output for read_file; empty for write ops.
+                output = (
+                    adapter_result.filesystem_result.content
+                    if adapter_result.filesystem_result is not None
+                    else ""
+                )
                 logger.info(
                     "EngineeringWorkflow: Filesystem step complete op=%r "
-                    "success=%s path=%r",
-                    op.id, success,
+                    "action=%r success=%s path=%r",
+                    op.id, action_id, success,
                     adapter_result.filesystem_request.path
                     if adapter_result.filesystem_request else "",
                 )
@@ -591,6 +783,37 @@ class EngineeringWorkflow:
 
         for op_id in execution_order:
             op = next(o for o in operations if o.id == op_id)
+            ref = op.execution_ref
+
+            # ── RepositoryManipulationPlan gate (modify mode only) ─────────
+            # Runs before the LLM call — no tokens consumed if plan is invalid.
+            if (
+                self._config.write_mode == "modify_file"
+                and ref is not None
+                and ref.adapter_id == "llm"
+                and ref.action_id == "generate"
+            ):
+                plan_error = self._run_modification_plan_gate(goal, op.id)
+                if plan_error is not None:
+                    logger.warning(
+                        "EngineeringWorkflow: modification plan invalid for goal_id=%r: %s",
+                        gid, plan_error,
+                    )
+                    return WorkflowExecutionReport(
+                        report_id=report_id,
+                        goal_id=gid,
+                        mission_id=mission_id,
+                        job_id=job_id,
+                        steps=tuple(steps),
+                        success=False,
+                        error=plan_error,
+                        execution_sequence=tuple(s.adapter_type.value for s in steps),
+                        metadata=tuple(sorted({
+                            "goal_id": gid,
+                            "failure_stage": "manipulation_plan",
+                            "steps_completed": str(len(steps)),
+                        }.items())),
+                    )
 
             step = self._execute_step(op, goal, context)
             steps.append(step)
@@ -617,9 +840,10 @@ class EngineeringWorkflow:
                 )
 
             # Populate cross-step context
-            ref = op.execution_ref
             if ref and ref.adapter_id == "llm":
                 context["generated_code"] = step.output
+            elif ref and ref.adapter_id == "filesystem" and ref.action_id == "read_file":
+                context["existing_content"] = step.output
 
         # ── 6. Assemble success report ─────────────────────────────────────
         logger.info(
@@ -627,6 +851,23 @@ class EngineeringWorkflow:
             "steps=%d",
             gid, len(steps),
         )
+
+        if self._config.write_mode == "modify_file":
+            success_metadata: dict[str, str] = {
+                "goal_id": gid,
+                "steps_completed": str(len(steps)),
+                "modified_file": goal.output_path,
+                "repository": goal.repository_path,
+                "commit_message": self._config.commit_message,
+            }
+        else:
+            success_metadata = {
+                "goal_id": gid,
+                "steps_completed": str(len(steps)),
+                "generated_file": goal.output_path,
+                "repository": goal.repository_path,
+                "commit_message": self._config.commit_message,
+            }
 
         return WorkflowExecutionReport(
             report_id=report_id,
@@ -637,11 +878,5 @@ class EngineeringWorkflow:
             success=True,
             error=None,
             execution_sequence=tuple(s.adapter_type.value for s in steps),
-            metadata=tuple(sorted({
-                "goal_id": gid,
-                "steps_completed": str(len(steps)),
-                "generated_file": goal.output_path,
-                "repository": goal.repository_path,
-                "commit_message": self._config.commit_message,
-            }.items())),
+            metadata=tuple(sorted(success_metadata.items())),
         )

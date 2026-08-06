@@ -233,9 +233,10 @@ class TestWriteModeFlowsThroughWorkflow:
         fs_op = next(o for o in ops if o.execution_ref and o.execution_ref.adapter_id == "filesystem")
         assert fs_op.execution_ref.action_id == "create_file"
 
-    def test_overwrite_file_write_mode_sets_action_id(self, tmp_path):
+    def test_modify_file_write_mode_sets_action_ids(self, tmp_path):
+        """modify_file mode builds a 5-step plan with read_file and modify_file actions."""
         from hermes.models.engineering_workflow import FounderGoal
-        workflow = self._make_workflow(tmp_path, "overwrite_file")
+        workflow = self._make_workflow(tmp_path, "modify_file")
         goal = FounderGoal(
             goal_id="wm-test-2",
             description="test",
@@ -244,8 +245,14 @@ class TestWriteModeFlowsThroughWorkflow:
             output_path="out.py",
         )
         ops = workflow._build_operations(goal, "job-wm-test-2")
-        fs_op = next(o for o in ops if o.execution_ref and o.execution_ref.adapter_id == "filesystem")
-        assert fs_op.execution_ref.action_id == "overwrite_file"
+        fs_action_ids = [
+            o.execution_ref.action_id
+            for o in ops
+            if o.execution_ref and o.execution_ref.adapter_id == "filesystem"
+        ]
+        assert "read_file" in fs_action_ids
+        assert "modify_file" in fs_action_ids
+        assert len(ops) == 5
 
     def test_default_write_mode_preserves_create_file_action_id(self, tmp_path):
         """The default write_mode keeps existing behaviour: action_id == 'create_file'."""
@@ -682,8 +689,8 @@ class TestImplementCLI:
 
         assert captured_configs[0].write_mode == "create_file"
 
-    def test_implement_write_mode_overwrite_for_existing_file(self, tmp_path):
-        """When output file already exists → write_mode must be 'overwrite_file'."""
+    def test_implement_write_mode_modify_for_existing_file(self, tmp_path):
+        """When output file already exists → write_mode must be 'modify_file'."""
         report = _make_success_report()
         env_cfg, caps, driver = self._mock_env_cfg()
 
@@ -706,7 +713,7 @@ class TestImplementCLI:
             mock_ri.return_value.scan.return_value = self._empty_snapshot()
             runner.invoke(app, ["implement", "task", "--output", "existing.py"])
 
-        assert captured_configs[0].write_mode == "overwrite_file"
+        assert captured_configs[0].write_mode == "modify_file"
 
     def test_implement_goal_output_path_set_correctly(self, tmp_path):
         report = _make_success_report()
