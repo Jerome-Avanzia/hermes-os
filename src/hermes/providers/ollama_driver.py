@@ -3,24 +3,43 @@
 Architecture position:
   Execution Gateway → LLM Adapter → Ollama (this module)
 
-This module contains everything Ollama-specific:
-  - Payload construction for the /api/chat endpoint
-  - HTTP call via httpx
-  - Response parsing from the /api/chat response shape
+One driver, two modes. Ollama Cloud uses the same /api/chat API as local
+Ollama. Transport and model identity are independent concerns:
 
-Registering Ollama with the LLM Adapter::
+  Transport (LOCAL vs CLOUD) → declared via OllamaMode at driver construction
+  Authentication             → api_key in AdapterConfiguration (independent)
+  Model identity             → plain model name, no suffix encoding
+
+OllamaMode drives two behavioral differences:
+  LOCAL → includes format:"json" when structured_output_schema is present
+  CLOUD → omits format:"json" (Ollama Cloud does not support structured output)
+  BOTH  → add Authorization: Bearer header when api_key is non-empty
+
+Registering with the LLM Adapter::
 
     from hermes.adapters.llm_adapter import LlmAdapter
-    from hermes.providers.ollama_driver import OLLAMA_CAPABILITIES, OLLAMA_DRIVER
+    from hermes.providers.ollama_driver import (
+        OLLAMA_LOCAL_CAPABILITIES, OLLAMA_LOCAL_DRIVER,
+        OLLAMA_CLOUD_CAPABILITIES, OLLAMA_CLOUD_DRIVER,
+    )
     from hermes.models.llm_adapter import LLMProvider
 
-    adapter = LlmAdapter()
-    adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_CAPABILITIES, driver=OLLAMA_DRIVER)
+    # Local deployment
+    adapter.register_provider(
+        LLMProvider.OLLAMA, OLLAMA_LOCAL_CAPABILITIES, driver=OLLAMA_LOCAL_DRIVER
+    )
 
-Nothing in this module knows about the LlmAdapter internals, the
-Execution Gateway, the Conductor, or any other kernel component.
-The three driver functions and the two constants are the complete
-public surface of this module.
+    # Cloud deployment (replaces local registration — first-wins)
+    adapter.register_provider(
+        LLMProvider.OLLAMA, OLLAMA_CLOUD_CAPABILITIES, driver=OLLAMA_CLOUD_DRIVER
+    )
+
+Environment variables (infrastructure only — model selection belongs to ModelRouter):
+    OLLAMA_BASE_URL              → local endpoint   (default: http://localhost:11434)
+    OLLAMA_CLOUD_BASE_URL        → cloud endpoint   (default: https://ollama.com)
+    OLLAMA_API_KEY               → cloud API key
+    OLLAMA_TIMEOUT_SECONDS       → local timeout    (default: 30)
+    OLLAMA_CLOUD_TIMEOUT_SECONDS → cloud timeout    (default: 120)
 
 Network calls introduced:
   - _call_ollama() makes a POST to {base_url}/api/chat via httpx.
@@ -31,7 +50,9 @@ Filesystem writes introduced:
 
 from __future__ import annotations
 
+import enum
 import logging
+import time
 
 import httpx
 
@@ -47,12 +68,39 @@ from hermes.models.llm_adapter import (
 logger = logging.getLogger(__name__)
 
 
+# ── OllamaMode ─────────────────────────────────────────────────────────────────
+
+
+class OllamaMode(enum.Enum):
+    """Explicit transport declaration for the Ollama driver.
+
+    Transport and authentication are independent concerns:
+      - OllamaMode declares WHERE requests are sent (local hardware vs cloud)
+      - api_key in AdapterConfiguration declares HOW to authenticate
+
+    LOCAL → targets a local Ollama instance (http://localhost:11434 by default)
+            Supports structured output (format:"json"), vision, tool calling.
+            api_key is empty for unauthenticated local instances; may be
+            non-empty if the local instance has authentication enabled.
+
+    CLOUD → targets Ollama Cloud (https://ollama.com by default)
+            Structured output not supported (format:"json" is suppressed).
+            Vision not supported. Tool calling supported.
+            api_key is expected; absence will result in a 401 from the API.
+    """
+
+    LOCAL = "local"
+    CLOUD = "cloud"
+
+
 # ── Ollama /api/chat payload builder ──────────────────────────────────────────
 
 
 def _build_ollama_payload(
     request: LLMRequest,
     config: AdapterConfiguration,
+    *,
+    mode: OllamaMode,
 ) -> dict:
     """Translate a normalized LLMRequest into an Ollama /api/chat payload.
 
@@ -60,7 +108,15 @@ def _build_ollama_payload(
       POST /api/chat
       {"model": "...", "messages": [...], "stream": false, "options": {...}}
 
-    format: "json" is added when a structured output schema is present.
+    format:"json" is added when a structured output schema is present AND
+    mode is LOCAL. Ollama Cloud does not support structured output — the
+    field is suppressed in CLOUD mode to avoid API errors.
+
+    Args:
+        request: The normalized LLMRequest.
+        config:  The AdapterConfiguration for this invocation.
+        mode:    OllamaMode.LOCAL or OllamaMode.CLOUD — controls structured
+                 output field inclusion. Keyword-only.
     """
     messages: list[dict] = []
     if request.system_prompt:
@@ -70,14 +126,15 @@ def _build_ollama_payload(
     payload: dict = {
         "model": request.model,
         "messages": messages,
-        "stream": False,            # streaming disabled; metadata only
+        "stream": False,
         "options": {
             "num_predict": request.max_tokens,
             "temperature": request.temperature,
         },
     }
 
-    if request.structured_output_schema:
+    if request.structured_output_schema and mode == OllamaMode.LOCAL:
+        # Ollama Cloud does not support format:"json" — suppress in CLOUD mode
         payload["format"] = "json"
 
     return payload
@@ -89,7 +146,7 @@ def _build_ollama_payload(
 def _parse_ollama_response(raw: dict, llm_request: LLMRequest) -> LLMResponse:
     """Translate a raw Ollama /api/chat response into a normalized LLMResponse.
 
-    Ollama response shape:
+    The response shape is identical for local and cloud Ollama:
       {"model": "...", "message": {"role": "assistant", "content": "..."},
        "done": true, "done_reason": "stop",
        "prompt_eval_count": N, "eval_count": M}
@@ -123,58 +180,166 @@ def _parse_ollama_response(raw: dict, llm_request: LLMRequest) -> LLMResponse:
     )
 
 
-# ── Ollama HTTP caller ─────────────────────────────────────────────────────────
+# ── Ollama HTTP callers ────────────────────────────────────────────────────────
 
 
 def _call_ollama(endpoint: str, payload: dict, timeout: int, api_key: str) -> dict:
     """Make the POST request to the Ollama /api/chat endpoint.
 
-    Uses httpx (already a project dependency). api_key is unused for Ollama
-    (local provider) but accepted for interface uniformity across all drivers.
+    Adds an Authorization: Bearer header when api_key is non-empty.
+    Authentication and transport are independent: a local instance may
+    require a key; a cloud request always requires one.
+
+    Uses httpx (already a project dependency).
 
     Raises:
         httpx.HTTPError: on network or HTTP-level failure (caller catches this)
     """
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
     logger.info(
-        "ollama_driver: calling endpoint=%s model=%s",
+        "ollama_driver: calling endpoint=%s model=%s auth=%s",
         endpoint,
         payload.get("model"),
+        "yes" if api_key else "no",
     )
+
     with httpx.Client(timeout=float(timeout)) as client:
-        response = client.post(endpoint, json=payload)
+        response = client.post(endpoint, json=payload, headers=headers)
         response.raise_for_status()
         return response.json()
 
 
-# ── Ollama capability declaration ─────────────────────────────────────────────
+# Retry policy for Cloud mode:
+#   Retry on: 429 (rate limit), 502 (bad gateway), 503 (service unavailable)
+#   No retry:  400, 401, 403, 404 (client errors — retry cannot help)
+#   Attempts:  3 (initial + 2 retries)
+#   Backoff:   exponential — 1s, 2s, 4s
+#   429:       respect Retry-After header if present; fall back to 4s
 
-#: Declared capabilities for Ollama (local inference, no API key required).
-OLLAMA_CAPABILITIES = ProviderCapabilities(
+_CLOUD_RETRY_STATUS_CODES = frozenset({429, 502, 503})
+_CLOUD_RETRY_DELAYS = (1.0, 2.0, 4.0)
+
+
+def _call_ollama_with_retry(
+    endpoint: str,
+    payload: dict,
+    timeout: int,
+    api_key: str,
+) -> dict:
+    """Make the POST request with exponential-backoff retry for Cloud transient failures.
+
+    Used by OLLAMA_CLOUD_DRIVER only. The retry loop handles the transient
+    HTTP conditions that cloud infrastructure introduces (rate limits, gateway
+    errors). Local infrastructure failures are immediate and non-retryable.
+
+    Raises:
+        httpx.HTTPError: if all retry attempts are exhausted (caller catches this)
+    """
+    last_exc: Exception | None = None
+
+    for attempt, delay in enumerate((*_CLOUD_RETRY_DELAYS, None)):
+        try:
+            return _call_ollama(endpoint, payload, timeout, api_key)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in _CLOUD_RETRY_STATUS_CODES:
+                raise  # client error — do not retry
+            last_exc = exc
+            if delay is None:
+                break  # exhausted
+            retry_after = exc.response.headers.get("Retry-After")
+            sleep_secs = float(retry_after) if retry_after else delay
+            logger.warning(
+                "ollama_driver: cloud request failed (status=%d attempt=%d) "
+                "retrying in %.1fs",
+                exc.response.status_code,
+                attempt + 1,
+                sleep_secs,
+            )
+            time.sleep(sleep_secs)
+        except httpx.TransportError:
+            raise  # network-level errors are not retried
+
+    raise last_exc  # type: ignore[misc]
+
+
+# ── Driver factory ─────────────────────────────────────────────────────────────
+
+
+def make_ollama_driver(mode: OllamaMode) -> ProviderDriver:
+    """Construct a ProviderDriver with mode-specific behavior.
+
+    The mode is captured in the build_payload closure. call_provider uses
+    the base HTTP caller for LOCAL and the retry-wrapped caller for CLOUD.
+
+    Args:
+        mode: OllamaMode.LOCAL or OllamaMode.CLOUD
+
+    Returns:
+        ProviderDriver ready for registration with LlmAdapter.
+    """
+    def _build(request: LLMRequest, config: AdapterConfiguration) -> dict:
+        return _build_ollama_payload(request, config, mode=mode)
+
+    call_provider = (
+        _call_ollama_with_retry if mode == OllamaMode.CLOUD else _call_ollama
+    )
+
+    return ProviderDriver(
+        build_payload=_build,
+        call_provider=call_provider,
+        parse_response=_parse_ollama_response,
+        endpoint_path="/api/chat",
+    )
+
+
+# ── Capability declarations ────────────────────────────────────────────────────
+
+#: Capabilities for a local Ollama instance.
+#: Structured output, vision, and tool calling are all supported locally.
+OLLAMA_LOCAL_CAPABILITIES = ProviderCapabilities(
     provider=LLMProvider.OLLAMA,
     supports_streaming=True,
-    supports_structured_output=True,   # via format="json"
+    supports_structured_output=True,
     supports_system_prompt=True,
-    supports_tool_use=False,
+    supports_tool_use=True,
     max_context_tokens=128_000,
     default_model="llama3.2",
     requires_api_key=False,
 )
 
-#: ProviderDriver that bundles all Ollama-specific functions.
-#: Register with LlmAdapter via:
-#:   adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_CAPABILITIES, driver=OLLAMA_DRIVER)
-OLLAMA_DRIVER = ProviderDriver(
-    build_payload=_build_ollama_payload,
-    call_provider=_call_ollama,
-    parse_response=_parse_ollama_response,
-    endpoint_path="/api/chat",
+#: Capabilities for Ollama Cloud.
+#: Structured output and vision are not supported on Ollama Cloud.
+#: An API key is required.
+OLLAMA_CLOUD_CAPABILITIES = ProviderCapabilities(
+    provider=LLMProvider.OLLAMA,
+    supports_streaming=True,
+    supports_structured_output=False,   # Ollama Cloud limitation
+    supports_system_prompt=True,
+    supports_tool_use=True,
+    max_context_tokens=128_000,
+    default_model="kimi-k2.7-code",
+    requires_api_key=True,
 )
+
+#: ProviderDriver for local Ollama. Includes format:"json" when schema present.
+OLLAMA_LOCAL_DRIVER = make_ollama_driver(OllamaMode.LOCAL)
+
+#: ProviderDriver for Ollama Cloud. Suppresses format:"json". Uses retry.
+OLLAMA_CLOUD_DRIVER = make_ollama_driver(OllamaMode.CLOUD)
 
 
 __all__ = [
-    "OLLAMA_CAPABILITIES",
-    "OLLAMA_DRIVER",
+    "OLLAMA_CLOUD_CAPABILITIES",
+    "OLLAMA_CLOUD_DRIVER",
+    "OLLAMA_LOCAL_CAPABILITIES",
+    "OLLAMA_LOCAL_DRIVER",
+    "OllamaMode",
     "_build_ollama_payload",
     "_call_ollama",
+    "_call_ollama_with_retry",
     "_parse_ollama_response",
+    "make_ollama_driver",
 ]

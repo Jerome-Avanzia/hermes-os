@@ -1,4 +1,4 @@
-"""Sprint 61 — LLM Adapter tests.
+"""Sprint 61 / 62 — LLM Adapter and Ollama Provider tests.
 
 Tests the provider-agnostic LLM Adapter layer:
 
@@ -16,6 +16,11 @@ Validates:
   • structured output metadata (schema carried through correctly)
   • deterministic translation (same inputs → same LLMRequest)
   • immutable contracts (all models are frozen dataclasses)
+  • OllamaMode: LOCAL vs CLOUD transport distinction
+  • make_ollama_driver factory produces mode-correct behavior
+  • auth header added when api_key non-empty (independent of mode)
+  • format:"json" suppressed in CLOUD mode (Ollama Cloud limitation)
+  • model names carry no transport encoding (pure identifiers)
 
 No real provider calls. The HTTP caller is replaced with a mock driver
 in all tests to isolate translation logic from network availability.
@@ -31,10 +36,14 @@ from hermes.adapters.llm_adapter import LlmAdapter, ProviderDriver
 from hermes.providers.anthropic_driver import ANTHROPIC_CAPABILITIES
 from hermes.providers.gemini_driver import GEMINI_CAPABILITIES
 from hermes.providers.ollama_driver import (
-    OLLAMA_CAPABILITIES,
-    OLLAMA_DRIVER,
+    OLLAMA_CLOUD_CAPABILITIES,
+    OLLAMA_CLOUD_DRIVER,
+    OLLAMA_LOCAL_CAPABILITIES,
+    OLLAMA_LOCAL_DRIVER,
+    OllamaMode,
     _build_ollama_payload,
     _parse_ollama_response,
+    make_ollama_driver,
 )
 from hermes.providers.openai_driver import OPENAI_CAPABILITIES
 from hermes.providers.openrouter_driver import OPENROUTER_CAPABILITIES
@@ -139,8 +148,14 @@ def _mock_call_raises(exc: Exception):
 def _make_ollama_adapter(
     raw_response: dict | None = None,
     call_raises: Exception | None = None,
+    mode: OllamaMode = OllamaMode.LOCAL,
 ) -> LlmAdapter:
-    """Build an LlmAdapter with Ollama registered and a mocked HTTP caller."""
+    """Build an LlmAdapter with Ollama registered and a mocked HTTP caller.
+
+    Uses make_ollama_driver() to obtain the real build_payload and
+    parse_response callables for the given mode, then replaces only
+    call_provider with a mock to avoid real HTTP calls.
+    """
     adapter = LlmAdapter()
 
     if call_raises is not None:
@@ -150,13 +165,15 @@ def _make_ollama_adapter(
             raw_response if raw_response is not None else _make_ollama_raw_response()
         )
 
+    base_driver = make_ollama_driver(mode)
     mock_driver = ProviderDriver(
-        build_payload=_build_ollama_payload,
+        build_payload=base_driver.build_payload,
         call_provider=caller,
-        parse_response=_parse_ollama_response,
-        endpoint_path="/api/chat",
+        parse_response=base_driver.parse_response,
+        endpoint_path=base_driver.endpoint_path,
     )
-    adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_CAPABILITIES, driver=mock_driver)
+    caps = OLLAMA_LOCAL_CAPABILITIES if mode == OllamaMode.LOCAL else OLLAMA_CLOUD_CAPABILITIES
+    adapter.register_provider(LLMProvider.OLLAMA, caps, driver=mock_driver)
     return adapter
 
 
@@ -169,7 +186,7 @@ class TestTypedContracts:
     """All LLM adapter contracts are frozen dataclasses with slots."""
 
     def test_provider_capabilities_is_frozen(self) -> None:
-        caps = OLLAMA_CAPABILITIES
+        caps = OLLAMA_LOCAL_CAPABILITIES
         assert dataclasses.is_dataclass(caps)
         with pytest.raises((dataclasses.FrozenInstanceError, AttributeError)):
             caps.supports_streaming = False  # type: ignore[misc]
@@ -244,7 +261,7 @@ class TestProviderRegistration:
     def test_register_provider_with_driver_returns_true(self) -> None:
         adapter = LlmAdapter()
         result = adapter.register_provider(
-            LLMProvider.OLLAMA, OLLAMA_CAPABILITIES, driver=OLLAMA_DRIVER,
+            LLMProvider.OLLAMA, OLLAMA_LOCAL_CAPABILITIES, driver=OLLAMA_LOCAL_DRIVER,
         )
         assert result is True
 
@@ -255,8 +272,8 @@ class TestProviderRegistration:
 
     def test_duplicate_registration_returns_false(self) -> None:
         adapter = LlmAdapter()
-        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_CAPABILITIES)
-        result = adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_CAPABILITIES)
+        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_LOCAL_CAPABILITIES)
+        result = adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_LOCAL_CAPABILITIES)
         assert result is False
 
     def test_first_registration_wins(self) -> None:
@@ -291,7 +308,7 @@ class TestProviderRegistration:
 
     def test_list_providers_returns_all_registered(self) -> None:
         adapter = LlmAdapter()
-        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_CAPABILITIES)
+        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_LOCAL_CAPABILITIES)
         adapter.register_provider(LLMProvider.ANTHROPIC, ANTHROPIC_CAPABILITIES)
         adapter.register_provider(LLMProvider.OPENAI, OPENAI_CAPABILITIES)
 
@@ -319,7 +336,7 @@ class TestProviderRegistration:
     def test_has_driver_true_when_driver_registered(self) -> None:
         adapter = LlmAdapter()
         adapter.register_provider(
-            LLMProvider.OLLAMA, OLLAMA_CAPABILITIES, driver=OLLAMA_DRIVER,
+            LLMProvider.OLLAMA, OLLAMA_LOCAL_CAPABILITIES, driver=OLLAMA_LOCAL_DRIVER,
         )
         assert adapter.has_driver(LLMProvider.OLLAMA) is True
 
@@ -331,7 +348,7 @@ class TestProviderRegistration:
     def test_all_five_providers_have_declared_capabilities(self) -> None:
         """All Sprint 61 providers have declared ProviderCapabilities constants."""
         all_caps = [
-            OLLAMA_CAPABILITIES,
+            OLLAMA_LOCAL_CAPABILITIES,
             ANTHROPIC_CAPABILITIES,
             OPENAI_CAPABILITIES,
             GEMINI_CAPABILITIES,
@@ -351,7 +368,7 @@ class TestCapabilityDiscovery:
     """Capability discovery works independently of execution drivers."""
 
     def test_ollama_capabilities_are_correct(self) -> None:
-        caps = OLLAMA_CAPABILITIES
+        caps = OLLAMA_LOCAL_CAPABILITIES
         assert caps.provider == LLMProvider.OLLAMA
         assert caps.supports_system_prompt is True
         assert caps.requires_api_key is False
@@ -364,7 +381,7 @@ class TestCapabilityDiscovery:
     def test_gemini_has_largest_context(self) -> None:
         """Gemini 2.0 Flash has the largest declared context window."""
         all_caps = [
-            OLLAMA_CAPABILITIES,
+            OLLAMA_LOCAL_CAPABILITIES,
             ANTHROPIC_CAPABILITIES,
             OPENAI_CAPABILITIES,
             GEMINI_CAPABILITIES,
@@ -376,7 +393,7 @@ class TestCapabilityDiscovery:
     def test_register_all_capabilities_and_discover(self) -> None:
         adapter = LlmAdapter()
         for caps in [
-            OLLAMA_CAPABILITIES, ANTHROPIC_CAPABILITIES, OPENAI_CAPABILITIES,
+            OLLAMA_LOCAL_CAPABILITIES, ANTHROPIC_CAPABILITIES, OPENAI_CAPABILITIES,
             GEMINI_CAPABILITIES, OPENROUTER_CAPABILITIES,
         ]:
             adapter.register_provider(caps.provider, caps)
@@ -388,7 +405,7 @@ class TestCapabilityDiscovery:
 
     def test_capability_flags_are_typed_bools(self) -> None:
         for caps in [
-            OLLAMA_CAPABILITIES, ANTHROPIC_CAPABILITIES, OPENAI_CAPABILITIES,
+            OLLAMA_LOCAL_CAPABILITIES, ANTHROPIC_CAPABILITIES, OPENAI_CAPABILITIES,
         ]:
             assert isinstance(caps.supports_streaming, bool)
             assert isinstance(caps.supports_structured_output, bool)
@@ -519,7 +536,11 @@ class TestRequestTranslation:
 
 
 class TestOllamaPayloadBuilding:
-    """_build_ollama_payload() produces correct Ollama /api/chat JSON."""
+    """_build_ollama_payload() produces correct Ollama /api/chat JSON.
+
+    All tests specify mode explicitly. LOCAL and CLOUD share the same
+    message structure; they differ only in format:"json" handling.
+    """
 
     def _make_llm_request(
         self,
@@ -547,7 +568,7 @@ class TestOllamaPayloadBuilding:
     def test_user_message_in_messages(self) -> None:
         config = _make_config()
         req = self._make_llm_request(user_prompt="Hello")
-        payload = _build_ollama_payload(req, config)
+        payload = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
         messages = payload["messages"]
         user_msgs = [m for m in messages if m["role"] == "user"]
         assert len(user_msgs) == 1
@@ -556,7 +577,7 @@ class TestOllamaPayloadBuilding:
     def test_system_message_included_when_present(self) -> None:
         config = _make_config()
         req = self._make_llm_request(system_prompt="You are a writer", user_prompt="Draft")
-        payload = _build_ollama_payload(req, config)
+        payload = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
         messages = payload["messages"]
         sys_msgs = [m for m in messages if m["role"] == "system"]
         assert len(sys_msgs) == 1
@@ -565,48 +586,71 @@ class TestOllamaPayloadBuilding:
     def test_system_message_omitted_when_empty(self) -> None:
         config = _make_config()
         req = self._make_llm_request(system_prompt="")
-        payload = _build_ollama_payload(req, config)
+        payload = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
         roles = [m["role"] for m in payload["messages"]]
         assert "system" not in roles
 
     def test_stream_is_false(self) -> None:
-        """Sprint 61: streaming disabled in payload regardless of config flag."""
+        """Streaming disabled in payload regardless of config flag."""
         config = _make_config(streaming=True)
         req = self._make_llm_request(streaming=True)
-        payload = _build_ollama_payload(req, config)
+        payload = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
         assert payload["stream"] is False
 
     def test_model_in_payload(self) -> None:
         config = _make_config(model="qwen2.5")
         req = self._make_llm_request(model="qwen2.5")
-        payload = _build_ollama_payload(req, config)
+        payload = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
         assert payload["model"] == "qwen2.5"
+
+    def test_model_name_is_plain_identifier(self) -> None:
+        """Model names carry no transport encoding — transport is explicit via mode."""
+        config = _make_config(model="kimi-k2.7-code")
+        req = self._make_llm_request(model="kimi-k2.7-code")
+        payload_local = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
+        payload_cloud = _build_ollama_payload(req, config, mode=OllamaMode.CLOUD)
+        assert payload_local["model"] == "kimi-k2.7-code"
+        assert payload_cloud["model"] == "kimi-k2.7-code"
 
     def test_options_carry_max_tokens_and_temperature(self) -> None:
         config = _make_config(max_tokens=512, temperature=0.3)
         req = self._make_llm_request(max_tokens=512, temperature=0.3)
-        payload = _build_ollama_payload(req, config)
+        payload = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
         opts = payload["options"]
         assert opts["num_predict"] == 512
         assert opts["temperature"] == 0.3
 
-    def test_format_json_added_when_schema_present(self) -> None:
+    def test_format_json_added_in_local_mode_when_schema_present(self) -> None:
+        """LOCAL mode includes format:"json" when structured_output_schema is set."""
         config = _make_config()
         req = self._make_llm_request(schema='{"type":"object"}')
-        payload = _build_ollama_payload(req, config)
+        payload = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
         assert payload.get("format") == "json"
+
+    def test_format_json_suppressed_in_cloud_mode_even_with_schema(self) -> None:
+        """CLOUD mode omits format:"json" — Ollama Cloud does not support structured output."""
+        config = _make_config()
+        req = self._make_llm_request(schema='{"type":"object"}')
+        payload = _build_ollama_payload(req, config, mode=OllamaMode.CLOUD)
+        assert "format" not in payload
 
     def test_format_absent_when_no_schema(self) -> None:
         config = _make_config()
         req = self._make_llm_request(schema="")
-        payload = _build_ollama_payload(req, config)
+        payload = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
+        assert "format" not in payload
+
+    def test_format_absent_when_no_schema_cloud(self) -> None:
+        config = _make_config()
+        req = self._make_llm_request(schema="")
+        payload = _build_ollama_payload(req, config, mode=OllamaMode.CLOUD)
         assert "format" not in payload
 
     def test_payload_is_deterministic(self) -> None:
         config = _make_config(max_tokens=128, temperature=0.0)
         req = self._make_llm_request(user_prompt="Analyse", system_prompt="Be brief")
-        p1 = _build_ollama_payload(req, config)
-        p2 = _build_ollama_payload(req, config)
+        p1 = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
+        p2 = _build_ollama_payload(req, config, mode=OllamaMode.LOCAL)
         assert p1 == p2
 
 
@@ -1014,13 +1058,14 @@ class TestErrorTranslation:
             raise ValueError("Unexpected response format")
 
         adapter = LlmAdapter()
+        _local_build = make_ollama_driver(OllamaMode.LOCAL).build_payload
         bad_driver = ProviderDriver(
-            build_payload=_build_ollama_payload,
+            build_payload=_local_build,
             call_provider=_mock_call_returns({}),
             parse_response=_bad_parse,
             endpoint_path="/api/chat",
         )
-        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_CAPABILITIES, driver=bad_driver)
+        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_LOCAL_CAPABILITIES, driver=bad_driver)
 
         request = _make_gateway_request()
         config = _make_config()
@@ -1147,12 +1192,12 @@ class TestProviderIndependence:
         adapter = LlmAdapter()
 
         ollama_mock_driver = ProviderDriver(
-            build_payload=_build_ollama_payload,
+            build_payload=make_ollama_driver(OllamaMode.LOCAL).build_payload,
             call_provider=_mock_call_returns(ollama_raw),
             parse_response=_parse_ollama_response,
             endpoint_path="/api/chat",
         )
-        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_CAPABILITIES, driver=ollama_mock_driver)
+        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_LOCAL_CAPABILITIES, driver=ollama_mock_driver)
         adapter.register_provider(LLMProvider.OPENAI, openai_caps, driver=openai_driver)
 
         # Ollama request
@@ -1185,14 +1230,15 @@ class TestProviderIndependence:
             endpoints_called.append(endpoint)
             return _make_ollama_raw_response()
 
+        _local_build = make_ollama_driver(OllamaMode.LOCAL).build_payload
         driver = ProviderDriver(
-            build_payload=_build_ollama_payload,
+            build_payload=_local_build,
             call_provider=capturing_call,
             parse_response=_parse_ollama_response,
             endpoint_path="/api/chat",
         )
         adapter = LlmAdapter()
-        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_CAPABILITIES, driver=driver)
+        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_LOCAL_CAPABILITIES, driver=driver)
 
         request = _make_gateway_request()
         config = _make_config(base_url="http://localhost:11434")
@@ -1208,14 +1254,15 @@ class TestProviderIndependence:
             endpoints_called.append(endpoint)
             return _make_ollama_raw_response()
 
+        _local_build = make_ollama_driver(OllamaMode.LOCAL).build_payload
         driver = ProviderDriver(
-            build_payload=_build_ollama_payload,
+            build_payload=_local_build,
             call_provider=capturing_call,
             parse_response=_parse_ollama_response,
             endpoint_path="/api/chat",
         )
         adapter = LlmAdapter()
-        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_CAPABILITIES, driver=driver)
+        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_LOCAL_CAPABILITIES, driver=driver)
 
         request = _make_gateway_request()
         config = _make_config(base_url="http://localhost:11434/")  # trailing slash
@@ -1371,3 +1418,207 @@ class TestGatewayAdapterIntegration:
 
         assert adapter_result.success is True
         assert adapter_result.llm_response.content == "Generated content"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 13. OllamaMode — explicit transport configuration
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestOllamaMode:
+    """OllamaMode is an explicit transport declaration independent of authentication."""
+
+    def test_ollama_mode_has_local_and_cloud(self) -> None:
+        assert OllamaMode.LOCAL.value == "local"
+        assert OllamaMode.CLOUD.value == "cloud"
+
+    def test_make_ollama_driver_returns_provider_driver(self) -> None:
+        from hermes.adapters.llm_adapter import ProviderDriver
+        local_driver = make_ollama_driver(OllamaMode.LOCAL)
+        cloud_driver = make_ollama_driver(OllamaMode.CLOUD)
+        assert isinstance(local_driver, ProviderDriver)
+        assert isinstance(cloud_driver, ProviderDriver)
+
+    def test_both_drivers_target_api_chat(self) -> None:
+        """Both LOCAL and CLOUD drivers use the same /api/chat endpoint path."""
+        assert make_ollama_driver(OllamaMode.LOCAL).endpoint_path == "/api/chat"
+        assert make_ollama_driver(OllamaMode.CLOUD).endpoint_path == "/api/chat"
+
+    def test_local_driver_includes_format_json_with_schema(self) -> None:
+        """LOCAL mode: format:"json" is included when structured_output_schema is set."""
+        req = LLMRequest(
+            request_id="r", provider=LLMProvider.OLLAMA, model="llama3.2",
+            system_prompt="", user_prompt="List items",
+            max_tokens=256, temperature=0.0, streaming=False,
+            structured_output_schema='{"type":"array"}', metadata=(),
+        )
+        config = _make_config()
+        driver = make_ollama_driver(OllamaMode.LOCAL)
+        payload = driver.build_payload(req, config)
+        assert payload.get("format") == "json"
+
+    def test_cloud_driver_suppresses_format_json_with_schema(self) -> None:
+        """CLOUD mode: format:"json" is suppressed regardless of schema presence."""
+        req = LLMRequest(
+            request_id="r", provider=LLMProvider.OLLAMA, model="kimi-k2.7-code",
+            system_prompt="", user_prompt="List items",
+            max_tokens=256, temperature=0.0, streaming=False,
+            structured_output_schema='{"type":"array"}', metadata=(),
+        )
+        config = _make_config()
+        driver = make_ollama_driver(OllamaMode.CLOUD)
+        payload = driver.build_payload(req, config)
+        assert "format" not in payload
+
+    def test_model_name_is_pure_identifier_no_suffix(self) -> None:
+        """Model names carry no transport encoding — mode is explicit via OllamaMode."""
+        req = LLMRequest(
+            request_id="r", provider=LLMProvider.OLLAMA, model="kimi-k2.7-code",
+            system_prompt="", user_prompt="Draft",
+            max_tokens=256, temperature=0.0, streaming=False,
+            structured_output_schema="", metadata=(),
+        )
+        config = _make_config(model="kimi-k2.7-code")
+        for mode in (OllamaMode.LOCAL, OllamaMode.CLOUD):
+            driver = make_ollama_driver(mode)
+            payload = driver.build_payload(req, config)
+            assert payload["model"] == "kimi-k2.7-code"  # no suffix appended
+
+    def test_transport_and_auth_are_independent(self) -> None:
+        """api_key non-empty is valid in LOCAL mode (secured local instance)."""
+        # LOCAL driver with api_key set — auth and transport are separate concerns
+        headers_sent: list[dict] = []
+
+        def capturing_call(endpoint, payload, timeout, api_key) -> dict:
+            headers_sent.append({"api_key": api_key})
+            return _make_ollama_raw_response()
+
+        local_driver = ProviderDriver(
+            build_payload=make_ollama_driver(OllamaMode.LOCAL).build_payload,
+            call_provider=capturing_call,
+            parse_response=_parse_ollama_response,
+            endpoint_path="/api/chat",
+        )
+        adapter = LlmAdapter()
+        adapter.register_provider(LLMProvider.OLLAMA, OLLAMA_LOCAL_CAPABILITIES, driver=local_driver)
+
+        # Local config with an api_key (secured local instance)
+        config = _make_config(base_url="http://localhost:11434", api_key="local-secret")
+        result = adapter.execute(_make_gateway_request(), config)
+
+        assert result.success is True
+        assert headers_sent[0]["api_key"] == "local-secret"  # key passed through
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 14. Ollama capability declarations
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestOllamaCapabilityDeclarations:
+    """LOCAL and CLOUD capability constants reflect actual provider constraints."""
+
+    def test_local_capabilities_support_structured_output(self) -> None:
+        assert OLLAMA_LOCAL_CAPABILITIES.supports_structured_output is True
+
+    def test_cloud_capabilities_do_not_support_structured_output(self) -> None:
+        assert OLLAMA_CLOUD_CAPABILITIES.supports_structured_output is False
+
+    def test_local_does_not_require_api_key(self) -> None:
+        assert OLLAMA_LOCAL_CAPABILITIES.requires_api_key is False
+
+    def test_cloud_requires_api_key(self) -> None:
+        assert OLLAMA_CLOUD_CAPABILITIES.requires_api_key is True
+
+    def test_both_capabilities_use_ollama_provider(self) -> None:
+        assert OLLAMA_LOCAL_CAPABILITIES.provider == LLMProvider.OLLAMA
+        assert OLLAMA_CLOUD_CAPABILITIES.provider == LLMProvider.OLLAMA
+
+    def test_both_support_streaming(self) -> None:
+        assert OLLAMA_LOCAL_CAPABILITIES.supports_streaming is True
+        assert OLLAMA_CLOUD_CAPABILITIES.supports_streaming is True
+
+    def test_both_support_tool_use(self) -> None:
+        assert OLLAMA_LOCAL_CAPABILITIES.supports_tool_use is True
+        assert OLLAMA_CLOUD_CAPABILITIES.supports_tool_use is True
+
+    def test_cloud_model_name_is_plain_identifier(self) -> None:
+        """Default model in CLOUD capabilities is a plain name with no suffix."""
+        assert ":" not in OLLAMA_CLOUD_CAPABILITIES.default_model or \
+               not OLLAMA_CLOUD_CAPABILITIES.default_model.endswith(":cloud")
+
+    def test_driver_constants_are_provider_drivers(self) -> None:
+        from hermes.adapters.llm_adapter import ProviderDriver
+        assert isinstance(OLLAMA_LOCAL_DRIVER, ProviderDriver)
+        assert isinstance(OLLAMA_CLOUD_DRIVER, ProviderDriver)
+
+    def test_all_five_providers_have_declared_capabilities(self) -> None:
+        """All LLMProvider enum values have a declared ProviderCapabilities constant."""
+        all_caps = [
+            OLLAMA_LOCAL_CAPABILITIES,   # covers LLMProvider.OLLAMA
+            ANTHROPIC_CAPABILITIES,
+            OPENAI_CAPABILITIES,
+            GEMINI_CAPABILITIES,
+            OPENROUTER_CAPABILITIES,
+        ]
+        expected_providers = {p for p in LLMProvider}
+        declared_providers = {caps.provider for caps in all_caps}
+        assert expected_providers == declared_providers
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 15. Cloud execution flow
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestCloudExecutionFlow:
+    """Cloud mode suppresses format:"json" and produces valid results."""
+
+    def test_cloud_execution_succeeds(self) -> None:
+        raw = _make_ollama_raw_response(content="Cloud response.")
+        adapter = _make_ollama_adapter(raw_response=raw, mode=OllamaMode.CLOUD)
+        request = _make_gateway_request(payload={"prompt": "Analyse"})
+        config = _make_config(
+            base_url="https://ollama.com",
+            api_key="sk-ollama-test",
+            model="kimi-k2.7-code",
+        )
+        result = adapter.execute(request, config)
+        assert result.success is True
+        assert result.llm_response.content == "Cloud response."
+
+    def test_cloud_execution_preserves_request_id(self) -> None:
+        adapter = _make_ollama_adapter(mode=OllamaMode.CLOUD)
+        request = _make_gateway_request(request_id="cloud-req-001")
+        config = _make_config(base_url="https://ollama.com", api_key="sk-test")
+        result = adapter.execute(request, config)
+        assert result.request_id == "cloud-req-001"
+
+    def test_cloud_structured_output_used_false_when_schema_set(self) -> None:
+        """CLOUD mode: structured_output_used reflects schema presence in LLMRequest
+        (the parse step still records whether a schema was requested, even though
+        the payload did not include format:"json")."""
+        raw = _make_ollama_raw_response(content='{"items": []}')
+        adapter = _make_ollama_adapter(raw_response=raw, mode=OllamaMode.CLOUD)
+        request = _make_gateway_request(
+            payload={"prompt": "List items", "schema": '{"type":"object"}'},
+        )
+        config = _make_config(base_url="https://ollama.com", api_key="sk-test")
+        result = adapter.execute(request, config)
+        # structured_output_used reflects what was requested, not what the payload contained
+        assert result.llm_response.structured_output_used is True
+
+    def test_cloud_and_local_produce_same_response_shape(self) -> None:
+        """Response parsing is mode-agnostic — same LLMResponse shape from both."""
+        raw = _make_ollama_raw_response(content="Same shape", prompt_eval_count=10, eval_count=5)
+        local_adapter = _make_ollama_adapter(raw_response=raw, mode=OllamaMode.LOCAL)
+        cloud_adapter = _make_ollama_adapter(raw_response=raw, mode=OllamaMode.CLOUD)
+        config = _make_config()
+        request = _make_gateway_request()
+
+        local_result = local_adapter.execute(request, config)
+        cloud_result = cloud_adapter.execute(request, config)
+
+        assert local_result.llm_response.content == cloud_result.llm_response.content
+        assert local_result.llm_response.input_tokens == cloud_result.llm_response.input_tokens
+        assert local_result.llm_response.total_tokens == cloud_result.llm_response.total_tokens

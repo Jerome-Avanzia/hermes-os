@@ -17,6 +17,14 @@ from hermes.models.llm_adapter import (
     LLMResponse,
     ProviderCapabilities,
 )
+from hermes.models.filesystem_adapter import (
+    FilesystemExecutionResult,
+    FilesystemOperation,
+    FilesystemRequest,
+    FilesystemResult,
+    FilesystemTarget,
+    FilesystemValidationResult,
+)
 from hermes.models.conductor import (
     ConductorAudit,
     ConductorDecision,
@@ -204,6 +212,12 @@ __all__ = [
     "ExecutiveBrief",
     "Experiment",
     "FileContent",
+    "FilesystemExecutionResult",
+    "FilesystemOperation",
+    "FilesystemRequest",
+    "FilesystemResult",
+    "FilesystemTarget",
+    "FilesystemValidationResult",
     "FounderWorkflow",
     "Goal",
     "Heartbeat",
