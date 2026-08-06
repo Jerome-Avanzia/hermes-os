@@ -1,3 +1,11 @@
+from hermes.models.conductor import (
+    ConductorAudit,
+    ConductorDecision,
+    ConductorRequest,
+    ConductorResult,
+    ConductorStage,
+    ConductorValidationResult,
+)
 from hermes.models.bottleneck import Bottleneck
 from hermes.models.heartbeat import Heartbeat
 from hermes.models.business import Business
@@ -136,6 +144,12 @@ from hermes.models.workspace_file import WorkspaceFile
 from hermes.models.workspace_snapshot import WorkspaceSnapshot
 
 __all__ = [
+    "ConductorAudit",
+    "ConductorDecision",
+    "ConductorRequest",
+    "ConductorResult",
+    "ConductorStage",
+    "ConductorValidationResult",
     "ApprovalDecision",
     "ApprovalStatus",
     "Bottleneck",
