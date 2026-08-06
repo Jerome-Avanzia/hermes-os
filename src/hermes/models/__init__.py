@@ -33,6 +33,13 @@ from hermes.models.git_adapter import (
     GitResult,
     GitValidationResult,
 )
+from hermes.models.docker_adapter import (
+    DockerExecutionResult,
+    DockerOperation,
+    DockerRequest,
+    DockerResult,
+    DockerValidationResult,
+)
 from hermes.models.conductor import (
     ConductorAudit,
     ConductorDecision,
@@ -226,6 +233,11 @@ __all__ = [
     "FilesystemResult",
     "FilesystemTarget",
     "FilesystemValidationResult",
+    "DockerExecutionResult",
+    "DockerOperation",
+    "DockerRequest",
+    "DockerResult",
+    "DockerValidationResult",
     "GitExecutionResult",
     "GitOperation",
     "GitRepository",
