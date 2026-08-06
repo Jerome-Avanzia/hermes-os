@@ -15,6 +15,7 @@ Coverage:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -866,3 +867,72 @@ class TestCLIRegistration:
     def test_hermes_help_lists_implement(self):
         result = runner.invoke(app, ["--help"])
         assert "implement" in result.output
+
+
+# ── Total execution time ──────────────────────────────────────────────────────
+
+
+class TestTotalExecutionTime:
+    """Total execution time appears in CLI output on success and failure."""
+
+    def _mock_env_cfg(self):
+        from hermes.providers.ollama_driver import (
+            OLLAMA_LOCAL_CAPABILITIES,
+            OLLAMA_LOCAL_DRIVER,
+            OllamaEnvConfig,
+            OllamaMode,
+        )
+        return (
+            OllamaEnvConfig(mode=OllamaMode.LOCAL, base_url="http://localhost:11434", api_key=""),
+            OLLAMA_LOCAL_CAPABILITIES,
+            OLLAMA_LOCAL_DRIVER,
+        )
+
+    def _empty_snapshot(self) -> RepositorySnapshot:
+        return _make_snapshot(file_count=0, directory_count=0, git_present=False)
+
+    def test_total_execution_time_shown_on_success(self, tmp_path):
+        report = _make_success_report()
+        env_cfg, caps, driver = self._mock_env_cfg()
+
+        with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
+             patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
+             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
+            mock_ri.return_value.scan.return_value = self._empty_snapshot()
+            mock_wf_cls.return_value.execute.return_value = report
+
+            result = runner.invoke(app, ["implement", "task", "--output", "f.py"])
+
+        assert "Total execution time" in result.output
+
+    def test_total_execution_time_shown_on_failure(self, tmp_path):
+        report = _make_failure_report()
+        env_cfg, caps, driver = self._mock_env_cfg()
+
+        with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
+             patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
+             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
+            mock_ri.return_value.scan.return_value = self._empty_snapshot()
+            mock_wf_cls.return_value.execute.return_value = report
+
+            result = runner.invoke(app, ["implement", "task", "--output", "f.py"])
+
+        assert "Total execution time" in result.output
+
+    def test_total_execution_time_format_matches_pattern(self, tmp_path):
+        """Format must be X.Xs (one decimal place, seconds suffix)."""
+        report = _make_success_report()
+        env_cfg, caps, driver = self._mock_env_cfg()
+
+        with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
+             patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
+             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
+            mock_ri.return_value.scan.return_value = self._empty_snapshot()
+            mock_wf_cls.return_value.execute.return_value = report
+
+            result = runner.invoke(app, ["implement", "task", "--output", "f.py"])
+
+        assert re.search(r"Total execution time: \d+\.\d+s", result.output)

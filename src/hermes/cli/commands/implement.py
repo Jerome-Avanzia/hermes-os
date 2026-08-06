@@ -36,6 +36,8 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+import time
+
 import typer
 
 from hermes.adapters.filesystem_adapter import FilesystemAdapter
@@ -177,10 +179,12 @@ def implement(
     typer.echo(f"Model:        {config.llm_model}  ({env_cfg.mode.value})")
     typer.echo("")
 
+    start_time = time.monotonic()
     report = workflow.execute(goal)
+    elapsed = time.monotonic() - start_time
 
     # ── 7. Print report ───────────────────────────────────────────────────────
-    _print_report(report)
+    _print_report(report, elapsed_seconds=elapsed)
 
     if not report.success:
         raise typer.Exit(code=1)
@@ -254,7 +258,7 @@ def _snapshot_to_context(snapshot: RepositorySnapshot) -> str:
     return "\n".join(lines)
 
 
-def _print_report(report) -> None:  # type: ignore[no-untyped-def]
+def _print_report(report, *, elapsed_seconds: float) -> None:  # type: ignore[no-untyped-def]
     """Print a WorkflowExecutionReport to stdout."""
     status = "✓ SUCCESS" if report.success else "✗ FAILED"
     typer.echo(f"Status: {status}")
@@ -271,3 +275,5 @@ def _print_report(report) -> None:  # type: ignore[no-untyped-def]
     typer.echo("")
     for key, value in report.metadata:
         typer.echo(f"  {key}: {value}")
+
+    typer.echo(f"\n  Total execution time: {elapsed_seconds:.1f}s")
