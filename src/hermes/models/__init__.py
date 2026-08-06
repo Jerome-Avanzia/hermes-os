@@ -8,6 +8,15 @@ from hermes.models.execution_gateway import (
     GatewayAudit,
     GatewayValidationResult,
 )
+from hermes.models.llm_adapter import (
+    AdapterConfiguration,
+    AdapterExecutionResult,
+    AdapterValidationResult,
+    LLMProvider,
+    LLMRequest,
+    LLMResponse,
+    ProviderCapabilities,
+)
 from hermes.models.conductor import (
     ConductorAudit,
     ConductorDecision,
@@ -154,7 +163,10 @@ from hermes.models.workspace_file import WorkspaceFile
 from hermes.models.workspace_snapshot import WorkspaceSnapshot
 
 __all__ = [
+    "AdapterConfiguration",
+    "AdapterExecutionResult",
     "AdapterRegistration",
+    "AdapterValidationResult",
     "DispatchDecision",
     "ExecutionAdapter",
     "ExecutionRequest",
@@ -162,6 +174,10 @@ __all__ = [
     "ExecutionStatus",
     "GatewayAudit",
     "GatewayValidationResult",
+    "LLMProvider",
+    "LLMRequest",
+    "LLMResponse",
+    "ProviderCapabilities",
     "ConductorAudit",
     "ConductorDecision",
     "ConductorRequest",
