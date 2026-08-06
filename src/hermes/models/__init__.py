@@ -81,6 +81,16 @@ from hermes.models.skill import (
     SkillStatus,
     SkillVersion,
 )
+from hermes.models.swarm import (
+    SwarmDefinition,
+    SwarmDependency,
+    SwarmExecutionPlan,
+    SwarmMember,
+    SwarmResult,
+    SwarmStrategy,
+    SwarmValidationError,
+    SwarmValidationResult,
+)
 from hermes.models.skill_registry import (
     CapabilityEntry,
     CapabilityIndex,
@@ -220,6 +230,14 @@ __all__ = [
     "StageTransition",
     "StaleOperation",
     "Strategy",
+    "SwarmDefinition",
+    "SwarmDependency",
+    "SwarmExecutionPlan",
+    "SwarmMember",
+    "SwarmResult",
+    "SwarmStrategy",
+    "SwarmValidationError",
+    "SwarmValidationResult",
     "Task",
     "TokenBudget",
     "TransitionCondition",
