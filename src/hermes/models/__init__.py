@@ -50,6 +50,15 @@ from hermes.models.repository_intelligence import (
     RepositorySnapshot,
     TestLocation,
 )
+from hermes.models.repository_manipulation import (
+    ConflictKind,
+    RepositoryChange,
+    RepositoryConflict,
+    RepositoryManipulationPlan,
+    RepositoryManipulationResult,
+    RepositoryOperation,
+    RepositoryOperationKind,
+)
 from hermes.models.conductor import (
     ConductorAudit,
     ConductorDecision,
@@ -256,6 +265,13 @@ __all__ = [
     "RepositoryFile",
     "RepositorySnapshot",
     "TestLocation",
+    "ConflictKind",
+    "RepositoryChange",
+    "RepositoryConflict",
+    "RepositoryManipulationPlan",
+    "RepositoryManipulationResult",
+    "RepositoryOperation",
+    "RepositoryOperationKind",
     "GitExecutionResult",
     "GitOperation",
     "GitRepository",
