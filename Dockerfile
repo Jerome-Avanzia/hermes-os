@@ -26,6 +26,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---- Runtime: minimal image, non-root user --------------------------------
 FROM python:3.12-slim
 
+# AT-1 Finding #004: git is a required runtime dependency for GitAdapter.
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid 1000 hermes \
     && useradd --uid 1000 --gid hermes --create-home --home-dir /home/hermes hermes
 
