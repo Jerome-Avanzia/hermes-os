@@ -40,6 +40,16 @@ from hermes.models.docker_adapter import (
     DockerResult,
     DockerValidationResult,
 )
+from hermes.models.repository_intelligence import (
+    BuildSystemDetection,
+    ConfigFile,
+    DocumentationFile,
+    EntryPoint,
+    LanguageDetection,
+    RepositoryFile,
+    RepositorySnapshot,
+    TestLocation,
+)
 from hermes.models.conductor import (
     ConductorAudit,
     ConductorDecision,
@@ -238,6 +248,14 @@ __all__ = [
     "DockerRequest",
     "DockerResult",
     "DockerValidationResult",
+    "BuildSystemDetection",
+    "ConfigFile",
+    "DocumentationFile",
+    "EntryPoint",
+    "LanguageDetection",
+    "RepositoryFile",
+    "RepositorySnapshot",
+    "TestLocation",
     "GitExecutionResult",
     "GitOperation",
     "GitRepository",
