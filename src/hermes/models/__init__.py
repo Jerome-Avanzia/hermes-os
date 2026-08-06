@@ -91,7 +91,20 @@ from hermes.models.skill_registry import (
     RegistryEntry,
     RegistryStatistics,
 )
-from hermes.models.operation import InvalidTransitionError, Operation, transition_operation
+from hermes.models.operation import (
+    InvalidTransitionError,
+    Operation,
+    OperationDefinition,
+    OperationDependency,
+    OperationExecutionReference,
+    OperationPriority,
+    OperationResult,
+    OperationStatus,
+    OperationType,
+    OperationValidationError,
+    OperationValidationResult,
+    transition_operation,
+)
 from hermes.models.operation_progress import OperationProgress
 from hermes.models.opportunity import Opportunity
 from hermes.models.organization import Organization
@@ -177,7 +190,16 @@ __all__ = [
     "OmissionReason",
     "OmittedReference",
     "Operation",
+    "OperationDefinition",
+    "OperationDependency",
+    "OperationExecutionReference",
+    "OperationPriority",
     "OperationProgress",
+    "OperationResult",
+    "OperationStatus",
+    "OperationType",
+    "OperationValidationError",
+    "OperationValidationResult",
     "Opportunity",
     "Organization",
     "Person",
