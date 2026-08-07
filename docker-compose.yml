@@ -3,6 +3,10 @@ services:
     build: .
     image: hermes-os:latest
     container_name: hermes
+    # Run as the host operator UID/GID so bind-mounted directories are
+    # writable without chmod/chown. Set HERMES_UID and HERMES_GID in the
+    # deployment environment; defaults to 1000:1000 (image default).
+    user: "${HERMES_UID:-1000}:${HERMES_GID:-1000}"
     restart: unless-stopped
     env_file:
       - .env
