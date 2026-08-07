@@ -1,9 +1,10 @@
-"""Tests for Phase 6 — Engineering Workflow (multi-operation plan execution).
+"""Tests for Phase 6/7 — Engineering Workflow (multi-operation plan execution).
 
 Coverage:
   - All typed contracts (FounderGoal, WorkflowMission, WorkflowConfig,
-    StepExecutionRecord, WorkflowExecutionReport)
-  - EngineeringWorkflow construction (no job_engine — Phase 6)
+    StepExecutionRecord, WorkflowExecutionReport, CorrectionRecord,
+    OperationCorrectionResult)
+  - EngineeringWorkflow construction (Phase 7: requires correction_engine)
   - execute(plan, goal): two-op create plan success
   - execute(plan, goal): two-op modify plan success
   - execute(plan, goal): mixed create + modify plan success
@@ -11,18 +12,22 @@ Coverage:
   - Op 1 fails generate: Op 2 never executes
   - Commit failure at end: success=False
   - operations_completed in metadata
+  - correction_attempts in metadata (Phase 7)
   - Single commit step at end of all_steps
   - Per-op create pipeline has NO commit step (ends at add)
   - Per-op modify pipeline has NO commit step (ends at add)
   - depends_on ordering respected
   - execute() never raises
+  - Phase 7: delegation — workflow calls correction_engine.execute_operation per op
+  - Phase 7: isolation — successful operations are never re-executed during correction
 
 Test strategy:
   - LLM adapter is mocked (MagicMock) — no Ollama required
   - Filesystem and Git use real temporary directories + git repos
   - Gateway is real (ExecutionGateway)
   - OperationEngine is real instance
-  - No job_engine — removed in Phase 6
+  - CorrectionEngine is real instance (wrapping mocked LLM)
+  - For delegation/isolation tests: CorrectionEngine is also mocked
 """
 
 from __future__ import annotations
@@ -37,11 +42,14 @@ from hermes.adapters.filesystem_adapter import FilesystemAdapter
 from hermes.adapters.git_adapter import GitAdapter
 from hermes.adapters.llm_adapter import LlmAdapter
 from hermes.adapters.validation_adapter import ValidationAdapter
+from hermes.kernel.correction_engine import CorrectionEngine
 from hermes.kernel.execution_gateway import ExecutionGateway
 from hermes.kernel.operation_engine import OperationEngine
 from hermes.models.engineering_plan import EngineeringPlan, PlannedOperation
 from hermes.models.engineering_workflow import (
+    CorrectionRecord,
     FounderGoal,
+    OperationCorrectionResult,
     StepExecutionRecord,
     WorkflowConfig,
     WorkflowExecutionReport,
@@ -50,6 +58,7 @@ from hermes.models.engineering_workflow import (
 from hermes.models.execution_gateway import (
     AdapterRegistration,
     ExecutionAdapter,
+    ExecutionRequest,
     ExecutionStatus,
 )
 from hermes.models.llm_adapter import (
@@ -130,6 +139,90 @@ def _make_llm_failure(request_id: str, operation_id: str) -> AdapterExecutionRes
 
 _GENERATED_CODE = "def hello():\n    return 'Hello, World!'\n"
 _MODIFIED_CODE = "def hello():\n    return 'Hello, Modified!'\n"
+
+
+def _make_correction_engine(
+    gateway: ExecutionGateway,
+    mock_llm: MagicMock,
+    fs_adapter: FilesystemAdapter,
+    git_adapter: GitAdapter,
+    validation_adapter: ValidationAdapter,
+    operation_engine: OperationEngine,
+    config: WorkflowConfig,
+) -> CorrectionEngine:
+    """Construct a real CorrectionEngine with a mocked LLM adapter."""
+    return CorrectionEngine(
+        gateway=gateway,
+        llm_adapter=mock_llm,
+        filesystem_adapter=fs_adapter,
+        git_adapter=git_adapter,
+        validation_adapter=validation_adapter,
+        operation_engine=operation_engine,
+        config=config,
+    )
+
+
+def _make_workflow(
+    gateway: ExecutionGateway,
+    mock_llm: MagicMock,
+    fs_adapter: FilesystemAdapter,
+    git_adapter: GitAdapter,
+    validation_adapter: ValidationAdapter,
+    operation_engine: OperationEngine,
+    config: WorkflowConfig,
+) -> EngineeringWorkflow:
+    """Construct EngineeringWorkflow with a real CorrectionEngine (mocked LLM)."""
+    ce = _make_correction_engine(
+        gateway, mock_llm, fs_adapter, git_adapter,
+        validation_adapter, operation_engine, config,
+    )
+    return EngineeringWorkflow(
+        gateway=gateway,
+        git_adapter=git_adapter,
+        operation_engine=operation_engine,
+        config=config,
+        correction_engine=ce,
+    )
+
+
+def _make_dummy_step_record(operation_id: str = "op-0") -> StepExecutionRecord:
+    """Build a minimal successful StepExecutionRecord for use in mock results."""
+    req = ExecutionRequest(
+        request_id=f"req-{operation_id}",
+        operation_id=operation_id,
+        adapter_type=ExecutionAdapter.LLM,
+        action_id="generate",
+        payload=(),
+    )
+    return StepExecutionRecord(
+        step_id=f"step-{operation_id}",
+        operation_id=operation_id,
+        adapter_type=ExecutionAdapter.LLM,
+        action_id="generate",
+        execution_request=req,
+        dispatch_status=ExecutionStatus.DISPATCHED,
+        adapter_success=True,
+        adapter_error=None,
+        output=_GENERATED_CODE,
+    )
+
+
+def _make_op_correction_result(
+    operation_id: str,
+    *,
+    success: bool = True,
+    correction_attempts: int = 0,
+    correction_log: tuple[CorrectionRecord, ...] = (),
+) -> OperationCorrectionResult:
+    """Build a minimal OperationCorrectionResult for use in mock CorrectionEngine."""
+    return OperationCorrectionResult(
+        operation_id=operation_id,
+        success=success,
+        correction_attempts=correction_attempts,
+        correction_log=correction_log,
+        steps=(_make_dummy_step_record(operation_id),),
+        error=None if success else "mock_failure",
+    )
 
 
 @pytest.fixture()
@@ -235,14 +328,9 @@ def workflow(
     operation_engine: OperationEngine,
     config: WorkflowConfig,
 ) -> EngineeringWorkflow:
-    return EngineeringWorkflow(
-        gateway=gateway,
-        llm_adapter=mock_llm,
-        filesystem_adapter=fs_adapter,
-        git_adapter=git_adapter,
-        validation_adapter=validation_adapter,
-        operation_engine=operation_engine,
-        config=config,
+    return _make_workflow(
+        gateway, mock_llm, fs_adapter, git_adapter,
+        validation_adapter, operation_engine, config,
     )
 
 
@@ -463,7 +551,7 @@ class TestWorkflowExecutionReport:
 
 
 class TestEngineeringWorkflowConstruction:
-    def test_constructs_without_job_engine(
+    def test_constructs_with_correction_engine(
         self,
         gateway: ExecutionGateway,
         mock_llm: MagicMock,
@@ -473,37 +561,29 @@ class TestEngineeringWorkflowConstruction:
         operation_engine: OperationEngine,
         config: WorkflowConfig,
     ):
-        wf = EngineeringWorkflow(
-            gateway=gateway,
-            llm_adapter=mock_llm,
-            filesystem_adapter=fs_adapter,
-            git_adapter=git_adapter,
-            validation_adapter=validation_adapter,
-            operation_engine=operation_engine,
-            config=config,
+        """Phase 7: EngineeringWorkflow takes correction_engine, not raw adapters."""
+        wf = _make_workflow(
+            gateway, mock_llm, fs_adapter, git_adapter,
+            validation_adapter, operation_engine, config,
         )
         assert wf is not None
 
-    def test_job_engine_not_accepted(
+    def test_unknown_kwargs_not_accepted(
         self,
         gateway: ExecutionGateway,
-        mock_llm: MagicMock,
-        fs_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
-        validation_adapter: ValidationAdapter,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
     ):
-        """job_engine is no longer a constructor parameter in Phase 6."""
+        """Unknown keyword arguments raise TypeError."""
+        ce = MagicMock(spec=CorrectionEngine)
         with pytest.raises(TypeError):
             EngineeringWorkflow(
                 gateway=gateway,
-                llm_adapter=mock_llm,
-                filesystem_adapter=fs_adapter,
                 git_adapter=git_adapter,
-                validation_adapter=validation_adapter,
                 operation_engine=operation_engine,
                 config=config,
+                correction_engine=ce,
                 job_engine=MagicMock(),  # type: ignore[call-arg]
             )
 
@@ -836,14 +916,9 @@ class TestFailurePropagation:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_failure(
             req.request_id, req.operation_id
         )
-        wf = EngineeringWorkflow(
-            gateway=gateway,
-            llm_adapter=mock_llm,
-            filesystem_adapter=fs_adapter,
-            git_adapter=git_adapter,
-            validation_adapter=validation_adapter,
-            operation_engine=operation_engine,
-            config=config,
+        wf = _make_workflow(
+            gateway, mock_llm, fs_adapter, git_adapter,
+            validation_adapter, operation_engine, config,
         )
         plan = _make_single_create_plan(goal, "hello.py")
         report = wf.execute(plan, goal)
@@ -865,14 +940,9 @@ class TestFailurePropagation:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_failure(
             req.request_id, req.operation_id
         )
-        wf = EngineeringWorkflow(
-            gateway=gateway,
-            llm_adapter=mock_llm,
-            filesystem_adapter=fs_adapter,
-            git_adapter=git_adapter,
-            validation_adapter=validation_adapter,
-            operation_engine=operation_engine,
-            config=config,
+        wf = _make_workflow(
+            gateway, mock_llm, fs_adapter, git_adapter,
+            validation_adapter, operation_engine, config,
         )
         plan = _make_two_create_plan(goal)
         report = wf.execute(plan, goal)
@@ -895,14 +965,9 @@ class TestFailurePropagation:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_failure(
             req.request_id, req.operation_id
         )
-        wf = EngineeringWorkflow(
-            gateway=gateway,
-            llm_adapter=mock_llm,
-            filesystem_adapter=fs_adapter,
-            git_adapter=git_adapter,
-            validation_adapter=validation_adapter,
-            operation_engine=operation_engine,
-            config=config,
+        wf = _make_workflow(
+            gateway, mock_llm, fs_adapter, git_adapter,
+            validation_adapter, operation_engine, config,
         )
         plan = _make_two_create_plan(goal)
         wf.execute(plan, goal)
@@ -935,14 +1000,9 @@ class TestGatewayDispatch:
         repo: Path,
     ):
         empty_gw = ExecutionGateway()
-        wf = EngineeringWorkflow(
-            gateway=empty_gw,
-            llm_adapter=mock_llm,
-            filesystem_adapter=fs_adapter,
-            git_adapter=git_adapter,
-            validation_adapter=validation_adapter,
-            operation_engine=operation_engine,
-            config=config,
+        wf = _make_workflow(
+            empty_gw, mock_llm, fs_adapter, git_adapter,
+            validation_adapter, operation_engine, config,
         )
         plan = _make_single_create_plan(goal, "hello.py")
         report = wf.execute(plan, goal)
@@ -966,14 +1026,9 @@ class TestNeverRaises:
         repo: Path,
     ):
         empty_gw = ExecutionGateway()
-        wf = EngineeringWorkflow(
-            gateway=empty_gw,
-            llm_adapter=mock_llm,
-            filesystem_adapter=fs_adapter,
-            git_adapter=git_adapter,
-            validation_adapter=validation_adapter,
-            operation_engine=operation_engine,
-            config=config,
+        wf = _make_workflow(
+            empty_gw, mock_llm, fs_adapter, git_adapter,
+            validation_adapter, operation_engine, config,
         )
         plan = _make_single_create_plan(goal, "hello.py")
         result = wf.execute(plan, goal)
@@ -993,14 +1048,9 @@ class TestNeverRaises:
     ):
         mock_llm = MagicMock(spec=LlmAdapter)
         mock_llm.execute.side_effect = RuntimeError("unexpected crash")
-        wf = EngineeringWorkflow(
-            gateway=gateway,
-            llm_adapter=mock_llm,
-            filesystem_adapter=fs_adapter,
-            git_adapter=git_adapter,
-            validation_adapter=validation_adapter,
-            operation_engine=operation_engine,
-            config=config,
+        wf = _make_workflow(
+            gateway, mock_llm, fs_adapter, git_adapter,
+            validation_adapter, operation_engine, config,
         )
         plan = _make_single_create_plan(goal, "hello.py")
         result = wf.execute(plan, goal)
@@ -1045,6 +1095,16 @@ class TestMetadata:
         meta = dict(report.metadata)
         assert meta.get("repository") == goal.repository_path
 
+    def test_metadata_contains_correction_attempts(
+        self, workflow: EngineeringWorkflow, goal: FounderGoal, repo: Path
+    ):
+        """correction_attempts is always present in metadata (0 when none needed)."""
+        plan = _make_single_create_plan(goal, "hello.py")
+        report = workflow.execute(plan, goal)
+        meta = dict(report.metadata)
+        assert "correction_attempts" in meta
+        assert meta["correction_attempts"] == "0"
+
 
 # ── TestRunTestsGate ──────────────────────────────────────────────────────────
 
@@ -1075,16 +1135,12 @@ class TestRunTestsGate:
             llm_timeout_seconds=30,
             commit_message="feat: test",
             test_command="pytest",
+            max_corrections=0,  # disable correction loop — test verifies immediate halt
         )
 
-        wf = EngineeringWorkflow(
-            gateway=gateway,
-            llm_adapter=mock_llm,
-            filesystem_adapter=fs_adapter,
-            git_adapter=git_adapter,
-            validation_adapter=validation_adapter,
-            operation_engine=operation_engine,
-            config=config,
+        wf = _make_workflow(
+            gateway, mock_llm, fs_adapter, git_adapter,
+            validation_adapter, operation_engine, config,
         )
 
         original_run = _sp.run
@@ -1108,3 +1164,248 @@ class TestRunTestsGate:
         action_ids = [s.action_id for s in report.steps]
         assert "run_tests" in action_ids
         assert "commit" not in action_ids
+
+
+# ── TestPhase7Delegation ───────────────────────────────────────────────────────
+
+
+class TestPhase7Delegation:
+    """Phase 7: EngineeringWorkflow delegates each PlannedOperation to CorrectionEngine."""
+
+    def test_workflow_calls_correction_engine_per_operation(
+        self,
+        gateway: ExecutionGateway,
+        git_adapter: GitAdapter,
+        operation_engine: OperationEngine,
+        config: WorkflowConfig,
+        goal: FounderGoal,
+        repo: Path,
+    ):
+        """workflow.execute() calls correction_engine.execute_operation() exactly
+        once per PlannedOperation, in topological order."""
+        mock_ce = MagicMock(spec=CorrectionEngine)
+        mock_ce.execute_operation.side_effect = lambda op, g: _make_op_correction_result(
+            op.operation_id, success=True
+        )
+
+        wf = EngineeringWorkflow(
+            gateway=gateway,
+            git_adapter=git_adapter,
+            operation_engine=operation_engine,
+            config=config,
+            correction_engine=mock_ce,
+        )
+
+        plan = _make_two_create_plan(goal)
+        report = wf.execute(plan, goal)
+
+        assert mock_ce.execute_operation.call_count == 2
+        call_op_ids = [
+            call.args[0].operation_id
+            for call in mock_ce.execute_operation.call_args_list
+        ]
+        # op-0 must be called before op-1 (depends_on ordering)
+        assert call_op_ids.index("op-0") < call_op_ids.index("op-1")
+
+    def test_workflow_halts_after_first_failed_operation(
+        self,
+        gateway: ExecutionGateway,
+        git_adapter: GitAdapter,
+        operation_engine: OperationEngine,
+        config: WorkflowConfig,
+        goal: FounderGoal,
+        repo: Path,
+    ):
+        """If operation 0 fails, operation 1 is never delegated."""
+        mock_ce = MagicMock(spec=CorrectionEngine)
+        mock_ce.execute_operation.side_effect = lambda op, g: _make_op_correction_result(
+            op.operation_id, success=(op.operation_id != "op-0")
+        )
+
+        wf = EngineeringWorkflow(
+            gateway=gateway,
+            git_adapter=git_adapter,
+            operation_engine=operation_engine,
+            config=config,
+            correction_engine=mock_ce,
+        )
+
+        plan = _make_two_create_plan(goal)
+        report = wf.execute(plan, goal)
+
+        assert report.success is False
+        # execute_operation called once (op-0 failed, op-1 never started)
+        assert mock_ce.execute_operation.call_count == 1
+
+    def test_correction_attempts_accumulated_across_operations(
+        self,
+        gateway: ExecutionGateway,
+        git_adapter: GitAdapter,
+        operation_engine: OperationEngine,
+        config: WorkflowConfig,
+        goal: FounderGoal,
+        repo: Path,
+    ):
+        """correction_attempts in metadata is the sum across all operations."""
+        mock_ce = MagicMock(spec=CorrectionEngine)
+        mock_ce.execute_operation.side_effect = lambda op, g: _make_op_correction_result(
+            op.operation_id, success=True,
+            correction_attempts=1,  # each op needed one correction
+        )
+
+        wf = EngineeringWorkflow(
+            gateway=gateway,
+            git_adapter=git_adapter,
+            operation_engine=operation_engine,
+            config=config,
+            correction_engine=mock_ce,
+        )
+
+        plan = _make_two_create_plan(goal)
+        report = wf.execute(plan, goal)
+
+        meta = dict(report.metadata)
+        # Two operations, each with correction_attempts=1 → total = 2
+        assert meta.get("correction_attempts") == "2"
+
+
+# ── TestPhase7Isolation ────────────────────────────────────────────────────────
+
+
+class TestPhase7Isolation:
+    """Phase 7: A successfully completed operation is NEVER re-executed while
+    another operation is undergoing correction.
+
+    This is enforced structurally: EngineeringWorkflow calls
+    correction_engine.execute_operation() exactly once per PlannedOperation.
+    The correction loop runs entirely inside CorrectionEngine — the workflow
+    never re-calls execute_operation for an already-completed operation.
+    """
+
+    def test_successful_op1_not_re_executed_when_op2_corrects(
+        self,
+        gateway: ExecutionGateway,
+        git_adapter: GitAdapter,
+        operation_engine: OperationEngine,
+        config: WorkflowConfig,
+        goal: FounderGoal,
+        repo: Path,
+    ):
+        """Op 1 succeeds first attempt. Op 2 needed 2 corrections.
+        execute_operation must be called exactly once for op-0 and once for op-1."""
+        call_counts: dict[str, int] = {}
+
+        def fake_execute(op, g):
+            op_id = op.operation_id
+            call_counts[op_id] = call_counts.get(op_id, 0) + 1
+            return _make_op_correction_result(
+                op_id,
+                success=True,
+                correction_attempts=2 if op_id == "op-1" else 0,
+            )
+
+        mock_ce = MagicMock(spec=CorrectionEngine)
+        mock_ce.execute_operation.side_effect = fake_execute
+
+        wf = EngineeringWorkflow(
+            gateway=gateway,
+            git_adapter=git_adapter,
+            operation_engine=operation_engine,
+            config=config,
+            correction_engine=mock_ce,
+        )
+
+        plan = _make_two_create_plan(goal)
+        report = wf.execute(plan, goal)
+
+        assert report.success is True
+        # op-0 called exactly once — never re-invoked during op-1's correction
+        assert call_counts.get("op-0") == 1, (
+            f"op-0 was called {call_counts.get('op-0')} times — "
+            "must be exactly 1 regardless of op-1's correction count"
+        )
+        # op-1 called exactly once — the correction loop ran INSIDE CorrectionEngine
+        assert call_counts.get("op-1") == 1
+
+    def test_generate_step_count_per_op_reflects_corrections(
+        self,
+        gateway: ExecutionGateway,
+        git_adapter: GitAdapter,
+        operation_engine: OperationEngine,
+        config: WorkflowConfig,
+        goal: FounderGoal,
+        repo: Path,
+    ):
+        """The steps audit trail shows more generate calls for the corrected op,
+        and exactly one generate call for the uncorrected op."""
+        def fake_execute(op, g):
+            op_id = op.operation_id
+            if op_id == "op-0":
+                # First attempt succeeded — one generate step
+                step = _make_dummy_step_record(op_id)
+                return OperationCorrectionResult(
+                    operation_id=op_id,
+                    success=True,
+                    correction_attempts=0,
+                    correction_log=(),
+                    steps=(step,),
+                    error=None,
+                )
+            else:
+                # Required 1 correction — two generate steps (initial + 1 correction)
+                step1 = _make_dummy_step_record(f"{op_id}-initial")
+                step2 = _make_dummy_step_record(f"{op_id}-corr1")
+                step2_rec = StepExecutionRecord(
+                    step_id=f"step-op-generate-corr1-{op_id}",
+                    operation_id=f"op-generate-corr1-{op_id}",
+                    adapter_type=ExecutionAdapter.LLM,
+                    action_id="generate",
+                    execution_request=step1.execution_request,
+                    dispatch_status=ExecutionStatus.DISPATCHED,
+                    adapter_success=True,
+                    adapter_error=None,
+                    output=_GENERATED_CODE,
+                )
+                return OperationCorrectionResult(
+                    operation_id=op_id,
+                    success=True,
+                    correction_attempts=1,
+                    correction_log=(CorrectionRecord(
+                        attempt=1,
+                        trigger="test_failure",
+                        error_excerpt="1 failed",
+                    ),),
+                    steps=(step1, step2_rec),
+                    error=None,
+                )
+
+        mock_ce = MagicMock(spec=CorrectionEngine)
+        mock_ce.execute_operation.side_effect = fake_execute
+
+        wf = EngineeringWorkflow(
+            gateway=gateway,
+            git_adapter=git_adapter,
+            operation_engine=operation_engine,
+            config=config,
+            correction_engine=mock_ce,
+        )
+
+        plan = _make_two_create_plan(goal)
+        report = wf.execute(plan, goal)
+
+        assert report.success is True
+
+        # Count generate steps per operation in the flat audit trail.
+        all_generate_steps = [
+            s for s in report.steps if s.action_id == "generate"
+        ]
+        # op-0: exactly 1 generate step (operation_id contains "op-0")
+        op0_generates = [s for s in all_generate_steps if "op-0" in s.operation_id]
+        assert len(op0_generates) == 1, (
+            f"op-0 has {len(op0_generates)} generate steps — expected exactly 1"
+        )
+        # op-1: 2 generate steps (initial + 1 correction)
+        op1_generates = [s for s in all_generate_steps if "op-1" in s.operation_id]
+        assert len(op1_generates) == 2, (
+            f"op-1 has {len(op1_generates)} generate steps — expected 2 (initial + 1 correction)"
+        )

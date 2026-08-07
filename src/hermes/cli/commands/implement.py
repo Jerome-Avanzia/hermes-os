@@ -1,4 +1,4 @@
-"""Bootstrap Phase 6 — hermes implement <task> CLI command.
+"""Bootstrap Phase 7 — hermes implement <task> CLI command.
 
 Thin wiring layer. All orchestration lives in EngineeringCoordinator.
 
@@ -38,6 +38,7 @@ from hermes.adapters.filesystem_adapter import FilesystemAdapter
 from hermes.adapters.git_adapter import GitAdapter
 from hermes.adapters.llm_adapter import LlmAdapter
 from hermes.adapters.validation_adapter import ValidationAdapter
+from hermes.kernel.correction_engine import CorrectionEngine
 from hermes.kernel.engineering_coordinator import EngineeringCoordinator
 from hermes.kernel.engineering_planner import EngineeringPlanner
 from hermes.kernel.execution_gateway import ExecutionGateway
@@ -179,7 +180,7 @@ def implement(
         temperature=0.0,
     )
 
-    workflow = EngineeringWorkflow(
+    correction_engine = CorrectionEngine(
         gateway=gateway,
         llm_adapter=llm_adapter,
         filesystem_adapter=fs_adapter,
@@ -187,6 +188,14 @@ def implement(
         validation_adapter=validation_adapter,
         operation_engine=op_engine,
         config=config,
+    )
+
+    workflow = EngineeringWorkflow(
+        gateway=gateway,
+        git_adapter=git_adapter,
+        operation_engine=op_engine,
+        config=config,
+        correction_engine=correction_engine,
     )
 
     planner = EngineeringPlanner(
@@ -289,12 +298,12 @@ def _snapshot_to_context(snapshot: RepositorySnapshot) -> str:
 
 def _print_report(report, *, elapsed_seconds: float) -> None:  # type: ignore[no-untyped-def]
     """Print a WorkflowExecutionReport to stdout."""
-    status = "✓ SUCCESS" if report.success else "✗ FAILED"
+    status = "SUCCESS" if report.success else "FAILED"
     typer.echo(f"Status: {status}")
     typer.echo("")
 
     for step in report.steps:
-        step_status = "✓" if step.adapter_success else "✗"
+        step_status = "+" if step.adapter_success else "!"
         typer.echo(f"  {step_status}  {step.adapter_type.value:<12}  {step.action_id}")
 
     if not report.success and report.error:
@@ -302,7 +311,14 @@ def _print_report(report, *, elapsed_seconds: float) -> None:  # type: ignore[no
         typer.echo(f"Error: {report.error}")
 
     typer.echo("")
+    metadata_dict = dict(report.metadata)
+    correction_attempts = int(metadata_dict.get("correction_attempts", "0"))
+    if correction_attempts > 0:
+        typer.echo(f"  correction_attempts: {correction_attempts}")
+
     for key, value in report.metadata:
+        if key == "correction_attempts":
+            continue  # already printed above with emphasis
         typer.echo(f"  {key}: {value}")
 
     typer.echo(f"\n  Total execution time: {elapsed_seconds:.1f}s")

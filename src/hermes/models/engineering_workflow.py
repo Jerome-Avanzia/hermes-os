@@ -121,6 +121,11 @@ class WorkflowConfig:
                            fails if file exists) or "overwrite_file" (create or replace).
                            Bootstrap Phase 1 only — set by implement.py based on whether
                            the target file already exists.
+    test_command         → from BuildSystemDetection.test_command; empty string → skip
+                           test gate
+    max_corrections      → maximum correction attempts per operation before declaring
+                           repair_limit_exceeded. Default 3. Set to 0 to disable the
+                           correction loop entirely (Phase 4 behaviour restored).
 
     Immutable after construction.
     """
@@ -134,6 +139,7 @@ class WorkflowConfig:
     commit_message: str
     write_mode: str = "create_file"  # "create_file" or "overwrite_file" — Bootstrap Phase 1
     test_command: str = ""  # from BuildSystemDetection.test_command; empty string → skip test gate
+    max_corrections: int = 3  # Phase 7: max correction attempts per operation (0 = disabled)
 
 
 # ── StepExecutionRecord ────────────────────────────────────────────────────────
@@ -176,7 +182,70 @@ class StepExecutionRecord:
     dispatch_status: ExecutionStatus
     adapter_success: bool
     adapter_error: str | None
-    output: str                  # content (LLM) or "" (other adapters)
+    output: str                  # LLM step: generated code; run_tests step: raw test
+                                 # output (stdout+stderr, ≤2000 chars) for correction
+                                 # context extraction; all other steps: ""
+
+
+# ── CorrectionRecord ───────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class CorrectionRecord:
+    """Lightweight record of a single correction attempt for one PlannedOperation.
+
+    Captured by CorrectionEngine at the start of each correction cycle to
+    document what error triggered the attempt. Intentionally lightweight —
+    it does not duplicate source code or full step records. The complete step
+    audit trail lives in OperationCorrectionResult.steps.
+
+    attempt       → 1-indexed correction number (first correction = 1)
+    trigger       → "validation_failure" | "test_failure"
+    error_excerpt → verbatim error text (≤2000 chars) that was fed back to the
+                    LLM as correction context
+
+    Immutable after construction.
+    """
+
+    attempt: int
+    trigger: str
+    error_excerpt: str
+
+
+# ── OperationCorrectionResult ──────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class OperationCorrectionResult:
+    """Immutable result of CorrectionEngine.execute_operation() for one PlannedOperation.
+
+    Returned to EngineeringWorkflow after the CorrectionEngine has executed
+    (and optionally corrected) a single PlannedOperation. EngineeringWorkflow
+    accumulates these to build the final WorkflowExecutionReport.
+
+    operation_id        → PlannedOperation.operation_id being reported
+    success             → True if the operation ultimately succeeded (possibly
+                          after one or more correction cycles)
+    correction_attempts → 0 if first attempt passed all gates; N if N correction
+                          cycles were executed. Always present — 0 is a valid value.
+    correction_log      → ordered CorrectionRecords, one per correction cycle;
+                          empty tuple when correction_attempts=0
+    steps               → ALL StepExecutionRecords across the initial attempt and
+                          every correction cycle (complete audit trail);
+                          git.add step included only when success=True
+    error               → None on success; "repair_limit_exceeded" if max_corrections
+                          was exhausted; adapter error string for non-correctable
+                          failures
+
+    Immutable after construction.
+    """
+
+    operation_id: str
+    success: bool
+    correction_attempts: int
+    correction_log: tuple[CorrectionRecord, ...]
+    steps: tuple[StepExecutionRecord, ...]
+    error: str | None
 
 
 # ── WorkflowExecutionReport ────────────────────────────────────────────────────
@@ -218,9 +287,11 @@ class WorkflowExecutionReport:
 
 
 __all__ = [
+    "CorrectionRecord",
     "FounderGoal",
+    "OperationCorrectionResult",
+    "StepExecutionRecord",
     "WorkflowConfig",
     "WorkflowExecutionReport",
     "WorkflowMission",
-    "StepExecutionRecord",
 ]
