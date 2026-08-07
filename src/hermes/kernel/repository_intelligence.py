@@ -137,12 +137,73 @@ _BUILD_SYSTEM_INDICATORS: list[tuple[str, str, str, str]] = [
 ]
 
 # Python-specific: checked after file scan (pyproject.toml can be poetry/setuptools)
+# test_command column is unused — _resolve_python_test_command() is called instead.
 _PYTHON_BUILD_INDICATORS: list[tuple[str, str, str, str]] = [
-    ("pyproject.toml",  "poetry",      "poetry build",       "pytest"),
-    ("setup.py",        "setuptools",  "python setup.py build", "pytest"),
-    ("setup.cfg",       "setuptools",  "python setup.py build", "pytest"),
-    ("requirements.txt","pip",         "pip install -r requirements.txt", "pytest"),
+    ("pyproject.toml",  "poetry",      "poetry build",       ""),
+    ("setup.py",        "setuptools",  "python setup.py build", ""),
+    ("setup.cfg",       "setuptools",  "python setup.py build", ""),
+    ("requirements.txt","pip",         "pip install -r requirements.txt", ""),
 ]
+
+def _resolve_python_test_command(root: Path, root_files: set[str]) -> str:
+    """Return the repository-specific test command for a Python project.
+
+    Priority (highest to lowest):
+      1. uv.lock present                          → 'uv run pytest'
+      2. [tool.poetry] in pyproject.toml          → 'poetry run pytest'
+      3. [tool.hatch] in pyproject.toml           → 'hatch run test'
+      4. tox.ini present                          → 'tox'
+      5. Makefile present with a 'test:' target   → 'make test'
+      6. .venv/bin/pytest exists at repo root     → '.venv/bin/pytest'
+      7. no supported test command                → ''
+
+    Declared toolchain (1–5) takes precedence over local executable
+    discovery (6). An empty string triggers the skip path in the
+    EngineeringWorkflow (executed=False, success=True).
+    """
+    root_lower = {f.lower() for f in root_files}
+
+    # 1. uv — lock file signals uv-managed project
+    if "uv.lock" in root_lower:
+        return "uv run pytest"
+
+    # 2 & 3. pyproject.toml content — poetry or hatch
+    if "pyproject.toml" in root_lower:
+        pyproject = root / "pyproject.toml"
+        try:
+            text = pyproject.read_text(encoding="utf-8", errors="ignore")
+            if "[tool.poetry]" in text:
+                return "poetry run pytest"
+            if "[tool.hatch]" in text or "[tool.hatch." in text:
+                return "hatch run test"
+        except OSError:
+            pass
+
+    # 4. tox
+    if "tox.ini" in root_lower:
+        return "tox"
+
+    # 5. Makefile with a test target (target lines start at column 0)
+    if "makefile" in root_lower:
+        makefile_name = next(
+            (f for f in root_files if f.lower() == "makefile"), "Makefile"
+        )
+        try:
+            for line in (root / makefile_name).read_text(
+                encoding="utf-8", errors="ignore"
+            ).splitlines():
+                if line.startswith("test:") or line.startswith("test :"):
+                    return "make test"
+        except OSError:
+            pass
+
+    # 6. Local venv — repository carries its own test runner
+    if (root / ".venv" / "bin" / "pytest").is_file():
+        return ".venv/bin/pytest"
+
+    # 7. No supported test command — triggers skip path
+    return ""
+
 
 # Node-specific: npm vs yarn vs pnpm
 _NODE_LOCK_FILES: dict[str, str] = {
@@ -625,7 +686,7 @@ class RepositoryIntelligence:
         if primary_lang == "python" or any(
             f.lower() in root_lower for f in ("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt")
         ):
-            for indicator, name, build_cmd, test_cmd in _PYTHON_BUILD_INDICATORS:
+            for indicator, name, build_cmd, _unused_test_cmd in _PYTHON_BUILD_INDICATORS:
                 if indicator.lower() in root_lower:
                     # Distinguish poetry from setuptools via pyproject.toml content
                     if indicator == "pyproject.toml":
@@ -635,18 +696,16 @@ class RepositoryIntelligence:
                             if "[tool.poetry]" in text:
                                 name = "poetry"
                                 build_cmd = "poetry build"
-                                test_cmd = "pytest"
                             else:
                                 name = "setuptools"
                                 build_cmd = "python -m build"
-                                test_cmd = "pytest"
                         except OSError:
                             pass
                     return BuildSystemDetection(
                         name=name,
                         config_file=indicator,
                         build_command=build_cmd,
-                        test_command=test_cmd,
+                        test_command=_resolve_python_test_command(root, root_files),
                     )
 
         # Language-agnostic indicators

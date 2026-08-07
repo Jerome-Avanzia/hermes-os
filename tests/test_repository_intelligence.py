@@ -518,7 +518,7 @@ class TestBuildSystemDetection:
         assert snap.build_system.name == "poetry"
         assert snap.build_system.config_file == "pyproject.toml"
         assert snap.build_system.build_command == "poetry build"
-        assert snap.build_system.test_command == "pytest"
+        assert snap.build_system.test_command == "poetry run pytest"
 
     def test_detects_setuptools_from_pyproject(self, tmp_path):
         repo = tmp_path / "repo"
@@ -627,6 +627,150 @@ class TestBuildSystemDetection:
         assert snap.build_system is not None
         with pytest.raises((AttributeError, TypeError)):
             snap.build_system.name = "other"  # type: ignore[misc]
+
+
+# ── Python test-command resolution tests ──────────────────────────────────────
+
+
+class TestPythonTestCommandResolution:
+    """Tests for _resolve_python_test_command() via BuildSystemDetection."""
+
+    def test_uv_lock_emits_uv_run_pytest(self, tmp_path):
+        repo = tmp_path / "repo"
+        _write(repo / "pyproject.toml", "[build-system]\nrequires=['setuptools']")
+        _write(repo / "uv.lock", "version = 1\n")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == "uv run pytest"
+
+    def test_poetry_pyproject_emits_poetry_run_pytest(self, tmp_path):
+        repo = tmp_path / "repo"
+        _write(repo / "pyproject.toml", "[tool.poetry]\nname = 'myapp'")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == "poetry run pytest"
+
+    def test_hatch_pyproject_emits_hatch_run_test(self, tmp_path):
+        repo = tmp_path / "repo"
+        _write(repo / "pyproject.toml", "[build-system]\n[tool.hatch.envs.default]\n")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == "hatch run test"
+
+    def test_tox_ini_emits_tox(self, tmp_path):
+        repo = tmp_path / "repo"
+        _write(repo / "pyproject.toml", "[build-system]\nrequires=['setuptools']")
+        _write(repo / "tox.ini", "[tox]\nenvlist=py312")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == "tox"
+
+    def test_makefile_with_test_target_emits_make_test(self, tmp_path):
+        repo = tmp_path / "repo"
+        _write(repo / "pyproject.toml", "[build-system]\nrequires=['setuptools']")
+        _write(repo / "Makefile", "test:\n\tpython -m pytest\n\nbuild:\n\tpython -m build\n")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == "make test"
+
+    def test_makefile_without_test_target_falls_through(self, tmp_path):
+        repo = tmp_path / "repo"
+        _write(repo / "pyproject.toml", "[build-system]\nrequires=['setuptools']")
+        _write(repo / "Makefile", "build:\n\tpython -m build\n")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == ""
+
+    def test_venv_bin_pytest_emits_dotenv_path(self, tmp_path):
+        repo = tmp_path / "repo"
+        _write(repo / "pyproject.toml", "[build-system]\nrequires=['setuptools']")
+        venv_pytest = repo / ".venv" / "bin" / "pytest"
+        venv_pytest.parent.mkdir(parents=True, exist_ok=True)
+        venv_pytest.write_text("#!/bin/sh\n")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == ".venv/bin/pytest"
+
+    def test_no_toolchain_returns_empty_string(self, tmp_path):
+        repo = tmp_path / "repo"
+        _write(repo / "pyproject.toml", "[build-system]\nrequires=['setuptools']")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == ""
+
+    def test_uv_lock_takes_priority_over_poetry(self, tmp_path):
+        """uv.lock wins when both uv.lock and [tool.poetry] are present."""
+        repo = tmp_path / "repo"
+        _write(repo / "pyproject.toml", "[tool.poetry]\nname = 'myapp'")
+        _write(repo / "uv.lock", "version = 1\n")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == "uv run pytest"
+
+    def test_uv_lock_takes_priority_over_tox(self, tmp_path):
+        """uv.lock wins when both uv.lock and tox.ini are present."""
+        repo = tmp_path / "repo"
+        _write(repo / "pyproject.toml", "[build-system]\nrequires=['setuptools']")
+        _write(repo / "uv.lock", "version = 1\n")
+        _write(repo / "tox.ini", "[tox]\nenvlist=py312")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == "uv run pytest"
+
+    def test_tox_takes_priority_over_venv(self, tmp_path):
+        """tox.ini wins over .venv/bin/pytest when both are present."""
+        repo = tmp_path / "repo"
+        _write(repo / "pyproject.toml", "[build-system]\nrequires=['setuptools']")
+        _write(repo / "tox.ini", "[tox]\nenvlist=py312")
+        venv_pytest = repo / ".venv" / "bin" / "pytest"
+        venv_pytest.parent.mkdir(parents=True, exist_ok=True)
+        venv_pytest.write_text("#!/bin/sh\n")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == "tox"
+
+    def test_setup_py_resolution(self, tmp_path):
+        """setup.py project with uv.lock emits uv run pytest."""
+        repo = tmp_path / "repo"
+        _write(repo / "setup.py", "from setuptools import setup; setup()")
+        _write(repo / "uv.lock", "version = 1\n")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == "uv run pytest"
+
+    def test_requirements_txt_no_toolchain_returns_empty(self, tmp_path):
+        """requirements.txt project with no toolchain returns empty string."""
+        repo = tmp_path / "repo"
+        _write(repo / "requirements.txt", "flask\n")
+        _write(repo / "main.py", "")
+        engine = RepositoryIntelligence(tmp_path)
+        snap = engine.scan("repo")
+        assert snap.build_system is not None
+        assert snap.build_system.test_command == ""
 
 
 # ── Entry point detection tests ───────────────────────────────────────────────
