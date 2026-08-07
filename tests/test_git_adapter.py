@@ -682,15 +682,24 @@ class TestGitAdapterCommit:
         assert result.success is True
         assert result.git_result is not None
 
-    def test_commit_nothing_to_commit_fails(self, adapter: GitAdapter, repo_with_commit: Path):
-        """Committing with nothing staged should return success=False."""
+    def test_commit_nothing_to_commit_is_noop_success(self, adapter: GitAdapter, repo_with_commit: Path):
+        """Committing with nothing staged returns success=True as a no-op.
+
+        git exits 1 with 'nothing to commit' on stdout. The adapter normalises
+        this to return_code=0 so the workflow continues without halting.
+        The repository is already in the desired state — this is not a failure.
+        """
         request = _make_request(
             "commit", {"repository_path": "repo", "message": "empty"}
         )
         result = adapter.execute(request)
-        # git commit exits 1 when nothing to commit
-        assert result.success is False
-        assert result.error is not None
+        assert result.success is True
+        assert result.error is None
+        assert result.git_result is not None
+        assert result.git_result.return_code == 0
+        # no_op flag is set in git_result metadata
+        meta = dict(result.git_result.metadata)
+        assert meta.get("no_op") == "true"
 
 
 # ── TestGitAdapterBranch ──────────────────────────────────────────────────────

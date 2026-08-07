@@ -450,9 +450,35 @@ class GitAdapter:
         )
 
     def _commit(self, repo_path: Path, git_request: GitRequest) -> GitResult:
-        """Create a commit with the given message."""
+        """Create a commit with the given message.
+
+        A no-op (nothing to commit) is normalised to return_code=0 with
+        metadata no_op=true. This occurs when the generated file content is
+        identical to the committed state, leaving the index unchanged after
+        git add. It is not a failure — the repository is already in the
+        desired state.
+
+        git writes "nothing to commit" to stdout (not stderr) and exits 1.
+        Without this check, the adapter would capture empty stderr and report
+        a fatal failure with no diagnostic message.
+        """
         args = ["commit", "-m", git_request.message]
         stdout, stderr, code = self._run_git(repo_path, args)
+
+        if code != 0 and "nothing to commit" in stdout:
+            logger.info(
+                "GitAdapter: commit no-op (nothing to commit) repo=%r — "
+                "file content already matches committed state",
+                git_request.repository_path,
+            )
+            return GitResult(
+                operation=GitOperation.COMMIT,
+                repository_path=git_request.repository_path,
+                output="no-op: nothing to commit",
+                return_code=0,
+                metadata=(("no_op", "true"),),
+            )
+
         output = stdout if code == 0 else stderr
         return GitResult(
             operation=GitOperation.COMMIT,
