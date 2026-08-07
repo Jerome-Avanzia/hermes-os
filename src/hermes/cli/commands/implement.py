@@ -33,6 +33,7 @@ This module's sole responsibility is Bootstrap Phase 1 orchestration.
 
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
 
@@ -83,7 +84,11 @@ def implement(
 
         hermes implement "Add input validation to the user endpoint" --output src/api.py
     """
-    workspace_root = Path.cwd()
+    # Use HERMES_REPOSITORIES when set (container deployment); fall back to
+    # the shell's CWD for local development where the operator runs the CLI
+    # from inside the target repository.
+    _hermes_repos = os.environ.get("HERMES_REPOSITORIES", "").strip()
+    workspace_root = Path(_hermes_repos) if _hermes_repos else Path.cwd()
 
     # ── 1. Scan repository with RepositoryIntelligence ────────────────────────
     try:

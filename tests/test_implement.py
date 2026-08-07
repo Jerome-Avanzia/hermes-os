@@ -15,6 +15,7 @@ Coverage:
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -736,7 +737,8 @@ class TestImplementCLI:
 
         assert captured_goals[0].output_path == "src/handlers.py"
 
-    def test_implement_goal_workspace_path_is_cwd(self, tmp_path):
+    def test_implement_goal_workspace_path_falls_back_to_cwd(self, tmp_path):
+        """Without HERMES_REPOSITORIES set, workspace_path defaults to CWD."""
         report = _make_success_report()
         env_cfg, caps, driver = self._mock_env_cfg()
 
@@ -749,13 +751,41 @@ class TestImplementCLI:
         with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
              patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
              patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
-             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
+             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path), \
+             patch.dict("os.environ", {}, clear=False):
+            # Ensure HERMES_REPOSITORIES is absent so the CWD fallback fires.
+            os.environ.pop("HERMES_REPOSITORIES", None)
             mock_ri.return_value.scan.return_value = self._empty_snapshot()
             mock_wf_cls.return_value.execute.side_effect = capture_execute
 
             runner.invoke(app, ["implement", "task", "--output", "f.py"])
 
         assert captured_goals[0].workspace_path == str(tmp_path)
+
+    def test_implement_goal_workspace_path_uses_hermes_repositories_env(self, tmp_path):
+        """When HERMES_REPOSITORIES is set, workspace_path uses that directory."""
+        report = _make_success_report()
+        env_cfg, caps, driver = self._mock_env_cfg()
+
+        captured_goals = []
+
+        def capture_execute(goal):
+            captured_goals.append(goal)
+            return report
+
+        repos_root = tmp_path / "repos"
+        repos_root.mkdir()
+
+        with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
+             patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
+             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch.dict("os.environ", {"HERMES_REPOSITORIES": str(repos_root)}):
+            mock_ri.return_value.scan.return_value = self._empty_snapshot()
+            mock_wf_cls.return_value.execute.side_effect = capture_execute
+
+            runner.invoke(app, ["implement", "task", "--output", "f.py"])
+
+        assert captured_goals[0].workspace_path == str(repos_root)
 
     def test_implement_commit_message_derived_from_task(self, tmp_path):
         report = _make_success_report()
