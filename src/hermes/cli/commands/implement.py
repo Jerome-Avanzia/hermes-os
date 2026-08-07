@@ -44,6 +44,7 @@ import typer
 from hermes.adapters.filesystem_adapter import FilesystemAdapter
 from hermes.adapters.git_adapter import GitAdapter
 from hermes.adapters.llm_adapter import LlmAdapter
+from hermes.adapters.validation_adapter import ValidationAdapter
 from hermes.kernel.execution_gateway import ExecutionGateway
 from hermes.kernel.job_engine import JobEngine
 from hermes.kernel.operation_engine import OperationEngine
@@ -158,12 +159,19 @@ def implement(
         available=True,
         description="Workspace git adapter",
     ))
+    gateway.register(AdapterRegistration(
+        adapter=ExecutionAdapter.VALIDATION,
+        adapter_id="validation-workspace",
+        available=True,
+        description="Workspace validation adapter (syntax gate)",
+    ))
 
     llm_adapter = LlmAdapter()
     llm_adapter.register_provider(LLMProvider.OLLAMA, capabilities, driver=driver)
 
     fs_adapter = FilesystemAdapter(workspace_root=workspace_root)
     git_adapter = GitAdapter(workspace_root=workspace_root)
+    validation_adapter = ValidationAdapter(workspace_root=workspace_root)
     job_engine = JobEngine(registry=SkillRegistry())
     op_engine = OperationEngine()
 
@@ -172,6 +180,7 @@ def implement(
         llm_adapter=llm_adapter,
         filesystem_adapter=fs_adapter,
         git_adapter=git_adapter,
+        validation_adapter=validation_adapter,
         job_engine=job_engine,
         operation_engine=op_engine,
         config=config,

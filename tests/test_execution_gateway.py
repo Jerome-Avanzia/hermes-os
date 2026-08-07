@@ -91,11 +91,11 @@ class TestExecutionAdapter:
         values = {a.value for a in ExecutionAdapter}
         assert values == {
             "llm", "git", "http", "filesystem",
-            "database", "automation", "docker", "generic",
+            "database", "automation", "docker", "validation", "generic",
         }
 
-    def test_exactly_eight_adapters(self) -> None:
-        assert len(ExecutionAdapter) == 8
+    def test_exactly_nine_adapters(self) -> None:
+        assert len(ExecutionAdapter) == 9
 
     def test_from_value(self) -> None:
         assert ExecutionAdapter("llm") is ExecutionAdapter.LLM
@@ -455,10 +455,10 @@ class TestExecutionGatewayRegistration:
         # Sorted by adapter type value: "git" < "llm"
         assert ids == ("git-x", "llm-x")
 
-    def test_register_all_eight_adapter_types(self) -> None:
+    def test_register_all_nine_adapter_types(self) -> None:
         for adapter in ExecutionAdapter:
             self.gw.register(_registration(adapter))
-        assert len(self.gw.list_registrations()) == 8
+        assert len(self.gw.list_registrations()) == 9
 
 
 # ── TestExecutionGatewayBuildRequest ─────────────────────────────────────────

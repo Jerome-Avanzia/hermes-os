@@ -32,6 +32,7 @@ import pytest
 from hermes.adapters.filesystem_adapter import FilesystemAdapter
 from hermes.adapters.git_adapter import GitAdapter
 from hermes.adapters.llm_adapter import LlmAdapter
+from hermes.adapters.validation_adapter import ValidationAdapter
 from hermes.kernel.execution_gateway import ExecutionGateway
 from hermes.kernel.job_engine import JobEngine
 from hermes.kernel.operation_engine import OperationEngine
@@ -155,7 +156,7 @@ def repo(workspace: Path) -> Path:
 
 @pytest.fixture()
 def gateway(workspace: Path) -> ExecutionGateway:
-    """A fully registered Gateway with LLM, Filesystem, and Git adapters."""
+    """A fully registered Gateway with LLM, Filesystem, Git, and Validation adapters."""
     gw = ExecutionGateway()
     gw.register(AdapterRegistration(
         adapter=ExecutionAdapter.LLM,
@@ -174,6 +175,12 @@ def gateway(workspace: Path) -> ExecutionGateway:
         adapter_id="git-test",
         available=True,
         description="Test git adapter",
+    ))
+    gw.register(AdapterRegistration(
+        adapter=ExecutionAdapter.VALIDATION,
+        adapter_id="validation-test",
+        available=True,
+        description="Test validation adapter",
     ))
     return gw
 
@@ -198,6 +205,11 @@ def fs_adapter(workspace: Path) -> FilesystemAdapter:
 @pytest.fixture()
 def git_adapter(workspace: Path) -> GitAdapter:
     return GitAdapter(workspace_root=workspace)
+
+
+@pytest.fixture()
+def validation_adapter(workspace: Path) -> ValidationAdapter:
+    return ValidationAdapter(workspace_root=workspace)
 
 
 @pytest.fixture()
@@ -229,6 +241,7 @@ def workflow(
     mock_llm: MagicMock,
     fs_adapter: FilesystemAdapter,
     git_adapter: GitAdapter,
+    validation_adapter: ValidationAdapter,
     job_engine: JobEngine,
     operation_engine: OperationEngine,
     config: WorkflowConfig,
@@ -238,6 +251,7 @@ def workflow(
         llm_adapter=mock_llm,
         filesystem_adapter=fs_adapter,
         git_adapter=git_adapter,
+        validation_adapter=validation_adapter,
         job_engine=job_engine,
         operation_engine=operation_engine,
         config=config,
@@ -454,6 +468,7 @@ class TestEngineeringWorkflowConstruction:
         mock_llm: MagicMock,
         fs_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
@@ -463,6 +478,7 @@ class TestEngineeringWorkflowConstruction:
             llm_adapter=mock_llm,
             filesystem_adapter=fs_adapter,
             git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
@@ -476,11 +492,11 @@ class TestEngineeringWorkflowConstruction:
 class TestOperationPlan:
     """Verify the OperationEngine plans operations correctly."""
 
-    def test_four_operations_built(
+    def test_five_operations_built(
         self, workflow: EngineeringWorkflow, goal: FounderGoal
     ):
         ops = workflow._build_operations(goal, f"job-{goal.goal_id}")
-        assert len(ops) == 4
+        assert len(ops) == 5
 
     def test_operation_types_in_order(
         self, workflow: EngineeringWorkflow, goal: FounderGoal
@@ -491,6 +507,7 @@ class TestOperationPlan:
         assert types == [
             OperationType.LLM,
             OperationType.FILESYSTEM,
+            OperationType.VALIDATION,
             OperationType.GIT,
             OperationType.GIT,
         ]
@@ -509,12 +526,13 @@ class TestOperationPlan:
     ):
         ops = list(workflow._build_operations(goal, f"job-{goal.goal_id}"))
         order = operation_engine.determine_execution_order(ops)
-        # generate must come before write, write before add, add before commit
-        assert len(order) == 4
+        # generate → write → validate → add → commit
+        assert len(order) == 5
         indices = {op_id: i for i, op_id in enumerate(order)}
         gid = goal.goal_id
         assert indices[f"op-generate-{gid}"] < indices[f"op-write-{gid}"]
-        assert indices[f"op-write-{gid}"] < indices[f"op-add-{gid}"]
+        assert indices[f"op-write-{gid}"] < indices[f"op-validate-{gid}"]
+        assert indices[f"op-validate-{gid}"] < indices[f"op-add-{gid}"]
         assert indices[f"op-add-{gid}"] < indices[f"op-commit-{gid}"]
 
     def test_dependencies_declared(
@@ -525,9 +543,12 @@ class TestOperationPlan:
         # write depends on generate
         write_deps = [d.operation_id for d in ops[f"op-write-{gid}"].depends_on]
         assert f"op-generate-{gid}" in write_deps
-        # add depends on write
+        # validate depends on write
+        validate_deps = [d.operation_id for d in ops[f"op-validate-{gid}"].depends_on]
+        assert f"op-write-{gid}" in validate_deps
+        # add depends on validate
         add_deps = [d.operation_id for d in ops[f"op-add-{gid}"].depends_on]
-        assert f"op-write-{gid}" in add_deps
+        assert f"op-validate-{gid}" in add_deps
 
     def test_operations_all_valid(
         self,
@@ -553,9 +574,9 @@ class TestFullSuccessPath:
         report = workflow.execute(goal)
         assert report.success is True, f"Expected success, got error: {report.error}"
 
-    def test_report_has_four_steps(self, workflow: EngineeringWorkflow, goal: FounderGoal):
+    def test_report_has_five_steps(self, workflow: EngineeringWorkflow, goal: FounderGoal):
         report = workflow.execute(goal)
-        assert len(report.steps) == 4
+        assert len(report.steps) == 5
 
     def test_report_no_error(self, workflow: EngineeringWorkflow, goal: FounderGoal):
         report = workflow.execute(goal)
@@ -607,7 +628,7 @@ class TestExecutionSequence:
 
     def test_execution_sequence_field(self, workflow: EngineeringWorkflow, goal: FounderGoal):
         report = workflow.execute(goal)
-        assert report.execution_sequence == ("llm", "filesystem", "git", "git")
+        assert report.execution_sequence == ("llm", "filesystem", "validation", "git", "git")
 
     def test_step_adapter_types_in_order(
         self, workflow: EngineeringWorkflow, goal: FounderGoal
@@ -617,6 +638,7 @@ class TestExecutionSequence:
         assert types == [
             ExecutionAdapter.LLM,
             ExecutionAdapter.FILESYSTEM,
+            ExecutionAdapter.VALIDATION,
             ExecutionAdapter.GIT,
             ExecutionAdapter.GIT,
         ]
@@ -624,7 +646,7 @@ class TestExecutionSequence:
     def test_step_action_ids(self, workflow: EngineeringWorkflow, goal: FounderGoal):
         report = workflow.execute(goal)
         actions = [s.action_id for s in report.steps]
-        assert actions == ["generate", "create_file", "add", "commit"]
+        assert actions == ["generate", "create_file", "validate", "add", "commit"]
 
     def test_llm_called_first(
         self, workflow: EngineeringWorkflow, goal: FounderGoal, mock_llm: MagicMock
@@ -662,14 +684,16 @@ class TestGatewayDispatch:
         report = workflow.execute(goal)
         assert report.steps[0].execution_request.adapter_type == ExecutionAdapter.LLM
         assert report.steps[1].execution_request.adapter_type == ExecutionAdapter.FILESYSTEM
-        assert report.steps[2].execution_request.adapter_type == ExecutionAdapter.GIT
+        assert report.steps[2].execution_request.adapter_type == ExecutionAdapter.VALIDATION
         assert report.steps[3].execution_request.adapter_type == ExecutionAdapter.GIT
+        assert report.steps[4].execution_request.adapter_type == ExecutionAdapter.GIT
 
     def test_gateway_failure_blocks_llm(
         self,
         mock_llm: MagicMock,
         fs_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
@@ -677,7 +701,7 @@ class TestGatewayDispatch:
     ):
         """If the LLM adapter is not registered, the LLM is never called."""
         gw = ExecutionGateway()
-        # Only register Filesystem and Git — NOT LLM
+        # Only register Filesystem, Git, and Validation — NOT LLM
         gw.register(AdapterRegistration(
             adapter=ExecutionAdapter.FILESYSTEM,
             adapter_id="fs", available=True, description="",
@@ -686,11 +710,16 @@ class TestGatewayDispatch:
             adapter=ExecutionAdapter.GIT,
             adapter_id="git", available=True, description="",
         ))
+        gw.register(AdapterRegistration(
+            adapter=ExecutionAdapter.VALIDATION,
+            adapter_id="validation", available=True, description="",
+        ))
         wf = EngineeringWorkflow(
             gateway=gw,
             llm_adapter=mock_llm,
             filesystem_adapter=fs_adapter,
             git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
@@ -705,6 +734,7 @@ class TestGatewayDispatch:
         mock_llm: MagicMock,
         fs_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
@@ -724,11 +754,16 @@ class TestGatewayDispatch:
             adapter=ExecutionAdapter.GIT,
             adapter_id="git", available=True, description="",
         ))
+        gw.register(AdapterRegistration(
+            adapter=ExecutionAdapter.VALIDATION,
+            adapter_id="validation", available=True, description="",
+        ))
         wf = EngineeringWorkflow(
             gateway=gw,
             llm_adapter=mock_llm,
             filesystem_adapter=fs_adapter,
             git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
@@ -756,6 +791,7 @@ class TestFailurePropagation:
         gateway: ExecutionGateway,
         fs_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
@@ -772,6 +808,7 @@ class TestFailurePropagation:
             llm_adapter=mock_llm,
             filesystem_adapter=fs_adapter,
             git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
@@ -790,13 +827,14 @@ class TestFailurePropagation:
         gateway: ExecutionGateway,
         mock_llm: MagicMock,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
         goal: FounderGoal,
         workspace: Path,
     ):
-        """Filesystem failure → git is never called."""
+        """Filesystem failure → validation and git are never called."""
         # Pre-create the file so create_file will fail (file already exists)
         output_file = workspace / goal.output_path
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -807,6 +845,7 @@ class TestFailurePropagation:
             llm_adapter=mock_llm,
             filesystem_adapter=FilesystemAdapter(workspace_root=workspace),
             git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
@@ -824,6 +863,7 @@ class TestFailurePropagation:
         gateway: ExecutionGateway,
         fs_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
@@ -838,6 +878,7 @@ class TestFailurePropagation:
             llm_adapter=mock_llm,
             filesystem_adapter=fs_adapter,
             git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
@@ -851,6 +892,7 @@ class TestFailurePropagation:
         gateway: ExecutionGateway,
         fs_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
@@ -865,6 +907,7 @@ class TestFailurePropagation:
             llm_adapter=mock_llm,
             filesystem_adapter=fs_adapter,
             git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
@@ -902,7 +945,7 @@ class TestAuditTrail:
     ):
         report = workflow.execute(goal)
         meta = dict(report.metadata)
-        assert meta.get("steps_completed") == "4"
+        assert meta.get("steps_completed") == "5"
 
     def test_metadata_contains_generated_file(
         self, workflow: EngineeringWorkflow, goal: FounderGoal
@@ -961,6 +1004,7 @@ class TestNeverRaises:
         mock_llm: MagicMock,
         fs_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
@@ -972,6 +1016,7 @@ class TestNeverRaises:
             llm_adapter=mock_llm,
             filesystem_adapter=fs_adapter,
             git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
@@ -985,6 +1030,7 @@ class TestNeverRaises:
         gateway: ExecutionGateway,
         fs_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
@@ -997,6 +1043,7 @@ class TestNeverRaises:
             llm_adapter=mock_llm,
             filesystem_adapter=fs_adapter,
             git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
@@ -1036,6 +1083,9 @@ class TestGatewayBoundary:
         gw.register(AdapterRegistration(
             adapter=ExecutionAdapter.GIT, adapter_id="git", available=True, description="",
         ))
+        gw.register(AdapterRegistration(
+            adapter=ExecutionAdapter.VALIDATION, adapter_id="validation", available=True, description="",
+        ))
 
         original_dispatch = gw.dispatch
         dispatch_calls = []
@@ -1051,21 +1101,23 @@ class TestGatewayBoundary:
             llm_adapter=mock_llm,
             filesystem_adapter=FilesystemAdapter(workspace_root=workspace),
             git_adapter=GitAdapter(workspace_root=workspace),
+            validation_adapter=ValidationAdapter(workspace_root=workspace),
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
         )
         report = wf.execute(goal)
 
-        # Gateway must be called exactly once per step (4 steps = 4 dispatch calls)
+        # Gateway must be called exactly once per step (5 steps = 5 dispatch calls)
         assert report.success is True
-        assert len(dispatch_calls) == 4
+        assert len(dispatch_calls) == 5
 
     def test_adapter_not_called_when_gateway_returns_unsupported(
         self,
         mock_llm: MagicMock,
         fs_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
@@ -1078,6 +1130,7 @@ class TestGatewayBoundary:
             llm_adapter=mock_llm,
             filesystem_adapter=fs_adapter,
             git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
@@ -1091,6 +1144,7 @@ class TestGatewayBoundary:
         mock_llm: MagicMock,
         fs_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
@@ -1102,6 +1156,7 @@ class TestGatewayBoundary:
             llm_adapter=mock_llm,
             filesystem_adapter=fs_adapter,
             git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
             job_engine=job_engine,
             operation_engine=operation_engine,
             config=config,
@@ -1146,7 +1201,7 @@ class TestDeterminism:
         self, workflow: EngineeringWorkflow, goal: FounderGoal
     ):
         report = workflow.execute(goal)
-        assert report.execution_sequence == ("llm", "filesystem", "git", "git")
+        assert report.execution_sequence == ("llm", "filesystem", "validation", "git", "git")
 
     def test_operation_ids_derived_from_goal_id(
         self, workflow: EngineeringWorkflow, goal: FounderGoal
@@ -1156,6 +1211,7 @@ class TestDeterminism:
         op_ids = {op.id for op in ops}
         assert f"op-generate-{gid}" in op_ids
         assert f"op-write-{gid}" in op_ids
+        assert f"op-validate-{gid}" in op_ids
         assert f"op-add-{gid}" in op_ids
         assert f"op-commit-{gid}" in op_ids
 

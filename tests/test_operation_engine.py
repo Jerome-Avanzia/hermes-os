@@ -146,7 +146,7 @@ class TestOperationPriority:
 
 class TestOperationType:
     def test_all_values(self) -> None:
-        expected = {"llm", "git", "http", "filesystem", "database", "automation", "docker", "generic"}
+        expected = {"llm", "git", "http", "filesystem", "database", "automation", "docker", "validation", "generic"}
         actual = {t.value for t in OperationType}
         assert actual == expected
 

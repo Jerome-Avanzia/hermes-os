@@ -188,6 +188,7 @@ class TestWriteModeFlowsThroughWorkflow:
         from hermes.adapters.filesystem_adapter import FilesystemAdapter
         from hermes.adapters.git_adapter import GitAdapter
         from hermes.adapters.llm_adapter import LlmAdapter
+        from hermes.adapters.validation_adapter import ValidationAdapter
         from hermes.kernel.execution_gateway import ExecutionGateway
         from hermes.kernel.job_engine import JobEngine
         from hermes.kernel.operation_engine import OperationEngine
@@ -199,6 +200,7 @@ class TestWriteModeFlowsThroughWorkflow:
         gw.register(AdapterRegistration(adapter=ExecutionAdapter.LLM, adapter_id="llm-test", available=True, description=""))
         gw.register(AdapterRegistration(adapter=ExecutionAdapter.FILESYSTEM, adapter_id="fs-test", available=True, description=""))
         gw.register(AdapterRegistration(adapter=ExecutionAdapter.GIT, adapter_id="git-test", available=True, description=""))
+        gw.register(AdapterRegistration(adapter=ExecutionAdapter.VALIDATION, adapter_id="validation-test", available=True, description=""))
 
         config = WorkflowConfig(
             llm_provider=LLMProvider.OLLAMA,
@@ -215,6 +217,7 @@ class TestWriteModeFlowsThroughWorkflow:
             llm_adapter=LlmAdapter(),
             filesystem_adapter=FilesystemAdapter(workspace_root=tmp_path),
             git_adapter=GitAdapter(workspace_root=tmp_path),
+            validation_adapter=ValidationAdapter(workspace_root=tmp_path),
             job_engine=JobEngine(registry=SkillRegistry()),
             operation_engine=OperationEngine(),
             config=config,
@@ -235,7 +238,7 @@ class TestWriteModeFlowsThroughWorkflow:
         assert fs_op.execution_ref.action_id == "create_file"
 
     def test_modify_file_write_mode_sets_action_ids(self, tmp_path):
-        """modify_file mode builds a 5-step plan with read_file and modify_file actions."""
+        """modify_file mode builds a 6-step plan with read_file, modify_file, and validate actions."""
         from hermes.models.engineering_workflow import FounderGoal
         workflow = self._make_workflow(tmp_path, "modify_file")
         goal = FounderGoal(
@@ -253,7 +256,7 @@ class TestWriteModeFlowsThroughWorkflow:
         ]
         assert "read_file" in fs_action_ids
         assert "modify_file" in fs_action_ids
-        assert len(ops) == 5
+        assert len(ops) == 6
 
     def test_default_write_mode_preserves_create_file_action_id(self, tmp_path):
         """The default write_mode keeps existing behaviour: action_id == 'create_file'."""
@@ -829,7 +832,7 @@ class TestImplementCLI:
 
         assert captured_configs[0].llm_provider == LLMProvider.OLLAMA
 
-    def test_implement_gateway_registers_three_adapters(self, tmp_path):
+    def test_implement_gateway_registers_four_adapters(self, tmp_path):
         report = _make_success_report()
         env_cfg, caps, driver = self._mock_env_cfg()
 
@@ -852,6 +855,7 @@ class TestImplementCLI:
         assert gw.resolve(ExecutionAdapter.LLM) is not None
         assert gw.resolve(ExecutionAdapter.FILESYSTEM) is not None
         assert gw.resolve(ExecutionAdapter.GIT) is not None
+        assert gw.resolve(ExecutionAdapter.VALIDATION) is not None
 
     def test_implement_ri_scan_called_with_repo(self, tmp_path):
         report = _make_success_report()

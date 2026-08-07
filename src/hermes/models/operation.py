@@ -162,6 +162,7 @@ class OperationType(enum.Enum):
     DATABASE = "database"     # database queries and mutations
     AUTOMATION = "automation" # browser or UI automation
     DOCKER = "docker"         # container build and run
+    VALIDATION = "validation" # code validation (syntax check, test runner, linter)
     GENERIC = "generic"       # no specific gateway adapter required
 
 

@@ -17,19 +17,21 @@ Every component used here already exists. The workflow's sole responsibility
 is composition: receiving a Founder Goal and orchestrating existing components
 to produce committed code.
 
-Create mode (write_mode="create_file") — AT-1 path, 4 steps:
+Create mode (write_mode="create_file") — AT-3 path, 5 steps:
   1. LLM generates source code from the goal description
   2. Filesystem creates the output file
-  3. Git stages the output file
-  4. Git commits the staged change
+  3. Validation adapter checks the generated file (pre-commit gate)
+  4. Git stages the output file
+  5. Git commits the staged change
 
-Modify mode (write_mode="modify_file") — AT-2 path, 5 steps:
+Modify mode (write_mode="modify_file") — AT-3 path, 6 steps:
   1. Filesystem reads the existing file content
   2. (RepositoryManipulationPlan validation — deterministic gate, no LLM)
   3. LLM generates the complete modified file (existing content in prompt)
   4. Filesystem writes the modified file (fails if file missing)
-  5. Git stages the modified file
-  6. Git commits the staged change
+  5. Validation adapter checks the modified file (pre-commit gate)
+  6. Git stages the output file
+  7. Git commits the staged change
 
 RepositoryManipulationPlan invariant (modify mode only):
   Before any LLM token is consumed, the planned MODIFY_FILE operation is
@@ -83,6 +85,7 @@ import logging
 from hermes.adapters.filesystem_adapter import FilesystemAdapter
 from hermes.adapters.git_adapter import GitAdapter
 from hermes.adapters.llm_adapter import LlmAdapter
+from hermes.adapters.validation_adapter import ValidationAdapter
 from hermes.kernel.execution_gateway import ExecutionGateway
 from hermes.kernel.job_engine import JobEngine
 from hermes.kernel.operation_engine import OperationEngine
@@ -115,7 +118,12 @@ logger = logging.getLogger(__name__)
 
 _ADAPTER_ID_TO_TYPE: dict[str, ExecutionAdapter] = {
     op.value: op
-    for op in [ExecutionAdapter.LLM, ExecutionAdapter.FILESYSTEM, ExecutionAdapter.GIT]
+    for op in [
+        ExecutionAdapter.LLM,
+        ExecutionAdapter.FILESYSTEM,
+        ExecutionAdapter.GIT,
+        ExecutionAdapter.VALIDATION,
+    ]
 }
 
 
@@ -171,6 +179,7 @@ class EngineeringWorkflow:
         llm_adapter: LlmAdapter,
         filesystem_adapter: FilesystemAdapter,
         git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
         job_engine: JobEngine,
         operation_engine: OperationEngine,
         config: WorkflowConfig,
@@ -182,6 +191,7 @@ class EngineeringWorkflow:
             llm_adapter:          The LLM Adapter — code generation.
             filesystem_adapter:   The Filesystem Adapter — file writing.
             git_adapter:          The Git Adapter — staging and committing.
+            validation_adapter:   The Validation Adapter — pre-commit syntax gate.
             job_engine:           The Job Engine — job planning.
             operation_engine:     The Operation Engine — operation planning.
             config:               Workflow runtime configuration.
@@ -190,6 +200,7 @@ class EngineeringWorkflow:
         self._llm_adapter = llm_adapter
         self._filesystem_adapter = filesystem_adapter
         self._git_adapter = git_adapter
+        self._validation_adapter = validation_adapter
         self._job_engine = job_engine
         self._operation_engine = operation_engine
         self._config = config
@@ -223,16 +234,18 @@ class EngineeringWorkflow:
         goal: FounderGoal,
         job_id: str,
     ) -> tuple[OperationDefinition, ...]:
-        """Build the four-step create-mode plan (AT-1 path — unchanged).
+        """Build the five-step create-mode plan.
 
-        Step 1 — generate (LLM):   adapter_id="llm",        action_id="generate"
-        Step 2 — write (FS):        adapter_id="filesystem", action_id="create_file"
-        Step 3 — add (Git):         adapter_id="git",        action_id="add"
-        Step 4 — commit (Git):      adapter_id="git",        action_id="commit"
+        Step 1 — generate (LLM):        adapter_id="llm",        action_id="generate"
+        Step 2 — write (FS):             adapter_id="filesystem", action_id="create_file"
+        Step 3 — validate (Validation):  adapter_id="validation", action_id="validate"
+        Step 4 — add (Git):              adapter_id="git",        action_id="add"
+        Step 5 — commit (Git):           adapter_id="git",        action_id="commit"
         """
         gid = goal.goal_id
         op_generate_id = f"op-generate-{gid}"
         op_write_id = f"op-write-{gid}"
+        op_validate_id = f"op-validate-{gid}"
         op_add_id = f"op-add-{gid}"
         op_commit_id = f"op-commit-{gid}"
 
@@ -263,13 +276,26 @@ class EngineeringWorkflow:
             ),
         )
 
+        op_validate = engine.build_operation(
+            id=op_validate_id,
+            job_id=job_id,
+            goal=f"Validate generated code at {goal.output_path}",
+            operation_type=OperationType.VALIDATION,
+            sequence_index=2,
+            depends_on=[OperationDependency(operation_id=op_write_id)],
+            execution_ref=OperationExecutionReference(
+                adapter_id="validation",
+                action_id="validate",
+            ),
+        )
+
         op_add = engine.build_operation(
             id=op_add_id,
             job_id=job_id,
             goal=f"Stage {goal.output_path} for commit",
             operation_type=OperationType.GIT,
-            sequence_index=2,
-            depends_on=[OperationDependency(operation_id=op_write_id)],
+            sequence_index=3,
+            depends_on=[OperationDependency(operation_id=op_validate_id)],
             execution_ref=OperationExecutionReference(
                 adapter_id="git",
                 action_id="add",
@@ -281,7 +307,7 @@ class EngineeringWorkflow:
             job_id=job_id,
             goal="Commit staged changes with goal description as context",
             operation_type=OperationType.GIT,
-            sequence_index=3,
+            sequence_index=4,
             depends_on=[OperationDependency(operation_id=op_add_id)],
             execution_ref=OperationExecutionReference(
                 adapter_id="git",
@@ -289,14 +315,14 @@ class EngineeringWorkflow:
             ),
         )
 
-        return (op_generate, op_write, op_add, op_commit)
+        return (op_generate, op_write, op_validate, op_add, op_commit)
 
     def _build_modify_operations(
         self,
         goal: FounderGoal,
         job_id: str,
     ) -> tuple[OperationDefinition, ...]:
-        """Build the five-step modify-mode plan (AT-2 path).
+        """Build the six-step modify-mode plan (AT-3 path).
 
         Step 1 — read_file (FS):    adapter_id="filesystem", action_id="read_file"
         Step 2 — generate (LLM):    adapter_id="llm",        action_id="generate"
@@ -304,13 +330,15 @@ class EngineeringWorkflow:
                                      this step in execute() — no LLM tokens
                                      are consumed if the plan is invalid)
         Step 3 — modify_file (FS):  adapter_id="filesystem", action_id="modify_file"
-        Step 4 — add (Git):         adapter_id="git",        action_id="add"
-        Step 5 — commit (Git):      adapter_id="git",        action_id="commit"
+        Step 4 — validate:          adapter_id="validation",  action_id="validate"
+        Step 5 — add (Git):         adapter_id="git",        action_id="add"
+        Step 6 — commit (Git):      adapter_id="git",        action_id="commit"
         """
         gid = goal.goal_id
         op_read_id = f"op-read-{gid}"
         op_generate_id = f"op-generate-{gid}"
         op_write_id = f"op-write-{gid}"
+        op_validate_id = f"op-validate-{gid}"
         op_add_id = f"op-add-{gid}"
         op_commit_id = f"op-commit-{gid}"
 
@@ -354,13 +382,26 @@ class EngineeringWorkflow:
             ),
         )
 
+        op_validate = engine.build_operation(
+            id=op_validate_id,
+            job_id=job_id,
+            goal=f"Validate modified code at {goal.output_path}",
+            operation_type=OperationType.VALIDATION,
+            sequence_index=3,
+            depends_on=[OperationDependency(operation_id=op_write_id)],
+            execution_ref=OperationExecutionReference(
+                adapter_id="validation",
+                action_id="validate",
+            ),
+        )
+
         op_add = engine.build_operation(
             id=op_add_id,
             job_id=job_id,
             goal=f"Stage {goal.output_path} for commit",
             operation_type=OperationType.GIT,
-            sequence_index=3,
-            depends_on=[OperationDependency(operation_id=op_write_id)],
+            sequence_index=4,
+            depends_on=[OperationDependency(operation_id=op_validate_id)],
             execution_ref=OperationExecutionReference(
                 adapter_id="git",
                 action_id="add",
@@ -372,7 +413,7 @@ class EngineeringWorkflow:
             job_id=job_id,
             goal="Commit staged changes with goal description as context",
             operation_type=OperationType.GIT,
-            sequence_index=4,
+            sequence_index=5,
             depends_on=[OperationDependency(operation_id=op_add_id)],
             execution_ref=OperationExecutionReference(
                 adapter_id="git",
@@ -380,7 +421,7 @@ class EngineeringWorkflow:
             ),
         )
 
-        return (op_read, op_generate, op_write, op_add, op_commit)
+        return (op_read, op_generate, op_write, op_validate, op_add, op_commit)
 
     def _build_llm_config(self) -> AdapterConfiguration:
         """Build the AdapterConfiguration from workflow config for LLM calls."""
@@ -537,6 +578,9 @@ class EngineeringWorkflow:
                 "files": repo_relative,
             }
 
+        if ref.adapter_id == "validation" and ref.action_id == "validate":
+            return {"path": goal.output_path}
+
         if ref.adapter_id == "git" and ref.action_id == "commit":
             return {
                 "repository_path": goal.repository_path,
@@ -652,6 +696,21 @@ class EngineeringWorkflow:
                     "EngineeringWorkflow: Git step complete op=%r action=%r "
                     "success=%s",
                     op.id, action_id, success,
+                )
+
+            elif adapter_type == ExecutionAdapter.VALIDATION:
+                adapter_result = self._validation_adapter.execute(request)
+                success = adapter_result.success
+                error = adapter_result.error
+                output = ""
+                logger.info(
+                    "EngineeringWorkflow: Validation step complete op=%r "
+                    "success=%s validator=%r",
+                    op.id, success,
+                    (
+                        adapter_result.validation_result.validator_used
+                        if adapter_result.validation_result else "n/a"
+                    ),
                 )
 
             else:

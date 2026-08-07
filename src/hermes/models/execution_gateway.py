@@ -75,6 +75,7 @@ class ExecutionAdapter(enum.Enum):
     DATABASE   → database queries and mutations
     AUTOMATION → browser or UI automation
     DOCKER     → container build and run
+    VALIDATION → code validation (syntax check, test runner, linter)
     GENERIC    → no specific external system required
     """
 
@@ -85,6 +86,7 @@ class ExecutionAdapter(enum.Enum):
     DATABASE = "database"
     AUTOMATION = "automation"
     DOCKER = "docker"
+    VALIDATION = "validation"
     GENERIC = "generic"
 
 
