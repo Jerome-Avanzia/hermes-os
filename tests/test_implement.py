@@ -177,6 +177,31 @@ class TestWorkflowConfigWriteMode:
         assert config.commit_message == "chore: update"
         assert config.write_mode == "create_file"
 
+    def test_default_test_command_is_empty_string(self):
+        config = WorkflowConfig(
+            llm_provider=LLMProvider.OLLAMA,
+            llm_model="llama3.2",
+            llm_base_url="http://localhost:11434",
+            llm_api_key="",
+            llm_max_tokens=4096,
+            llm_timeout_seconds=60,
+            commit_message="feat: test",
+        )
+        assert config.test_command == ""
+
+    def test_test_command_can_be_set(self):
+        config = WorkflowConfig(
+            llm_provider=LLMProvider.OLLAMA,
+            llm_model="llama3.2",
+            llm_base_url="http://localhost:11434",
+            llm_api_key="",
+            llm_max_tokens=4096,
+            llm_timeout_seconds=60,
+            commit_message="feat: test",
+            test_command="pytest -x",
+        )
+        assert config.test_command == "pytest -x"
+
 
 # ── write_mode flows through EngineeringWorkflow ──────────────────────────────
 
@@ -256,7 +281,7 @@ class TestWriteModeFlowsThroughWorkflow:
         ]
         assert "read_file" in fs_action_ids
         assert "modify_file" in fs_action_ids
-        assert len(ops) == 6
+        assert len(ops) == 7  # read+gen+write+validate+test+add+commit
 
     def test_default_write_mode_preserves_create_file_action_id(self, tmp_path):
         """The default write_mode keeps existing behaviour: action_id == 'create_file'."""
@@ -977,3 +1002,106 @@ class TestTotalExecutionTime:
             result = runner.invoke(app, ["implement", "task", "--output", "f.py"])
 
         assert re.search(r"Total execution time: \d+\.\d+s", result.output)
+
+
+# ── TestTestCommandExtraction ─────────────────────────────────────────────────
+
+
+class TestTestCommandExtraction:
+    """Verify test_command is extracted from BuildSystemDetection and passed to WorkflowConfig."""
+
+    def _mock_env_cfg(self):
+        from hermes.providers.ollama_driver import (
+            OLLAMA_LOCAL_CAPABILITIES,
+            OLLAMA_LOCAL_DRIVER,
+            OllamaEnvConfig,
+            OllamaMode,
+        )
+        return (
+            OllamaEnvConfig(mode=OllamaMode.LOCAL, base_url="http://localhost:11434", api_key=""),
+            OLLAMA_LOCAL_CAPABILITIES,
+            OLLAMA_LOCAL_DRIVER,
+        )
+
+    def test_test_command_from_build_system(self, tmp_path):
+        """When BuildSystemDetection has a test_command, it flows to WorkflowConfig."""
+        from unittest.mock import patch, MagicMock
+        report = _make_success_report()
+        env_cfg, caps, driver = self._mock_env_cfg()
+
+        snap = _make_snapshot(build_system=BuildSystemDetection(
+            name="poetry",
+            config_file="pyproject.toml",
+            build_command="poetry build",
+            test_command="pytest --tb=short",
+        ))
+
+        captured_configs = []
+
+        def capture_init(**kwargs):
+            captured_configs.append(kwargs.get("config"))
+            m = MagicMock()
+            m.execute.return_value = report
+            return m
+
+        with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
+             patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
+             patch("hermes.cli.commands.implement.EngineeringWorkflow", side_effect=capture_init), \
+             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
+            mock_ri.return_value.scan.return_value = snap
+            runner.invoke(app, ["implement", "task", "--output", "f.py"])
+
+        assert captured_configs[0].test_command == "pytest --tb=short"
+
+    def test_no_build_system_gives_empty_test_command(self, tmp_path):
+        """When build_system is None, test_command must be empty string (not 'pytest')."""
+        from unittest.mock import patch, MagicMock
+        report = _make_success_report()
+        env_cfg, caps, driver = self._mock_env_cfg()
+
+        snap = _make_snapshot(build_system=None)
+        captured_configs = []
+
+        def capture_init(**kwargs):
+            captured_configs.append(kwargs.get("config"))
+            m = MagicMock()
+            m.execute.return_value = report
+            return m
+
+        with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
+             patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
+             patch("hermes.cli.commands.implement.EngineeringWorkflow", side_effect=capture_init), \
+             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
+            mock_ri.return_value.scan.return_value = snap
+            runner.invoke(app, ["implement", "task", "--output", "f.py"])
+
+        assert captured_configs[0].test_command == ""
+
+    def test_empty_build_system_test_command_gives_empty(self, tmp_path):
+        """When build_system.test_command is empty, test_command must be empty (no fallback)."""
+        from unittest.mock import patch, MagicMock
+        report = _make_success_report()
+        env_cfg, caps, driver = self._mock_env_cfg()
+
+        snap = _make_snapshot(build_system=BuildSystemDetection(
+            name="custom",
+            config_file="Makefile",
+            build_command="make build",
+            test_command="",
+        ))
+        captured_configs = []
+
+        def capture_init(**kwargs):
+            captured_configs.append(kwargs.get("config"))
+            m = MagicMock()
+            m.execute.return_value = report
+            return m
+
+        with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
+             patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
+             patch("hermes.cli.commands.implement.EngineeringWorkflow", side_effect=capture_init), \
+             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
+            mock_ri.return_value.scan.return_value = snap
+            runner.invoke(app, ["implement", "task", "--output", "f.py"])
+
+        assert captured_configs[0].test_command == ""

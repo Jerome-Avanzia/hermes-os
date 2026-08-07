@@ -112,6 +112,12 @@ def implement(
     output_abs = workspace_root / output
     write_mode = "modify_file" if output_abs.exists() else "create_file"
 
+    test_command = (
+        snapshot.build_system.test_command.strip()
+        if snapshot.build_system and snapshot.build_system.test_command.strip()
+        else ""
+    )
+
     config = WorkflowConfig(
         llm_provider=LLMProvider.OLLAMA,
         llm_model=capabilities.default_model,
@@ -121,6 +127,7 @@ def implement(
         llm_timeout_seconds=120,
         commit_message=f"feat: {task[:72]}",
         write_mode=write_mode,
+        test_command=test_command,
     )
 
     # ── 4. Build FounderGoal with repository context injected into description ─

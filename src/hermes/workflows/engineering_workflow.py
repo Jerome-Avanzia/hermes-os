@@ -234,18 +234,20 @@ class EngineeringWorkflow:
         goal: FounderGoal,
         job_id: str,
     ) -> tuple[OperationDefinition, ...]:
-        """Build the five-step create-mode plan.
+        """Build the six-step create-mode plan.
 
         Step 1 — generate (LLM):        adapter_id="llm",        action_id="generate"
         Step 2 — write (FS):             adapter_id="filesystem", action_id="create_file"
         Step 3 — validate (Validation):  adapter_id="validation", action_id="validate"
-        Step 4 — add (Git):              adapter_id="git",        action_id="add"
-        Step 5 — commit (Git):           adapter_id="git",        action_id="commit"
+        Step 4 — run_tests (Validation): adapter_id="validation", action_id="run_tests"
+        Step 5 — add (Git):              adapter_id="git",        action_id="add"
+        Step 6 — commit (Git):           adapter_id="git",        action_id="commit"
         """
         gid = goal.goal_id
         op_generate_id = f"op-generate-{gid}"
         op_write_id = f"op-write-{gid}"
         op_validate_id = f"op-validate-{gid}"
+        op_test_id = f"op-test-{gid}"
         op_add_id = f"op-add-{gid}"
         op_commit_id = f"op-commit-{gid}"
 
@@ -289,13 +291,26 @@ class EngineeringWorkflow:
             ),
         )
 
+        op_test = engine.build_operation(
+            id=op_test_id,
+            job_id=job_id,
+            goal=f"Run test suite for repository {goal.repository_path}",
+            operation_type=OperationType.VALIDATION,
+            sequence_index=3,
+            depends_on=[OperationDependency(operation_id=op_validate_id)],
+            execution_ref=OperationExecutionReference(
+                adapter_id="validation",
+                action_id="run_tests",
+            ),
+        )
+
         op_add = engine.build_operation(
             id=op_add_id,
             job_id=job_id,
             goal=f"Stage {goal.output_path} for commit",
             operation_type=OperationType.GIT,
-            sequence_index=3,
-            depends_on=[OperationDependency(operation_id=op_validate_id)],
+            sequence_index=4,
+            depends_on=[OperationDependency(operation_id=op_test_id)],
             execution_ref=OperationExecutionReference(
                 adapter_id="git",
                 action_id="add",
@@ -307,7 +322,7 @@ class EngineeringWorkflow:
             job_id=job_id,
             goal="Commit staged changes with goal description as context",
             operation_type=OperationType.GIT,
-            sequence_index=4,
+            sequence_index=5,
             depends_on=[OperationDependency(operation_id=op_add_id)],
             execution_ref=OperationExecutionReference(
                 adapter_id="git",
@@ -315,14 +330,14 @@ class EngineeringWorkflow:
             ),
         )
 
-        return (op_generate, op_write, op_validate, op_add, op_commit)
+        return (op_generate, op_write, op_validate, op_test, op_add, op_commit)
 
     def _build_modify_operations(
         self,
         goal: FounderGoal,
         job_id: str,
     ) -> tuple[OperationDefinition, ...]:
-        """Build the six-step modify-mode plan (AT-3 path).
+        """Build the seven-step modify-mode plan (AT-4 path).
 
         Step 1 — read_file (FS):    adapter_id="filesystem", action_id="read_file"
         Step 2 — generate (LLM):    adapter_id="llm",        action_id="generate"
@@ -331,14 +346,16 @@ class EngineeringWorkflow:
                                      are consumed if the plan is invalid)
         Step 3 — modify_file (FS):  adapter_id="filesystem", action_id="modify_file"
         Step 4 — validate:          adapter_id="validation",  action_id="validate"
-        Step 5 — add (Git):         adapter_id="git",        action_id="add"
-        Step 6 — commit (Git):      adapter_id="git",        action_id="commit"
+        Step 5 — run_tests:         adapter_id="validation",  action_id="run_tests"
+        Step 6 — add (Git):         adapter_id="git",        action_id="add"
+        Step 7 — commit (Git):      adapter_id="git",        action_id="commit"
         """
         gid = goal.goal_id
         op_read_id = f"op-read-{gid}"
         op_generate_id = f"op-generate-{gid}"
         op_write_id = f"op-write-{gid}"
         op_validate_id = f"op-validate-{gid}"
+        op_test_id = f"op-test-{gid}"
         op_add_id = f"op-add-{gid}"
         op_commit_id = f"op-commit-{gid}"
 
@@ -395,13 +412,26 @@ class EngineeringWorkflow:
             ),
         )
 
+        op_test = engine.build_operation(
+            id=op_test_id,
+            job_id=job_id,
+            goal=f"Run test suite for repository {goal.repository_path}",
+            operation_type=OperationType.VALIDATION,
+            sequence_index=4,
+            depends_on=[OperationDependency(operation_id=op_validate_id)],
+            execution_ref=OperationExecutionReference(
+                adapter_id="validation",
+                action_id="run_tests",
+            ),
+        )
+
         op_add = engine.build_operation(
             id=op_add_id,
             job_id=job_id,
             goal=f"Stage {goal.output_path} for commit",
             operation_type=OperationType.GIT,
-            sequence_index=4,
-            depends_on=[OperationDependency(operation_id=op_validate_id)],
+            sequence_index=5,
+            depends_on=[OperationDependency(operation_id=op_test_id)],
             execution_ref=OperationExecutionReference(
                 adapter_id="git",
                 action_id="add",
@@ -413,7 +443,7 @@ class EngineeringWorkflow:
             job_id=job_id,
             goal="Commit staged changes with goal description as context",
             operation_type=OperationType.GIT,
-            sequence_index=5,
+            sequence_index=6,
             depends_on=[OperationDependency(operation_id=op_add_id)],
             execution_ref=OperationExecutionReference(
                 adapter_id="git",
@@ -421,7 +451,7 @@ class EngineeringWorkflow:
             ),
         )
 
-        return (op_read, op_generate, op_write, op_validate, op_add, op_commit)
+        return (op_read, op_generate, op_write, op_validate, op_test, op_add, op_commit)
 
     def _build_llm_config(self) -> AdapterConfiguration:
         """Build the AdapterConfiguration from workflow config for LLM calls."""
@@ -581,6 +611,12 @@ class EngineeringWorkflow:
         if ref.adapter_id == "validation" and ref.action_id == "validate":
             return {"path": goal.output_path}
 
+        if ref.adapter_id == "validation" and ref.action_id == "run_tests":
+            return {
+                "repository_path": goal.repository_path,
+                "test_command": self._config.test_command,
+            }
+
         if ref.adapter_id == "git" and ref.action_id == "commit":
             return {
                 "repository_path": goal.repository_path,
@@ -703,15 +739,31 @@ class EngineeringWorkflow:
                 success = adapter_result.success
                 error = adapter_result.error
                 output = ""
-                logger.info(
-                    "EngineeringWorkflow: Validation step complete op=%r "
-                    "success=%s validator=%r",
-                    op.id, success,
-                    (
-                        adapter_result.validation_result.validator_used
-                        if adapter_result.validation_result else "n/a"
-                    ),
-                )
+                if action_id == "run_tests":
+                    from hermes.models.validation_adapter import TestRunExecutionResult as _TRER
+                    if isinstance(adapter_result, _TRER) and adapter_result.test_run_result is not None:
+                        tr = adapter_result.test_run_result
+                        logger.info(
+                            "EngineeringWorkflow: Test run complete op=%r success=%s "
+                            "executed=%s tests_run=%d tests_failed=%d duration_ms=%d",
+                            op.id, success, tr.executed, tr.tests_run,
+                            tr.tests_failed, tr.duration_ms,
+                        )
+                    else:
+                        logger.info(
+                            "EngineeringWorkflow: Test run complete op=%r success=%s",
+                            op.id, success,
+                        )
+                else:
+                    logger.info(
+                        "EngineeringWorkflow: Validation step complete op=%r "
+                        "success=%s validator=%r",
+                        op.id, success,
+                        (
+                            adapter_result.validation_result.validator_used
+                            if adapter_result.validation_result else "n/a"
+                        ),
+                    )
 
             else:
                 return StepExecutionRecord(

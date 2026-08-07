@@ -51,6 +51,8 @@ Network calls introduced:
 from __future__ import annotations
 
 import logging
+import re
+import shlex
 import subprocess
 import sys
 import time
@@ -62,6 +64,9 @@ from hermes.models.validation_adapter import (
     ValidationRequest,
     ValidationResult,
     ValidatorKind,
+    TestRunExecutionResult,
+    TestRunRequest,
+    TestRunResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +77,25 @@ _EXTENSION_TO_VALIDATOR: dict[str, ValidatorKind] = {
     ".py": ValidatorKind.PYTHON_SYNTAX,
     ".pyi": ValidatorKind.PYTHON_SYNTAX,
 }
+
+_TEST_RUN_TIMEOUT_SECONDS = 120
+
+
+def _parse_test_counts(output: str) -> tuple[int, int, int]:
+    """Best-effort parse of test counts from subprocess output.
+
+    Looks for patterns like "3 passed", "1 failed" in the combined output.
+    Returns (tests_run, tests_failed, tests_passed). All zeros if parsing fails.
+    """
+    passed = 0
+    failed = 0
+    passed_match = re.search(r"(\d+) passed", output)
+    failed_match = re.search(r"(\d+) failed", output)
+    if passed_match:
+        passed = int(passed_match.group(1))
+    if failed_match:
+        failed = int(failed_match.group(1))
+    return passed + failed, failed, passed
 
 
 def _detect_validator(path: Path) -> tuple[str, ValidatorKind]:
@@ -230,9 +254,258 @@ class ValidationAdapter:
         _, validator_kind = _detect_validator(resolved)
         return ValidationRequest(path=path, validator=validator_kind)
 
+    # ── Test runner ────────────────────────────────────────────────────────────
+
+    def _run_tests(self, repo_root: Path, command: list[str]) -> TestRunResult:
+        """Execute the test suite subprocess in the repository root.
+
+        Args:
+            repo_root: Absolute path to the repository directory (cwd for subprocess).
+            command:   Tokenised test command (e.g. ["pytest"] or ["cargo", "test"]).
+
+        Returns:
+            TestRunResult with executed=True. success reflects exit code.
+            Never raises — all subprocess errors are captured in the result.
+        """
+        start = time.monotonic()
+        try:
+            proc = subprocess.run(
+                command,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=_TEST_RUN_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            return TestRunResult(
+                success=False,
+                executed=True,
+                reason="",
+                exit_code=-1,
+                stdout="",
+                stderr=f"test_run_timeout: exceeded {_TEST_RUN_TIMEOUT_SECONDS}s",
+                duration_ms=duration_ms,
+                tests_run=0,
+                tests_failed=0,
+                tests_passed=0,
+            )
+        except FileNotFoundError as exc:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            return TestRunResult(
+                success=False,
+                executed=True,
+                reason="",
+                exit_code=-1,
+                stdout="",
+                stderr=f"test_run_binary_not_found: {command[0]!r}: {exc}",
+                duration_ms=duration_ms,
+                tests_run=0,
+                tests_failed=0,
+                tests_passed=0,
+            )
+        except Exception as exc:
+            duration_ms = int((time.monotonic() - start) * 1000)
+            return TestRunResult(
+                success=False,
+                executed=True,
+                reason="",
+                exit_code=-1,
+                stdout="",
+                stderr=f"test_run_error: {type(exc).__name__}: {exc}",
+                duration_ms=duration_ms,
+                tests_run=0,
+                tests_failed=0,
+                tests_passed=0,
+            )
+
+        duration_ms = int((time.monotonic() - start) * 1000)
+        combined = proc.stdout + proc.stderr
+        tests_run, tests_failed, tests_passed = _parse_test_counts(combined)
+        return TestRunResult(
+            success=proc.returncode == 0,
+            executed=True,
+            reason="",
+            exit_code=proc.returncode,
+            stdout=proc.stdout,
+            stderr=proc.stderr,
+            duration_ms=duration_ms,
+            tests_run=tests_run,
+            tests_failed=tests_failed,
+            tests_passed=tests_passed,
+        )
+
+    def _execute_run_tests(self, request: ExecutionRequest) -> TestRunExecutionResult:
+        """Execute the run_tests action for a repository.
+
+        Handles empty test_command (not-executed skip), path validation,
+        command parsing, subprocess execution, and result assembly.
+
+        Args:
+            request: The ExecutionRequest with action_id="run_tests".
+
+        Returns:
+            TestRunExecutionResult. Never raises.
+        """
+        meta_base: dict[str, str] = {"action": "run_tests"}
+
+        payload_dict = dict(request.payload)
+        repository_path = payload_dict.get("repository_path", "").strip()
+        test_command = payload_dict.get("test_command", "").strip()
+
+        # ── Empty test_command → not-executed (no test command detected) ──────
+        if not test_command:
+            skip_result = TestRunResult(
+                success=True,
+                executed=False,
+                reason="no_test_command_detected",
+                exit_code=-1,
+                stdout="",
+                stderr="",
+                duration_ms=0,
+                tests_run=0,
+                tests_failed=0,
+                tests_passed=0,
+            )
+            meta = dict(meta_base)
+            meta["executed"] = "false"
+            meta["reason"] = "no_test_command_detected"
+            logger.info(
+                "ValidationAdapter: test run not executed (no test command detected) "
+                "repository_path=%r",
+                repository_path,
+            )
+            return TestRunExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=True,
+                error=None,
+                test_run_request=TestRunRequest(
+                    repository_path=repository_path,
+                    test_command="",
+                ),
+                test_run_result=skip_result,
+                adapter_metadata=tuple(sorted(meta.items())),
+            )
+
+        # ── repository_path required ───────────────────────────────────────────
+        if not repository_path:
+            return TestRunExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=False,
+                error="test_run_request_invalid: payload missing 'repository_path' key",
+                test_run_request=None,
+                test_run_result=None,
+                adapter_metadata=tuple(sorted(meta_base.items())),
+            )
+
+        # ── Absolute path rejected ─────────────────────────────────────────────
+        if Path(repository_path).is_absolute():
+            return TestRunExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=False,
+                error=f"test_run_path_invalid: absolute paths are not allowed: {repository_path!r}",
+                test_run_request=None,
+                test_run_result=None,
+                adapter_metadata=tuple(sorted(meta_base.items())),
+            )
+
+        # ── Path traversal rejected ────────────────────────────────────────────
+        resolved = (self._workspace_root / repository_path).resolve()
+        try:
+            resolved.relative_to(self._workspace_root)
+        except ValueError:
+            return TestRunExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=False,
+                error=f"test_run_path_invalid: path escapes workspace root: {repository_path!r}",
+                test_run_request=None,
+                test_run_result=None,
+                adapter_metadata=tuple(sorted(meta_base.items())),
+            )
+
+        # ── Parse command ──────────────────────────────────────────────────────
+        try:
+            command = shlex.split(test_command)
+        except ValueError as exc:
+            return TestRunExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=False,
+                error=f"test_run_command_invalid: {exc}",
+                test_run_request=TestRunRequest(
+                    repository_path=repository_path,
+                    test_command=test_command,
+                ),
+                test_run_result=None,
+                adapter_metadata=tuple(sorted(meta_base.items())),
+            )
+
+        tr_request = TestRunRequest(
+            repository_path=repository_path,
+            test_command=test_command,
+        )
+
+        logger.info(
+            "ValidationAdapter: running tests repository_path=%r command=%r",
+            repository_path, test_command,
+        )
+
+        # ── Execute ────────────────────────────────────────────────────────────
+        tr_result = self._run_tests(resolved, command)
+
+        success = tr_result.success
+        error: str | None = None
+        if not success:
+            # Build a concise error for the workflow report
+            if tr_result.stderr.strip():
+                detail = tr_result.stderr.strip().splitlines()[0]
+            elif tr_result.stdout.strip():
+                lines = tr_result.stdout.strip().splitlines()
+                detail = lines[-1]
+            else:
+                detail = "non-zero exit code"
+            error = f"test_run_failed: exit_code={tr_result.exit_code}: {detail}"
+
+        if success:
+            logger.info(
+                "ValidationAdapter: test run passed repository_path=%r "
+                "executed=%s tests_run=%d tests_failed=%d duration_ms=%d",
+                repository_path, tr_result.executed, tr_result.tests_run,
+                tr_result.tests_failed, tr_result.duration_ms,
+            )
+        else:
+            logger.warning(
+                "ValidationAdapter: test run failed repository_path=%r "
+                "exit_code=%d tests_failed=%d stderr=%r",
+                repository_path, tr_result.exit_code, tr_result.tests_failed,
+                tr_result.stderr[:200],
+            )
+
+        meta_final = dict(meta_base)
+        meta_final["duration_ms"] = str(tr_result.duration_ms)
+        meta_final["executed"] = str(tr_result.executed).lower()
+        meta_final["exit_code"] = str(tr_result.exit_code)
+        meta_final["tests_failed"] = str(tr_result.tests_failed)
+        meta_final["tests_passed"] = str(tr_result.tests_passed)
+        meta_final["tests_run"] = str(tr_result.tests_run)
+
+        return TestRunExecutionResult(
+            request_id=request.request_id,
+            operation_id=request.operation_id,
+            success=success,
+            error=error,
+            test_run_request=tr_request,
+            test_run_result=tr_result,
+            adapter_metadata=tuple(sorted(meta_final.items())),
+        )
+
     # ── Execution ──────────────────────────────────────────────────────────────
 
-    def execute(self, request: ExecutionRequest) -> ValidationExecutionResult:
+    def execute(self, request: ExecutionRequest) -> ValidationExecutionResult | TestRunExecutionResult:
         """Execute a validation request through the appropriate validator.
 
         Execution steps:
@@ -269,6 +542,10 @@ class ValidationAdapter:
                 validation_result=None,
                 adapter_metadata=tuple(sorted(meta_base.items())),
             )
+
+        # ── 2. Route by action_id ──────────────────────────────────────────
+        if request.action_id == "run_tests":
+            return self._execute_run_tests(request)
 
         # ── 2. Extract and validate path from payload ──────────────────────
         payload_dict = dict(request.payload)

@@ -492,11 +492,11 @@ class TestEngineeringWorkflowConstruction:
 class TestOperationPlan:
     """Verify the OperationEngine plans operations correctly."""
 
-    def test_five_operations_built(
+    def test_six_operations_built(
         self, workflow: EngineeringWorkflow, goal: FounderGoal
     ):
         ops = workflow._build_operations(goal, f"job-{goal.goal_id}")
-        assert len(ops) == 5
+        assert len(ops) == 6
 
     def test_operation_types_in_order(
         self, workflow: EngineeringWorkflow, goal: FounderGoal
@@ -508,6 +508,7 @@ class TestOperationPlan:
             OperationType.LLM,
             OperationType.FILESYSTEM,
             OperationType.VALIDATION,
+            OperationType.VALIDATION,  # run_tests
             OperationType.GIT,
             OperationType.GIT,
         ]
@@ -526,13 +527,14 @@ class TestOperationPlan:
     ):
         ops = list(workflow._build_operations(goal, f"job-{goal.goal_id}"))
         order = operation_engine.determine_execution_order(ops)
-        # generate → write → validate → add → commit
-        assert len(order) == 5
+        # generate → write → validate → test → add → commit
+        assert len(order) == 6
         indices = {op_id: i for i, op_id in enumerate(order)}
         gid = goal.goal_id
         assert indices[f"op-generate-{gid}"] < indices[f"op-write-{gid}"]
         assert indices[f"op-write-{gid}"] < indices[f"op-validate-{gid}"]
-        assert indices[f"op-validate-{gid}"] < indices[f"op-add-{gid}"]
+        assert indices[f"op-validate-{gid}"] < indices[f"op-test-{gid}"]
+        assert indices[f"op-test-{gid}"] < indices[f"op-add-{gid}"]
         assert indices[f"op-add-{gid}"] < indices[f"op-commit-{gid}"]
 
     def test_dependencies_declared(
@@ -546,9 +548,13 @@ class TestOperationPlan:
         # validate depends on write
         validate_deps = [d.operation_id for d in ops[f"op-validate-{gid}"].depends_on]
         assert f"op-write-{gid}" in validate_deps
-        # add depends on validate
+        # test depends on validate
+        test_deps = [d.operation_id for d in ops[f"op-test-{gid}"].depends_on]
+        assert f"op-validate-{gid}" in test_deps
+        # add depends on test (not validate directly)
         add_deps = [d.operation_id for d in ops[f"op-add-{gid}"].depends_on]
-        assert f"op-validate-{gid}" in add_deps
+        assert f"op-test-{gid}" in add_deps
+        assert f"op-validate-{gid}" not in add_deps
 
     def test_operations_all_valid(
         self,
@@ -574,9 +580,9 @@ class TestFullSuccessPath:
         report = workflow.execute(goal)
         assert report.success is True, f"Expected success, got error: {report.error}"
 
-    def test_report_has_five_steps(self, workflow: EngineeringWorkflow, goal: FounderGoal):
+    def test_report_has_six_steps(self, workflow: EngineeringWorkflow, goal: FounderGoal):
         report = workflow.execute(goal)
-        assert len(report.steps) == 5
+        assert len(report.steps) == 6
 
     def test_report_no_error(self, workflow: EngineeringWorkflow, goal: FounderGoal):
         report = workflow.execute(goal)
@@ -628,7 +634,7 @@ class TestExecutionSequence:
 
     def test_execution_sequence_field(self, workflow: EngineeringWorkflow, goal: FounderGoal):
         report = workflow.execute(goal)
-        assert report.execution_sequence == ("llm", "filesystem", "validation", "git", "git")
+        assert report.execution_sequence == ("llm", "filesystem", "validation", "validation", "git", "git")
 
     def test_step_adapter_types_in_order(
         self, workflow: EngineeringWorkflow, goal: FounderGoal
@@ -639,6 +645,7 @@ class TestExecutionSequence:
             ExecutionAdapter.LLM,
             ExecutionAdapter.FILESYSTEM,
             ExecutionAdapter.VALIDATION,
+            ExecutionAdapter.VALIDATION,
             ExecutionAdapter.GIT,
             ExecutionAdapter.GIT,
         ]
@@ -646,7 +653,7 @@ class TestExecutionSequence:
     def test_step_action_ids(self, workflow: EngineeringWorkflow, goal: FounderGoal):
         report = workflow.execute(goal)
         actions = [s.action_id for s in report.steps]
-        assert actions == ["generate", "create_file", "validate", "add", "commit"]
+        assert actions == ["generate", "create_file", "validate", "run_tests", "add", "commit"]
 
     def test_llm_called_first(
         self, workflow: EngineeringWorkflow, goal: FounderGoal, mock_llm: MagicMock
@@ -685,8 +692,9 @@ class TestGatewayDispatch:
         assert report.steps[0].execution_request.adapter_type == ExecutionAdapter.LLM
         assert report.steps[1].execution_request.adapter_type == ExecutionAdapter.FILESYSTEM
         assert report.steps[2].execution_request.adapter_type == ExecutionAdapter.VALIDATION
-        assert report.steps[3].execution_request.adapter_type == ExecutionAdapter.GIT
+        assert report.steps[3].execution_request.adapter_type == ExecutionAdapter.VALIDATION
         assert report.steps[4].execution_request.adapter_type == ExecutionAdapter.GIT
+        assert report.steps[5].execution_request.adapter_type == ExecutionAdapter.GIT
 
     def test_gateway_failure_blocks_llm(
         self,
@@ -945,7 +953,7 @@ class TestAuditTrail:
     ):
         report = workflow.execute(goal)
         meta = dict(report.metadata)
-        assert meta.get("steps_completed") == "5"
+        assert meta.get("steps_completed") == "6"
 
     def test_metadata_contains_generated_file(
         self, workflow: EngineeringWorkflow, goal: FounderGoal
@@ -1108,9 +1116,9 @@ class TestGatewayBoundary:
         )
         report = wf.execute(goal)
 
-        # Gateway must be called exactly once per step (5 steps = 5 dispatch calls)
+        # Gateway must be called exactly once per step (6 steps = 6 dispatch calls)
         assert report.success is True
-        assert len(dispatch_calls) == 5
+        assert len(dispatch_calls) == 6
 
     def test_adapter_not_called_when_gateway_returns_unsupported(
         self,
@@ -1201,7 +1209,7 @@ class TestDeterminism:
         self, workflow: EngineeringWorkflow, goal: FounderGoal
     ):
         report = workflow.execute(goal)
-        assert report.execution_sequence == ("llm", "filesystem", "validation", "git", "git")
+        assert report.execution_sequence == ("llm", "filesystem", "validation", "validation", "git", "git")
 
     def test_operation_ids_derived_from_goal_id(
         self, workflow: EngineeringWorkflow, goal: FounderGoal
@@ -1212,8 +1220,183 @@ class TestDeterminism:
         assert f"op-generate-{gid}" in op_ids
         assert f"op-write-{gid}" in op_ids
         assert f"op-validate-{gid}" in op_ids
+        assert f"op-test-{gid}" in op_ids
         assert f"op-add-{gid}" in op_ids
         assert f"op-commit-{gid}" in op_ids
+
+
+# ── TestRunTestsGate ───────────────────────────────────────────────────────────
+
+
+class TestRunTestsGate:
+    """Verify the run_tests gate blocks commits on test failure."""
+
+    def test_run_tests_failure_halts_before_git_add(
+        self,
+        gateway: ExecutionGateway,
+        mock_llm: MagicMock,
+        git_adapter: GitAdapter,
+        job_engine: JobEngine,
+        operation_engine: OperationEngine,
+        goal: FounderGoal,
+        workspace: Path,
+        repo: Path,
+    ):
+        """When run_tests fails, git add and git commit must not execute."""
+        from unittest.mock import patch as _patch
+        import subprocess as _subprocess
+
+        fs_adapter = FilesystemAdapter(workspace_root=workspace)
+        validation_adapter = ValidationAdapter(workspace_root=workspace)
+
+        config = WorkflowConfig(
+            llm_provider=LLMProvider.OLLAMA,
+            llm_model="test-model",
+            llm_base_url="http://localhost:11434",
+            llm_api_key="",
+            llm_max_tokens=2048,
+            llm_timeout_seconds=30,
+            commit_message="feat: test",
+            test_command="pytest",
+        )
+
+        wf = EngineeringWorkflow(
+            gateway=gateway,
+            llm_adapter=mock_llm,
+            filesystem_adapter=fs_adapter,
+            git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
+            job_engine=job_engine,
+            operation_engine=operation_engine,
+            config=config,
+        )
+
+        # Patch subprocess.run to return exit 0 for py_compile (syntax passes)
+        # and exit 1 for pytest (tests fail)
+        original_run = _subprocess.run
+
+        def selective_run(cmd, **kwargs):
+            if "py_compile" in (cmd[2] if len(cmd) > 2 else ""):
+                return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+            if cmd[0] == "pytest":
+                return type("R", (), {
+                    "returncode": 1,
+                    "stdout": "1 failed in 0.01s",
+                    "stderr": "FAILED test_foo::test_bar",
+                })()
+            return original_run(cmd, **kwargs)
+
+        with _patch("subprocess.run", side_effect=selective_run):
+            report = wf.execute(goal)
+
+        assert report.success is False
+        action_ids = [s.action_id for s in report.steps]
+        assert "run_tests" in action_ids
+        assert "add" not in action_ids
+        assert "commit" not in action_ids
+
+    def test_run_tests_failure_file_remains_on_disk(
+        self,
+        gateway: ExecutionGateway,
+        mock_llm: MagicMock,
+        git_adapter: GitAdapter,
+        job_engine: JobEngine,
+        operation_engine: OperationEngine,
+        goal: FounderGoal,
+        workspace: Path,
+        repo: Path,
+    ):
+        """File must exist on disk even when run_tests blocks the commit."""
+        import subprocess as _subprocess
+        from unittest.mock import patch as _patch
+
+        fs_adapter = FilesystemAdapter(workspace_root=workspace)
+        validation_adapter = ValidationAdapter(workspace_root=workspace)
+
+        config = WorkflowConfig(
+            llm_provider=LLMProvider.OLLAMA,
+            llm_model="test-model",
+            llm_base_url="http://localhost:11434",
+            llm_api_key="",
+            llm_max_tokens=2048,
+            llm_timeout_seconds=30,
+            commit_message="feat: test",
+            test_command="pytest",
+        )
+
+        wf = EngineeringWorkflow(
+            gateway=gateway,
+            llm_adapter=mock_llm,
+            filesystem_adapter=fs_adapter,
+            git_adapter=git_adapter,
+            validation_adapter=validation_adapter,
+            job_engine=job_engine,
+            operation_engine=operation_engine,
+            config=config,
+        )
+
+        original_run = _subprocess.run
+
+        def selective_run(cmd, **kwargs):
+            if "py_compile" in (cmd[2] if len(cmd) > 2 else ""):
+                return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+            if cmd[0] == "pytest":
+                return type("R", (), {
+                    "returncode": 1, "stdout": "", "stderr": "1 failed",
+                })()
+            return original_run(cmd, **kwargs)
+
+        with _patch("subprocess.run", side_effect=selective_run):
+            report = wf.execute(goal)
+
+        assert report.success is False
+        output_file = workspace / goal.output_path
+        assert output_file.exists(), "File must remain on disk after test gate failure"
+
+    def test_skip_path_proceeds_to_commit(
+        self,
+        gateway: ExecutionGateway,
+        mock_llm: MagicMock,
+        fs_adapter: FilesystemAdapter,
+        git_adapter: GitAdapter,
+        validation_adapter: ValidationAdapter,
+        job_engine: JobEngine,
+        operation_engine: OperationEngine,
+        goal: FounderGoal,
+        workspace: Path,
+        repo: Path,
+    ):
+        """When test_command is empty, run_tests is skipped and commit proceeds."""
+        config = WorkflowConfig(
+            llm_provider=LLMProvider.OLLAMA,
+            llm_model="test-model",
+            llm_base_url="http://localhost:11434",
+            llm_api_key="",
+            llm_max_tokens=2048,
+            llm_timeout_seconds=30,
+            commit_message="feat: test",
+            test_command="",  # skip path
+        )
+
+        wf = EngineeringWorkflow(
+            gateway=gateway,
+            llm_adapter=mock_llm,
+            filesystem_adapter=FilesystemAdapter(workspace_root=workspace),
+            git_adapter=GitAdapter(workspace_root=workspace),
+            validation_adapter=ValidationAdapter(workspace_root=workspace),
+            job_engine=job_engine,
+            operation_engine=operation_engine,
+            config=config,
+        )
+        report = wf.execute(goal)
+
+        assert report.success is True
+        action_ids = [s.action_id for s in report.steps]
+        assert "run_tests" in action_ids
+        assert "commit" in action_ids
+        # run_tests step must be success
+        rt_step = next(s for s in report.steps if s.action_id == "run_tests")
+        assert rt_step.adapter_success is True
 
 
 # ── TestFutureExtensibility ────────────────────────────────────────────────────

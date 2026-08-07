@@ -132,6 +132,7 @@ class WorkflowConfig:
     llm_timeout_seconds: int
     commit_message: str
     write_mode: str = "create_file"  # "create_file" or "overwrite_file" — Bootstrap Phase 1
+    test_command: str = ""  # from BuildSystemDetection.test_command; empty string → skip test gate
 
 
 # ── StepExecutionRecord ────────────────────────────────────────────────────────

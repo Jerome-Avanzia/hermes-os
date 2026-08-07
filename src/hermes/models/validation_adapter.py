@@ -130,3 +130,102 @@ class ValidationExecutionResult:
     validation_request: ValidationRequest | None
     validation_result: ValidationResult | None
     adapter_metadata: tuple[tuple[str, str], ...]
+
+
+# ── TestRunRequest ─────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True, slots=True)
+class TestRunRequest:
+    """Typed request for a single test suite execution.
+
+    Produced by ValidationAdapter._execute_run_tests() from an ExecutionRequest.
+    The adapter resolves the workspace-relative repository_path and the
+    test_command string before execution.
+
+    repository_path → workspace-relative path to the repository root
+    test_command    → command string to execute (e.g. "pytest", "cargo test")
+                      empty string → adapter returns a not-executed result
+    """
+
+    repository_path: str
+    test_command: str
+
+
+# ── TestRunResult ──────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class TestRunResult:
+    """Typed result of a single test suite execution.
+
+    Returned by ValidationAdapter._run_tests(). Carries the complete subprocess
+    outcome for inclusion in TestRunExecutionResult.
+
+    success      → True if tests passed (exit code 0) or if not executed
+    executed     → True if a subprocess was invoked; False if test_command was
+                   empty and no subprocess ran. Separates execution state from
+                   outcome state — "validation succeeded" vs "validation was
+                   not applicable." Scales cleanly as additional validation
+                   stages (linting, type checking) are added.
+    reason       → "no_test_command_detected" when executed=False; "" otherwise
+    exit_code    → subprocess exit code; -1 if no process was run
+    stdout       → captured stdout from the subprocess
+    stderr       → captured stderr from the subprocess
+    duration_ms  → wall-clock time for the subprocess, in milliseconds; 0 if not run
+    tests_run    → total test count from parsed output; 0 if not run or parse fails
+    tests_failed → failed test count from parsed output; 0 if not run or parse fails
+    tests_passed → passed test count from parsed output; 0 if not run or parse fails
+    """
+
+    success: bool
+    executed: bool
+    reason: str
+    exit_code: int
+    stdout: str
+    stderr: str
+    duration_ms: int
+    tests_run: int
+    tests_failed: int
+    tests_passed: int
+
+
+# ── TestRunExecutionResult ─────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class TestRunExecutionResult:
+    """Complete outcome of a ValidationAdapter test run execution.
+
+    Parallel to ValidationExecutionResult: carries the full audit trail
+    including request, result, and metadata for a run_tests action.
+
+    request_id       → mirrors the ExecutionRequest.request_id
+    operation_id     → mirrors the ExecutionRequest.operation_id
+    success          → True if tests passed or were not executed (executed=False)
+    error            → human-readable error string if success=False; None otherwise
+    test_run_request → the typed request; None if payload extraction failed
+    test_run_result  → the typed result; None if request build failed
+    adapter_metadata → sorted tuple of (key, value) pairs for audit/logging
+    """
+
+    request_id: str
+    operation_id: str
+    success: bool
+    error: str | None
+    test_run_request: TestRunRequest | None
+    test_run_result: TestRunResult | None
+    adapter_metadata: tuple[tuple[str, str], ...]
+
+
+# ── Public API ─────────────────────────────────────────────────────────────────
+
+
+__all__ = [
+    "TestRunExecutionResult",
+    "TestRunRequest",
+    "TestRunResult",
+    "ValidationExecutionResult",
+    "ValidationRequest",
+    "ValidationResult",
+    "ValidatorKind",
+]
