@@ -1,9 +1,9 @@
-"""Bootstrap Phase 1 — hermes implement <task> CLI command.
+"""Bootstrap Phase 6 — hermes implement <task> CLI command.
 
-Composes existing Hermes components into a user-facing engineering command.
+Thin wiring layer. All orchestration lives in EngineeringCoordinator.
 
 Architecture:
-  hermes implement "<task>" --output <path> [--repo <path>]
+  hermes implement "<task>" [--output <path>] [--repo <path>]
        ↓
   RepositoryIntelligence.scan()   → RepositorySnapshot (what is in the repo)
        ↓
@@ -11,24 +11,16 @@ Architecture:
        ↓
   configure_from_env()            → OllamaEnvConfig + WorkflowConfig
        ↓
-  EngineeringWorkflow.execute()   → WorkflowExecutionReport
+  EngineeringCoordinator.execute() → WorkflowExecutionReport
        ↓
   stdout: engineering report
 
-Bootstrap Phase 1 constraints:
-  - --output is required: the Founder specifies the target file.
-  - --repo defaults to "." (current directory as the git repository).
-  - write_mode is selected automatically: "overwrite_file" if the target
-    path already exists, "create_file" otherwise.
+Autonomous mode (--output omitted): EngineeringCoordinator calls
+EngineeringPlanner to decompose the goal, then EngineeringWorkflow executes
+each operation and commits once at the end.
 
-Long-term target (Phase 2+):
-  - --output is removed.
-  - Ollama selects target files autonomously from the RepositorySnapshot
-    via structured JSON output + RepositoryManipulationPlan validation.
-  - The Founder experience becomes: hermes implement "<task>"
-
-No new architecture is introduced here. Every component used already exists.
-This module's sole responsibility is Bootstrap Phase 1 orchestration.
+Deterministic mode (--output set): EngineeringCoordinator builds a
+single-operation plan and calls EngineeringWorkflow directly.
 """
 
 from __future__ import annotations
@@ -46,14 +38,14 @@ from hermes.adapters.filesystem_adapter import FilesystemAdapter
 from hermes.adapters.git_adapter import GitAdapter
 from hermes.adapters.llm_adapter import LlmAdapter
 from hermes.adapters.validation_adapter import ValidationAdapter
+from hermes.kernel.engineering_coordinator import EngineeringCoordinator
+from hermes.kernel.engineering_planner import EngineeringPlanner
 from hermes.kernel.execution_gateway import ExecutionGateway
-from hermes.kernel.job_engine import JobEngine
 from hermes.kernel.operation_engine import OperationEngine
 from hermes.kernel.repository_intelligence import RepositoryIntelligence
-from hermes.kernel.skill_registry import SkillRegistry
 from hermes.models.engineering_workflow import FounderGoal, WorkflowConfig
 from hermes.models.execution_gateway import AdapterRegistration, ExecutionAdapter
-from hermes.models.llm_adapter import LLMProvider
+from hermes.models.llm_adapter import AdapterConfiguration, LLMProvider
 from hermes.models.repository_intelligence import RepositorySnapshot
 from hermes.providers.ollama_driver import configure_from_env
 from hermes.workflows.engineering_workflow import EngineeringWorkflow
@@ -67,7 +59,7 @@ def implement(
         "-o",
         help=(
             "Workspace-relative path for the output file. "
-            "When omitted, Hermes selects the target file autonomously (Phase 5+)."
+            "When omitted, Hermes selects and decomposes the task autonomously (Phase 6+)."
         ),
     ),
     repo: str = typer.Option(
@@ -79,16 +71,14 @@ def implement(
 ) -> None:
     """Implement an engineering task using Ollama and the Hermes workflow engine.
 
-    Bootstrap Phase 1: reads the repository, builds context, asks Ollama to
-    generate code, writes the file, and commits the result.
+    Phase 6: reads the repository, builds context, asks Ollama to plan a
+    multi-operation engineering plan, executes each operation, and commits once.
 
     Example:
 
+        hermes implement "Add input validation to the user endpoint"
         hermes implement "Add input validation to the user endpoint" --output src/api.py
     """
-    # Use HERMES_REPOSITORIES when set (container deployment); fall back to
-    # the shell's CWD for local development where the operator runs the CLI
-    # from inside the target repository.
     _hermes_repos = os.environ.get("HERMES_REPOSITORIES", "").strip()
     workspace_root = Path(_hermes_repos) if _hermes_repos else Path.cwd()
 
@@ -109,15 +99,6 @@ def implement(
         typer.echo(f"Error: failed to read Ollama configuration — {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    # ── 3. Select write mode (deterministic mode only) ────────────────────────
-    # In autonomous mode (output is None), write_mode is derived by the workflow
-    # from the LLM's propose_target result; we pass a placeholder here.
-    if output is not None:
-        output_abs = workspace_root / output
-        write_mode = "modify_file" if output_abs.exists() else "create_file"
-    else:
-        write_mode = "create_file"  # placeholder; overridden in autonomous mode
-
     test_command = (
         snapshot.build_system.test_command.strip()
         if snapshot.build_system and snapshot.build_system.test_command.strip()
@@ -132,11 +113,10 @@ def implement(
         llm_max_tokens=4096,
         llm_timeout_seconds=120,
         commit_message=f"feat: {task[:72]}",
-        write_mode=write_mode,
         test_command=test_command,
     )
 
-    # ── 4. Build FounderGoal with repository context injected into description ─
+    # ── 3. Build FounderGoal with repository context injected into description ─
     goal_id = str(uuid.uuid4())[:8]
     enriched_description = (
         f"{task}\n\n"
@@ -144,7 +124,7 @@ def implement(
         f"{context_str}"
     )
 
-    # output_path="" → autonomous mode; workflow's propose_target derives the file.
+    # output_path="" → autonomous mode; coordinator/planner derives the file(s).
     goal = FounderGoal(
         goal_id=goal_id,
         description=enriched_description,
@@ -153,7 +133,7 @@ def implement(
         output_path=output if output is not None else "",
     )
 
-    # ── 5. Wire adapters and gateway ──────────────────────────────────────────
+    # ── 4. Wire adapters and gateway ──────────────────────────────────────────
     gateway = ExecutionGateway()
     gateway.register(AdapterRegistration(
         adapter=ExecutionAdapter.LLM,
@@ -186,8 +166,18 @@ def implement(
     fs_adapter = FilesystemAdapter(workspace_root=workspace_root)
     git_adapter = GitAdapter(workspace_root=workspace_root)
     validation_adapter = ValidationAdapter(workspace_root=workspace_root)
-    job_engine = JobEngine(registry=SkillRegistry())
     op_engine = OperationEngine()
+
+    # Build LLM config for the planner
+    llm_config = AdapterConfiguration(
+        provider=LLMProvider.OLLAMA,
+        model=capabilities.default_model,
+        base_url=env_cfg.base_url,
+        api_key=env_cfg.api_key,
+        max_tokens=4096,
+        timeout_seconds=120,
+        temperature=0.0,
+    )
 
     workflow = EngineeringWorkflow(
         gateway=gateway,
@@ -195,12 +185,23 @@ def implement(
         filesystem_adapter=fs_adapter,
         git_adapter=git_adapter,
         validation_adapter=validation_adapter,
-        job_engine=job_engine,
         operation_engine=op_engine,
         config=config,
     )
 
-    # ── 6. Execute ────────────────────────────────────────────────────────────
+    planner = EngineeringPlanner(
+        gateway=gateway,
+        llm_adapter=llm_adapter,
+        llm_config=llm_config,
+        operation_engine=op_engine,
+    )
+
+    coordinator = EngineeringCoordinator(
+        planner=planner,
+        workflow=workflow,
+    )
+
+    # ── 5. Execute ────────────────────────────────────────────────────────────
     typer.echo(f"Implementing: {task}")
     typer.echo(f"Output:       {output if output is not None else '(autonomous)'}")
     typer.echo(f"Repository:   {repo}")
@@ -208,10 +209,10 @@ def implement(
     typer.echo("")
 
     start_time = time.monotonic()
-    report = workflow.execute(goal)
+    report = coordinator.execute(goal)
     elapsed = time.monotonic() - start_time
 
-    # ── 7. Print report ───────────────────────────────────────────────────────
+    # ── 6. Print report ───────────────────────────────────────────────────────
     _print_report(report, elapsed_seconds=elapsed)
 
     if not report.success:

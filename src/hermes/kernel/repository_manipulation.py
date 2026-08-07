@@ -124,23 +124,51 @@ class RepositoryManipulation:
         changes: list[RepositoryChange] = []
         conflicts: list[RepositoryConflict] = []
 
+        # ── Pre-validation: duplicate target detection ─────────────────────────
+        # Flag operations of the SAME kind targeting the same path.
+        # Two CREATE_FILE or two MODIFY_FILE ops on the same path indicate a
+        # planner error. Sequential ops of DIFFERENT kinds (e.g. MODIFY then
+        # DELETE) are valid and handled by the simulation loop below.
+        seen_path_kinds: dict[tuple[str, str], str] = {}  # (path_norm, kind) → first op_id
+        duplicate_conflicts: list[RepositoryConflict] = []
+        duplicate_op_ids: set[str] = set()
         for op in operations:
+            path_norm = _normalise_path(op.path)
+            if path_norm is None:
+                continue  # invalid path conflicts handled in simulation loop below
+            key = (path_norm, op.kind.value)
+            if key in seen_path_kinds:
+                first_op_id = seen_path_kinds[key]
+                duplicate_conflicts.append(RepositoryConflict(
+                    operation_id=op.operation_id,
+                    kind=ConflictKind.PATH_ALREADY_EXISTS,
+                    path=path_norm,
+                    detail=f"duplicate_target: {path_norm} already targeted by {first_op_id}",
+                ))
+                duplicate_op_ids.add(op.operation_id)
+            else:
+                seen_path_kinds[key] = op.operation_id
+
+        for op in operations:
+            if op.operation_id in duplicate_op_ids:
+                continue  # already captured as a duplicate conflict; skip simulation
             change, conflict = self._process_operation(op, repo_root, sim_files, sim_dirs)
             if change is not None:
                 changes.append(change)
             if conflict is not None:
                 conflicts.append(conflict)
 
+        all_conflicts = duplicate_conflicts + conflicts
         return RepositoryManipulationPlan(
             plan_id=pid,
             repository_path=repository_path,
             planned_at=ts,
             operations=tuple(operations),
             changes=tuple(changes),
-            conflicts=tuple(conflicts),
-            valid=len(conflicts) == 0,
+            conflicts=tuple(all_conflicts),
+            valid=len(all_conflicts) == 0,
             operation_count=len(operations),
-            conflict_count=len(conflicts),
+            conflict_count=len(all_conflicts),
         )
 
     def validate(
