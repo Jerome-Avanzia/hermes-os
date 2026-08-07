@@ -465,6 +465,15 @@ class GitAdapter:
         args = ["commit", "-m", git_request.message]
         stdout, stderr, code = self._run_git(repo_path, args)
 
+        logger.info(
+            "GitAdapter: commit raw result repo=%r return_code=%d "
+            "stdout=%r stderr=%r",
+            git_request.repository_path,
+            code,
+            stdout,
+            stderr,
+        )
+
         if code != 0 and "nothing to commit" in stdout:
             logger.info(
                 "GitAdapter: commit no-op (nothing to commit) repo=%r — "
