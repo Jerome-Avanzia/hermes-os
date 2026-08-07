@@ -13,10 +13,14 @@ services:
       HERMES_SKILLS: /data/skills
       HERMES_LOGS: /data/logs
     volumes:
-      - ./data/repos:/data/repos:ro
+      # Canonical production workspace — repositories Hermes reads and writes.
+      # Place target repositories under /opt/avanzia/repos on the host.
+      - /opt/avanzia/repos:/data/repos
+      # Bundled application data — shipped with the image, read-only.
       - ./knowledge:/data/knowledge:ro
       - ./skills:/data/skills:ro
-      - ./data/logs:/data/logs
+      # Canonical production log directory.
+      - /opt/avanzia/logs:/data/logs
     command: ["--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8000:8000"
