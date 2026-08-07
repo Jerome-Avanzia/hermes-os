@@ -685,8 +685,8 @@ class TestGitAdapterCommit:
     def test_commit_nothing_to_commit_is_noop_success(self, adapter: GitAdapter, repo_with_commit: Path):
         """Committing with nothing staged returns success=True as a no-op.
 
-        git exits 1 with 'nothing to commit' on stdout. The adapter normalises
-        this to return_code=0 so the workflow continues without halting.
+        Detected via git diff --cached --quiet (exit 0 = nothing staged).
+        Locale-independent — no stdout message parsing required.
         The repository is already in the desired state — this is not a failure.
         """
         request = _make_request(
@@ -697,7 +697,7 @@ class TestGitAdapterCommit:
         assert result.error is None
         assert result.git_result is not None
         assert result.git_result.return_code == 0
-        # no_op flag is set in git_result metadata
+        assert result.git_result.output == "no-op: no staged changes"
         meta = dict(result.git_result.metadata)
         assert meta.get("no_op") == "true"
 

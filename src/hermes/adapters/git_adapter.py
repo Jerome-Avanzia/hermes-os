@@ -452,42 +452,37 @@ class GitAdapter:
     def _commit(self, repo_path: Path, git_request: GitRequest) -> GitResult:
         """Create a commit with the given message.
 
-        A no-op (nothing to commit) is normalised to return_code=0 with
-        metadata no_op=true. This occurs when the generated file content is
-        identical to the committed state, leaving the index unchanged after
-        git add. It is not a failure — the repository is already in the
-        desired state.
+        Before invoking git commit, checks for staged changes using
+        `git diff --cached --quiet`. This plumbing command exits 0 when the
+        index matches HEAD (nothing staged) and 1 when staged changes exist.
+        It is locale-independent, deterministic, and works correctly on both
+        initial commits (no HEAD) and subsequent commits.
 
-        git writes "nothing to commit" to stdout (not stderr) and exits 1.
-        Without this check, the adapter would capture empty stderr and report
-        a fatal failure with no diagnostic message.
+        When nothing is staged, the operation is treated as a successful no-op:
+        the repository is already in the desired state. git commit is never
+        invoked, avoiding locale-dependent message parsing entirely.
         """
-        args = ["commit", "-m", git_request.message]
-        stdout, stderr, code = self._run_git(repo_path, args)
+        # ── Pre-check: are there staged changes? ──────────────────────────
+        # exit 0 → index == HEAD (nothing to commit); exit 1 → staged changes exist
+        _, _, staged_code = self._run_git(repo_path, ["diff", "--cached", "--quiet"])
 
-        logger.info(
-            "GitAdapter: commit raw result repo=%r return_code=%d "
-            "stdout=%r stderr=%r",
-            git_request.repository_path,
-            code,
-            stdout,
-            stderr,
-        )
-
-        if code != 0 and "nothing to commit" in stdout:
+        if staged_code == 0:
             logger.info(
-                "GitAdapter: commit no-op (nothing to commit) repo=%r — "
-                "file content already matches committed state",
+                "GitAdapter: commit no-op (no staged changes) repo=%r — "
+                "index matches HEAD, repository already in desired state",
                 git_request.repository_path,
             )
             return GitResult(
                 operation=GitOperation.COMMIT,
                 repository_path=git_request.repository_path,
-                output="no-op: nothing to commit",
+                output="no-op: no staged changes",
                 return_code=0,
                 metadata=(("no_op", "true"),),
             )
 
+        # ── Staged changes exist — proceed with commit ─────────────────────
+        args = ["commit", "-m", git_request.message]
+        stdout, stderr, code = self._run_git(repo_path, args)
         output = stdout if code == 0 else stderr
         return GitResult(
             operation=GitOperation.COMMIT,
