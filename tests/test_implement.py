@@ -1,16 +1,13 @@
-"""Tests for Bootstrap Phase 1 — hermes implement CLI command.
+"""Tests for Bootstrap Phase 6 — hermes implement CLI command.
 
 Coverage:
   - _snapshot_to_context() serialiser with various RepositorySnapshot shapes
   - WorkflowConfig.write_mode default and override
-  - write_mode flows through _build_operations → action_id
   - implement command wiring: adapters, gateway, WorkflowConfig construction
-  - write_mode auto-selection: create_file for new files, overwrite_file for existing
-  - CLI integration via typer.testing.CliRunner (with mocked EngineeringWorkflow)
-  - Error handling: workflow failure → exit code 1
-  - --output required; --repo optional
+  - CLI integration via typer.testing.CliRunner (with mocked EngineeringCoordinator)
+  - Error handling: coordinator failure → exit code 1
+  - --output optional; --repo optional
   - RepositorySnapshot context string format
-  - Existing EngineeringWorkflow tests are NOT modified
 """
 
 from __future__ import annotations
@@ -203,30 +200,13 @@ class TestWorkflowConfigWriteMode:
         assert config.test_command == "pytest -x"
 
 
-# ── write_mode flows through EngineeringWorkflow ──────────────────────────────
+# ── write_mode in WorkflowConfig ──────────────────────────────────────────────
 
 
-class TestWriteModeFlowsThroughWorkflow:
-    """Verify that write_mode propagates from WorkflowConfig to operation action_id."""
+class TestWorkflowConfigWriteModeField:
+    """Verify that write_mode field is still present in WorkflowConfig (backward compat)."""
 
-    def _make_workflow(self, tmp_path: Path, write_mode: str):
-        from hermes.adapters.filesystem_adapter import FilesystemAdapter
-        from hermes.adapters.git_adapter import GitAdapter
-        from hermes.adapters.llm_adapter import LlmAdapter
-        from hermes.adapters.validation_adapter import ValidationAdapter
-        from hermes.kernel.execution_gateway import ExecutionGateway
-        from hermes.kernel.job_engine import JobEngine
-        from hermes.kernel.operation_engine import OperationEngine
-        from hermes.kernel.skill_registry import SkillRegistry
-        from hermes.models.execution_gateway import AdapterRegistration
-        from hermes.workflows.engineering_workflow import EngineeringWorkflow
-
-        gw = ExecutionGateway()
-        gw.register(AdapterRegistration(adapter=ExecutionAdapter.LLM, adapter_id="llm-test", available=True, description=""))
-        gw.register(AdapterRegistration(adapter=ExecutionAdapter.FILESYSTEM, adapter_id="fs-test", available=True, description=""))
-        gw.register(AdapterRegistration(adapter=ExecutionAdapter.GIT, adapter_id="git-test", available=True, description=""))
-        gw.register(AdapterRegistration(adapter=ExecutionAdapter.VALIDATION, adapter_id="validation-test", available=True, description=""))
-
+    def test_write_mode_field_present(self):
         config = WorkflowConfig(
             llm_provider=LLMProvider.OLLAMA,
             llm_model="llama3.2",
@@ -235,69 +215,22 @@ class TestWriteModeFlowsThroughWorkflow:
             llm_max_tokens=512,
             llm_timeout_seconds=10,
             commit_message="test",
-            write_mode=write_mode,
         )
-        return EngineeringWorkflow(
-            gateway=gw,
-            llm_adapter=LlmAdapter(),
-            filesystem_adapter=FilesystemAdapter(workspace_root=tmp_path),
-            git_adapter=GitAdapter(workspace_root=tmp_path),
-            validation_adapter=ValidationAdapter(workspace_root=tmp_path),
-            job_engine=JobEngine(registry=SkillRegistry()),
-            operation_engine=OperationEngine(),
-            config=config,
-        )
+        # Field should exist even if not used in Phase 6 execution path
+        assert hasattr(config, "write_mode")
 
-    def test_create_file_write_mode_sets_action_id(self, tmp_path):
-        from hermes.models.engineering_workflow import FounderGoal
-        workflow = self._make_workflow(tmp_path, "create_file")
-        goal = FounderGoal(
-            goal_id="wm-test-1",
-            description="test",
-            workspace_path=str(tmp_path),
-            repository_path=".",
-            output_path="out.py",
+    def test_write_mode_can_be_set(self):
+        config = WorkflowConfig(
+            llm_provider=LLMProvider.OLLAMA,
+            llm_model="llama3.2",
+            llm_base_url="http://localhost:11434",
+            llm_api_key="",
+            llm_max_tokens=512,
+            llm_timeout_seconds=10,
+            commit_message="test",
+            write_mode="modify_file",
         )
-        ops = workflow._build_operations(goal, "job-wm-test-1")
-        fs_op = next(o for o in ops if o.execution_ref and o.execution_ref.adapter_id == "filesystem")
-        assert fs_op.execution_ref.action_id == "create_file"
-
-    def test_modify_file_write_mode_sets_action_ids(self, tmp_path):
-        """modify_file mode builds a 6-step plan with read_file, modify_file, and validate actions."""
-        from hermes.models.engineering_workflow import FounderGoal
-        workflow = self._make_workflow(tmp_path, "modify_file")
-        goal = FounderGoal(
-            goal_id="wm-test-2",
-            description="test",
-            workspace_path=str(tmp_path),
-            repository_path=".",
-            output_path="out.py",
-        )
-        ops = workflow._build_operations(goal, "job-wm-test-2")
-        fs_action_ids = [
-            o.execution_ref.action_id
-            for o in ops
-            if o.execution_ref and o.execution_ref.adapter_id == "filesystem"
-        ]
-        assert "read_file" in fs_action_ids
-        assert "modify_file" in fs_action_ids
-        assert len(ops) == 7  # read+gen+write+validate+test+add+commit
-
-    def test_default_write_mode_preserves_create_file_action_id(self, tmp_path):
-        """The default write_mode keeps existing behaviour: action_id == 'create_file'."""
-        from hermes.models.engineering_workflow import FounderGoal
-        workflow = self._make_workflow(tmp_path, "create_file")
-        goal = FounderGoal(
-            goal_id="wm-test-3",
-            description="test",
-            workspace_path=str(tmp_path),
-            repository_path=".",
-            output_path="out.py",
-        )
-        ops = workflow._build_operations(goal, "job-wm-test-3")
-        fs_op = next(o for o in ops if o.execution_ref and o.execution_ref.adapter_id == "filesystem")
-        # Must equal "create_file" to keep backward compatibility with existing tests
-        assert fs_op.execution_ref.action_id == "create_file"
+        assert config.write_mode == "modify_file"
 
 
 # ── _snapshot_to_context ──────────────────────────────────────────────────────
@@ -551,16 +484,16 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_execute(goal):
+        def capture_coordinator_execute(goal):
             captured_goals.append(goal)
             return report
 
         with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
              patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
-             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.EngineeringCoordinator") as mock_coord_cls, \
              patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
             mock_ri.return_value.scan.return_value = self._empty_snapshot()
-            mock_wf_cls.return_value.execute.side_effect = capture_execute
+            mock_coord_cls.return_value.execute.side_effect = capture_coordinator_execute
 
             result = runner.invoke(app, ["implement", "Add validation"])
 
@@ -577,10 +510,10 @@ class TestImplementCLI:
 
         with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
              patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
-             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.EngineeringCoordinator") as mock_coord_cls, \
              patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
             mock_ri.return_value.scan.return_value = self._empty_snapshot()
-            mock_wf_cls.return_value.execute.return_value = report
+            mock_coord_cls.return_value.execute.return_value = report
 
             result = runner.invoke(app, ["implement", "Add validation"])
 
@@ -646,16 +579,16 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_execute(goal):
+        def capture_coordinator_execute(goal):
             captured_goals.append(goal)
             return report
 
         with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
              patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
-             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.EngineeringCoordinator") as mock_coord_cls, \
              patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
             mock_ri.return_value.scan.return_value = self._empty_snapshot()
-            mock_wf_cls.return_value.execute.side_effect = capture_execute
+            mock_coord_cls.return_value.execute.side_effect = capture_coordinator_execute
 
             runner.invoke(app, ["implement", "task", "--output", "f.py"])
 
@@ -668,16 +601,16 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_execute(goal):
+        def capture_coordinator_execute(goal):
             captured_goals.append(goal)
             return report
 
         with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
              patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
-             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.EngineeringCoordinator") as mock_coord_cls, \
              patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
             mock_ri.return_value.scan.return_value = self._empty_snapshot()
-            mock_wf_cls.return_value.execute.side_effect = capture_execute
+            mock_coord_cls.return_value.execute.side_effect = capture_coordinator_execute
 
             runner.invoke(app, ["implement", "task", "--output", "f.py", "--repo", "myrepo"])
 
@@ -689,16 +622,16 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_execute(goal):
+        def capture_coordinator_execute(goal):
             captured_goals.append(goal)
             return report
 
         with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
              patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
-             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.EngineeringCoordinator") as mock_coord_cls, \
              patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
             mock_ri.return_value.scan.return_value = self._empty_snapshot()
-            mock_wf_cls.return_value.execute.side_effect = capture_execute
+            mock_coord_cls.return_value.execute.side_effect = capture_coordinator_execute
 
             runner.invoke(app, [
                 "implement",
@@ -714,7 +647,7 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_execute(goal):
+        def capture_coordinator_execute(goal):
             captured_goals.append(goal)
             return report
 
@@ -722,10 +655,10 @@ class TestImplementCLI:
 
         with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
              patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
-             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.EngineeringCoordinator") as mock_coord_cls, \
              patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
             mock_ri.return_value.scan.return_value = snap
-            mock_wf_cls.return_value.execute.side_effect = capture_execute
+            mock_coord_cls.return_value.execute.side_effect = capture_coordinator_execute
 
             runner.invoke(app, ["implement", "task", "--output", "src/f.py"])
 
@@ -733,8 +666,11 @@ class TestImplementCLI:
         assert "Repository context" in desc
         assert "python" in desc
 
-    def test_implement_write_mode_create_file_for_new_file(self, tmp_path):
-        """When output file does not exist → write_mode must be 'create_file'."""
+    def test_implement_write_mode_defaults_to_create_file(self, tmp_path):
+        """Phase 6: implement.py no longer derives write_mode from file existence.
+        WorkflowConfig always uses default write_mode='create_file'; intent is
+        determined by EngineeringCoordinator from PlannedOperation.intent.
+        """
         report = _make_success_report()
         env_cfg, caps, driver = self._mock_env_cfg()
 
@@ -751,36 +687,10 @@ class TestImplementCLI:
              patch("hermes.cli.commands.implement.EngineeringWorkflow", side_effect=capture_init), \
              patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
             mock_ri.return_value.scan.return_value = self._empty_snapshot()
-            # output file does NOT exist in tmp_path
             runner.invoke(app, ["implement", "task", "--output", "brand_new.py"])
 
+        # Default write_mode is always 'create_file'; coordinator determines intent
         assert captured_configs[0].write_mode == "create_file"
-
-    def test_implement_write_mode_modify_for_existing_file(self, tmp_path):
-        """When output file already exists → write_mode must be 'modify_file'."""
-        report = _make_success_report()
-        env_cfg, caps, driver = self._mock_env_cfg()
-
-        # Create the file so it "exists"
-        existing = tmp_path / "existing.py"
-        existing.write_text("# old content")
-
-        captured_configs = []
-
-        def capture_init(**kwargs):
-            captured_configs.append(kwargs.get("config"))
-            m = MagicMock()
-            m.execute.return_value = report
-            return m
-
-        with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
-             patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
-             patch("hermes.cli.commands.implement.EngineeringWorkflow", side_effect=capture_init), \
-             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
-            mock_ri.return_value.scan.return_value = self._empty_snapshot()
-            runner.invoke(app, ["implement", "task", "--output", "existing.py"])
-
-        assert captured_configs[0].write_mode == "modify_file"
 
     def test_implement_goal_output_path_set_correctly(self, tmp_path):
         report = _make_success_report()
@@ -788,16 +698,16 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_execute(goal):
+        def capture_coordinator_execute(goal):
             captured_goals.append(goal)
             return report
 
         with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
              patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
-             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.EngineeringCoordinator") as mock_coord_cls, \
              patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
             mock_ri.return_value.scan.return_value = self._empty_snapshot()
-            mock_wf_cls.return_value.execute.side_effect = capture_execute
+            mock_coord_cls.return_value.execute.side_effect = capture_coordinator_execute
 
             runner.invoke(app, ["implement", "task", "--output", "src/handlers.py"])
 
@@ -810,19 +720,19 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_execute(goal):
+        def capture_coordinator_execute(goal):
             captured_goals.append(goal)
             return report
 
         with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
              patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
-             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.EngineeringCoordinator") as mock_coord_cls, \
              patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path), \
              patch.dict("os.environ", {}, clear=False):
             # Ensure HERMES_REPOSITORIES is absent so the CWD fallback fires.
             os.environ.pop("HERMES_REPOSITORIES", None)
             mock_ri.return_value.scan.return_value = self._empty_snapshot()
-            mock_wf_cls.return_value.execute.side_effect = capture_execute
+            mock_coord_cls.return_value.execute.side_effect = capture_coordinator_execute
 
             runner.invoke(app, ["implement", "task", "--output", "f.py"])
 
@@ -835,7 +745,7 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_execute(goal):
+        def capture_coordinator_execute(goal):
             captured_goals.append(goal)
             return report
 
@@ -844,10 +754,10 @@ class TestImplementCLI:
 
         with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
              patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
-             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.EngineeringCoordinator") as mock_coord_cls, \
              patch.dict("os.environ", {"HERMES_REPOSITORIES": str(repos_root)}):
             mock_ri.return_value.scan.return_value = self._empty_snapshot()
-            mock_wf_cls.return_value.execute.side_effect = capture_execute
+            mock_coord_cls.return_value.execute.side_effect = capture_coordinator_execute
 
             runner.invoke(app, ["implement", "task", "--output", "f.py"])
 

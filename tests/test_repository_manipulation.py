@@ -1178,3 +1178,132 @@ class TestHelpers:
     def test_make_plan_id_deterministic(self):
         ops = [_op("op1", CF, "a.py")]
         assert _make_plan_id("repo", ops) == _make_plan_id("repo", ops)
+
+
+# ── Phase 6: Duplicate target detection ───────────────────────────────────────
+
+
+class TestDuplicateTargetDetection:
+    """Pre-validation duplicate target detection added in Phase 6.
+
+    Duplicate target conflicts are prepended before simulation conflicts in the
+    returned plan. The plan is invalid (valid=False) when duplicates are detected.
+    """
+
+    def test_two_modify_ops_same_target_fails(self, tmp_path):
+        """Two MODIFY_FILE ops on same target → plan.valid=False."""
+        # Create the file so MODIFY_FILE would otherwise succeed
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "target.py").write_text("# content")
+
+        engine = RepositoryManipulation(workspace_root=tmp_path)
+        ops = [
+            _op("op-0", MF, "target.py"),
+            _op("op-1", MF, "target.py"),
+        ]
+        plan = engine.plan("repo", ops)
+
+        assert plan.valid is False
+
+    def test_two_modify_ops_conflict_detail_starts_with_duplicate_target(self, tmp_path):
+        """Duplicate conflict detail must start with 'duplicate_target:'."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "target.py").write_text("# content")
+
+        engine = RepositoryManipulation(workspace_root=tmp_path)
+        ops = [
+            _op("op-0", MF, "target.py"),
+            _op("op-1", MF, "target.py"),
+        ]
+        plan = engine.plan("repo", ops)
+
+        dup_conflicts = [c for c in plan.conflicts if "duplicate_target" in c.detail]
+        assert len(dup_conflicts) >= 1
+
+    def test_two_create_ops_same_target_fails(self, tmp_path):
+        """Two CREATE_FILE ops on same target → plan.valid=False."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        engine = RepositoryManipulation(workspace_root=tmp_path)
+        ops = [
+            _op("op-0", CF, "new_file.py"),
+            _op("op-1", CF, "new_file.py"),
+        ]
+        plan = engine.plan("repo", ops)
+
+        assert plan.valid is False
+
+    def test_two_delete_ops_same_target_fails(self, tmp_path):
+        """Two DELETE_FILE ops on same target → plan.valid=False (same-kind duplicate)."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "target.py").write_text("# content")
+
+        engine = RepositoryManipulation(workspace_root=tmp_path)
+        ops = [
+            _op("op-0", DF, "target.py"),
+            _op("op-1", DF, "target.py"),
+        ]
+        plan = engine.plan("repo", ops)
+
+        assert plan.valid is False
+
+    def test_modify_then_create_same_target_is_not_a_duplicate(self, tmp_path):
+        """MODIFY + CREATE on same target are DIFFERENT kinds → no duplicate conflict.
+
+        Sequential ops of different kinds are handled by the simulation loop.
+        Only same-kind duplicates (e.g. two MODIFY or two CREATE) are duplicate_target errors.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / "target.py").write_text("# content")
+
+        engine = RepositoryManipulation(workspace_root=tmp_path)
+        ops = [
+            _op("op-0", MF, "target.py"),
+            _op("op-1", CF, "target.py"),
+        ]
+        plan = engine.plan("repo", ops)
+
+        dup_conflicts = [c for c in plan.conflicts if "duplicate_target" in c.detail]
+        assert len(dup_conflicts) == 0
+
+    def test_duplicate_detected_before_simulation(self, tmp_path):
+        """Duplicate must be reported even when file doesn't exist (MODIFY would fail anyway).
+
+        The pre-pass runs BEFORE the simulation loop. Both ops reference a
+        non-existent file; op-0 would fail MODIFY validation, but op-1 must
+        still be flagged as a duplicate by the pre-pass.
+        """
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        # File does NOT exist — both MODIFY ops would fail individually
+        engine = RepositoryManipulation(workspace_root=tmp_path)
+        ops = [
+            _op("op-0", MF, "ghost.py"),
+            _op("op-1", MF, "ghost.py"),
+        ]
+        plan = engine.plan("repo", ops)
+
+        assert plan.valid is False
+        dup_conflicts = [c for c in plan.conflicts if "duplicate_target" in c.detail]
+        assert len(dup_conflicts) >= 1
+
+    def test_no_duplicates_existing_tests_unaffected(self, tmp_path):
+        """Three unique targets → no duplicate conflicts added."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        engine = RepositoryManipulation(workspace_root=tmp_path)
+        ops = [
+            _op("op-0", CF, "a.py"),
+            _op("op-1", CF, "b.py"),
+            _op("op-2", CF, "c.py"),
+        ]
+        plan = engine.plan("repo", ops)
+
+        dup_conflicts = [c for c in plan.conflicts if "duplicate_target" in c.detail]
+        assert len(dup_conflicts) == 0
