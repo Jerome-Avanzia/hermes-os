@@ -81,7 +81,7 @@ independently break common naive implementations.
 ### Command
 
 ```bash
-docker compose run --rm hermes implement \
+docker exec hermes hermes implement \
   "Implement text_utils.py with a truncate function" \
   --repo hermes-text-utils
 ```
@@ -133,7 +133,7 @@ Use a two-operation autonomous plan against `hermes-text-utils` (or any repo
 where Hermes produces a two-operation `EngineeringPlan`). For example:
 
 ```bash
-docker compose run --rm hermes implement \
+docker exec hermes hermes implement \
   "Add a word_count function in word_utils.py and implement text_utils.py with truncate" \
   --repo hermes-text-utils
 ```
