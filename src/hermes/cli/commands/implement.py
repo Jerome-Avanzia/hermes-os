@@ -36,6 +36,7 @@ from __future__ import annotations
 import os
 import uuid
 from pathlib import Path
+from typing import Optional
 
 import time
 
@@ -60,13 +61,13 @@ from hermes.workflows.engineering_workflow import EngineeringWorkflow
 
 def implement(
     task: str = typer.Argument(..., help="Engineering task in plain language"),
-    output: str = typer.Option(
-        ...,
+    output: Optional[str] = typer.Option(
+        None,
         "--output",
         "-o",
         help=(
-            "[Bootstrap v1] Workspace-relative path for the output file. "
-            "Future: Hermes selects target files autonomously."
+            "Workspace-relative path for the output file. "
+            "When omitted, Hermes selects the target file autonomously (Phase 5+)."
         ),
     ),
     repo: str = typer.Option(
@@ -108,9 +109,14 @@ def implement(
         typer.echo(f"Error: failed to read Ollama configuration — {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    # ── 3. Select write mode: modify if file exists, create otherwise ──────────
-    output_abs = workspace_root / output
-    write_mode = "modify_file" if output_abs.exists() else "create_file"
+    # ── 3. Select write mode (deterministic mode only) ────────────────────────
+    # In autonomous mode (output is None), write_mode is derived by the workflow
+    # from the LLM's propose_target result; we pass a placeholder here.
+    if output is not None:
+        output_abs = workspace_root / output
+        write_mode = "modify_file" if output_abs.exists() else "create_file"
+    else:
+        write_mode = "create_file"  # placeholder; overridden in autonomous mode
 
     test_command = (
         snapshot.build_system.test_command.strip()
@@ -138,12 +144,13 @@ def implement(
         f"{context_str}"
     )
 
+    # output_path="" → autonomous mode; workflow's propose_target derives the file.
     goal = FounderGoal(
         goal_id=goal_id,
         description=enriched_description,
         workspace_path=str(workspace_root),
         repository_path=repo,
-        output_path=output,
+        output_path=output if output is not None else "",
     )
 
     # ── 5. Wire adapters and gateway ──────────────────────────────────────────
@@ -195,7 +202,7 @@ def implement(
 
     # ── 6. Execute ────────────────────────────────────────────────────────────
     typer.echo(f"Implementing: {task}")
-    typer.echo(f"Output:       {output}")
+    typer.echo(f"Output:       {output if output is not None else '(autonomous)'}")
     typer.echo(f"Repository:   {repo}")
     typer.echo(f"Model:        {config.llm_model}  ({env_cfg.mode.value})")
     typer.echo("")

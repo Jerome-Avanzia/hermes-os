@@ -73,7 +73,8 @@ class FounderGoal:
     description: str
     workspace_path: str
     repository_path: str     # workspace-relative path to git repository root
-    output_path: str         # workspace-relative path where generated code is written
+    output_path: str = ""    # workspace-relative path where generated code is written;
+                             # empty string → autonomous mode (Phase 5+)
 
 
 # ── WorkflowMission ────────────────────────────────────────────────────────────

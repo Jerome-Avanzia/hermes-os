@@ -207,25 +207,63 @@ class EngineeringWorkflow:
 
     # ── Planning ──────────────────────────────────────────────────────────────
 
+    def _build_propose_operation(
+        self,
+        goal: FounderGoal,
+        job_id: str,
+    ) -> OperationDefinition:
+        """Build the propose_target operation for autonomous mode (Phase 5+).
+
+        This operation is the first step in autonomous execution. It asks the
+        LLM to propose the target file and operation from the repository context
+        embedded in goal.description.
+
+        Step 0 — propose_target (LLM): adapter_id="llm", action_id="propose_target"
+
+        Returns a single OperationDefinition (not a tuple) — it is executed
+        separately before the main pipeline is built.
+        """
+        gid = goal.goal_id
+        return self._operation_engine.build_operation(
+            id=f"op-propose-{gid}",
+            job_id=job_id,
+            goal=f"Propose target file for: {goal.description[:80]}",
+            operation_type=OperationType.LLM,
+            sequence_index=0,
+            execution_ref=OperationExecutionReference(
+                adapter_id="llm",
+                action_id="propose_target",
+            ),
+        )
+
     def _build_operations(
         self,
         goal: FounderGoal,
         job_id: str,
+        write_mode: str | None = None,
     ) -> tuple[OperationDefinition, ...]:
         """Build the operation plan from a FounderGoal.
 
-        Dispatches to the create-mode plan (4 steps) or modify-mode plan
-        (5 steps) based on WorkflowConfig.write_mode.
+        Dispatches to the create-mode plan (6 steps) or modify-mode plan
+        (7 steps) based on WorkflowConfig.write_mode or the write_mode override.
 
         Create mode (write_mode="create_file"):
-          generate → create_file → add → commit
+          generate → create_file → validate → run_tests → add → commit
 
         Modify mode (write_mode="modify_file"):
-          read_file → generate → modify_file → add → commit
+          read_file → generate → modify_file → validate → run_tests → add → commit
           (RepositoryManipulationPlan gate runs between read_file and generate
           in execute(), before any LLM token is consumed.)
+
+        Args:
+            goal:       The FounderGoal with concrete output_path.
+            job_id:     The job identifier for operation IDs.
+            write_mode: Override the config's write_mode. When None, uses
+                        self._config.write_mode. Used by autonomous mode after
+                        the LLM's proposal is accepted.
         """
-        if self._config.write_mode == "modify_file":
+        effective_write_mode = write_mode if write_mode is not None else self._config.write_mode
+        if effective_write_mode == "modify_file":
             return self._build_modify_operations(goal, job_id)
         return self._build_create_operations(goal, job_id)
 
@@ -513,6 +551,53 @@ class EngineeringWorkflow:
 
         return None
 
+    def _run_selection_plan_gate(
+        self,
+        goal: FounderGoal,
+        selected_file: str,
+        operation: str,
+        operation_id: str,
+    ) -> str | None:
+        """Validate the LLM-proposed file operation via RepositoryManipulation.
+
+        Runs after Phase 1 (propose_target) succeeds with confidence="high".
+        Validates the proposed file operation against the live repository state
+        before any LLM token is consumed for code generation.
+
+        Args:
+            goal:         The FounderGoal (workspace_path, repository_path).
+            selected_file: Repo-relative path from RepositorySelectionResult.
+            operation:    "create_file" or "modify_file".
+            operation_id: The operation ID for the plan (used for conflict linking).
+
+        Returns:
+            None if the plan is valid and Phase 2 should proceed.
+            An error string starting with "manipulation_plan_conflict:" if invalid.
+        """
+        kind = (
+            RepositoryOperationKind.MODIFY_FILE
+            if operation == "modify_file"
+            else RepositoryOperationKind.CREATE_FILE
+        )
+
+        repo_op = RepositoryOperation(
+            operation_id=operation_id,
+            kind=kind,
+            path=selected_file,
+        )
+
+        try:
+            rm_engine = RepositoryManipulation(workspace_root=goal.workspace_path)
+            plan = rm_engine.plan(goal.repository_path, [repo_op])
+        except Exception as exc:
+            return f"manipulation_plan_error: {type(exc).__name__}: {exc}"
+
+        if not plan.valid:
+            detail = "; ".join(c.detail for c in plan.conflicts)
+            return f"manipulation_plan_conflict: {detail}"
+
+        return None
+
     # ── Step execution ─────────────────────────────────────────────────────────
 
     def _build_payload(
@@ -551,6 +636,32 @@ class EngineeringWorkflow:
 
         if ref.adapter_id == "filesystem" and ref.action_id == "read_file":
             return {"path": goal.output_path}
+
+        if ref.adapter_id == "llm" and ref.action_id == "propose_target":
+            return {
+                "system_prompt": (
+                    "You are a software repository analyst. "
+                    "Identify the single target file for the engineering task described below. "
+                    "Respond ONLY with a valid JSON object — no markdown, no code fences, "
+                    "no explanation.\n\n"
+                    "JSON schema:\n"
+                    '{"selected_file": "<repo-relative path or empty string if ambiguous>", '
+                    '"operation": "<create_file|modify_file|empty string if ambiguous>", '
+                    '"confidence": "<high|ambiguous>", '
+                    '"basis": "<one sentence describing your choice>", '
+                    '"candidates": ["<path>", ...]}\n\n'
+                    "Rules:\n"
+                    "- confidence='high': you are certain about exactly one target file\n"
+                    "- confidence='ambiguous': multiple files are equally plausible\n"
+                    "- When confidence='high': selected_file=<repo-relative path>, "
+                    "operation=create_file if the file does not yet exist or modify_file if "
+                    "it does, candidates=[]\n"
+                    "- When confidence='ambiguous': selected_file='', operation='', "
+                    "candidates=[alphabetically sorted list of plausible paths]\n"
+                    "- selected_file must be repo-relative (no leading /)"
+                ),
+                "prompt": goal.description,
+            }
 
         if ref.adapter_id == "llm" and ref.action_id == "generate":
             if self._config.write_mode == "modify_file":
@@ -694,16 +805,35 @@ class EngineeringWorkflow:
                 adapter_result = self._llm_adapter.execute(request, llm_config)
                 success = adapter_result.success
                 error = adapter_result.error
-                output = (
-                    adapter_result.llm_response.content
-                    if adapter_result.llm_response
-                    else ""
-                )
-                logger.info(
-                    "EngineeringWorkflow: LLM step complete op=%r success=%s "
-                    "output_length=%d",
-                    op.id, success, len(output),
-                )
+
+                if action_id == "propose_target":
+                    from hermes.models.repository_selection import (
+                        SelectionExecutionResult as _SER,
+                    )
+                    if (
+                        isinstance(adapter_result, _SER)
+                        and adapter_result.selection_result is not None
+                    ):
+                        context["selection_result"] = adapter_result.selection_result
+                        output = adapter_result.selection_result.selected_file
+                    else:
+                        output = ""
+                    logger.info(
+                        "EngineeringWorkflow: propose_target step complete op=%r "
+                        "success=%s",
+                        op.id, success,
+                    )
+                else:
+                    output = (
+                        adapter_result.llm_response.content
+                        if adapter_result.llm_response
+                        else ""
+                    )
+                    logger.info(
+                        "EngineeringWorkflow: LLM step complete op=%r success=%s "
+                        "output_length=%d",
+                        op.id, success, len(output),
+                    )
 
             elif adapter_type == ExecutionAdapter.FILESYSTEM:
                 adapter_result = self._filesystem_adapter.execute(request)
@@ -815,50 +945,181 @@ class EngineeringWorkflow:
     def execute(self, goal: FounderGoal) -> WorkflowExecutionReport:
         """Execute a complete engineering workflow from a Founder Goal.
 
-        Execution steps:
-          1. Derive mission from goal.
-          2. Build four-step operation plan (JobEngine + OperationEngine).
-          3. Validate all operations; fail early if any is invalid.
-          4. Compute topological execution order.
-          5. For each operation in order:
-             a. Build ExecutionRequest (via Gateway).
-             b. gateway.dispatch() → validate and produce dispatch contract.
-             c. If not DISPATCHED → halt with success=False.
-             d. Invoke the appropriate adapter.
-             e. If adapter fails → halt with success=False.
-             f. Extract output for downstream steps.
-          6. Assemble and return WorkflowExecutionReport.
+        Deterministic mode (goal.output_path is set):
+          1. Build 6- or 7-step operation plan.
+          2. Validate all operations.
+          3. Compute topological order.
+          4. Execute steps; halt on any failure.
+          5. Return WorkflowExecutionReport.
+
+        Autonomous mode (goal.output_path == ""):
+          Phase 1 — propose_target:
+            1. Execute propose_target via LLM.
+            2. If confidence="ambiguous" → halt with ordered candidates.
+            3. RepositoryManipulation gate on the proposed file.
+          Phase 2 — deterministic pipeline:
+            4. Derive concrete goal (output_path = proposed file).
+            5. Build and execute the 6- or 7-step pipeline.
 
         The workflow never raises exceptions. All failures are captured in
         WorkflowExecutionReport(success=False, error=...).
 
         Args:
             goal: The Founder Goal describing what to build.
+                  goal.output_path="" → autonomous mode (Phase 5+).
 
         Returns:
             WorkflowExecutionReport capturing the complete execution audit trail.
         """
+        from pathlib import Path as _Path
+
         gid = goal.goal_id
         mission_id = f"mission-{gid}"
         job_id = f"job-{gid}"
         report_id = f"report-{gid}"
+        autonomous = not goal.output_path   # True when output_path == ""
 
         logger.info(
-            "EngineeringWorkflow: starting execution for goal_id=%r description=%r",
-            gid, goal.description[:80],
+            "EngineeringWorkflow: starting execution for goal_id=%r "
+            "autonomous=%s description=%r",
+            gid, autonomous, goal.description[:80],
         )
 
         # ── 1. Build mission ───────────────────────────────────────────────
-        mission = WorkflowMission(
+        WorkflowMission(
             mission_id=mission_id,
             goal_id=gid,
             objective=goal.description,
         )
 
-        # ── 2. Build operations ────────────────────────────────────────────
-        operations = list(self._build_operations(goal, job_id))
+        # ── Autonomous Phase 1: propose_target ─────────────────────────────
+        steps: list[StepExecutionRecord] = []
+        context: dict = {}   # cross-step data; "selection_result" key in autonomous mode
+        derived_write_mode: str | None = None  # set by autonomous Phase 1
 
-        # ── 3. Validate all operations (OperationEngine) ───────────────────
+        if autonomous:
+            op_propose = self._build_propose_operation(goal, job_id)
+
+            step = self._execute_step(op_propose, goal, context)
+            steps.append(step)
+
+            if not step.adapter_success:
+                logger.warning(
+                    "EngineeringWorkflow: propose_target failed for goal_id=%r: %r",
+                    gid, step.adapter_error,
+                )
+                return WorkflowExecutionReport(
+                    report_id=report_id,
+                    goal_id=gid,
+                    mission_id=mission_id,
+                    job_id=job_id,
+                    steps=tuple(steps),
+                    success=False,
+                    error=step.adapter_error,
+                    execution_sequence=tuple(s.adapter_type.value for s in steps),
+                    metadata=tuple(sorted({
+                        "goal_id": gid,
+                        "failure_stage": "propose_target",
+                        "steps_completed": str(len(steps)),
+                    }.items())),
+                )
+
+            from hermes.models.repository_selection import (
+                RepositorySelectionResult as _RSR,
+            )
+            sel = context.get("selection_result")
+
+            if not isinstance(sel, _RSR):
+                return WorkflowExecutionReport(
+                    report_id=report_id,
+                    goal_id=gid,
+                    mission_id=mission_id,
+                    job_id=job_id,
+                    steps=tuple(steps),
+                    success=False,
+                    error="propose_target_no_result: selection result not populated",
+                    execution_sequence=tuple(s.adapter_type.value for s in steps),
+                    metadata=tuple(sorted({
+                        "goal_id": gid,
+                        "failure_stage": "propose_target",
+                        "steps_completed": str(len(steps)),
+                    }.items())),
+                )
+
+            # Gate 1: ambiguity check
+            if sel.confidence == "ambiguous":
+                candidates_str = ", ".join(sel.candidates)
+                logger.info(
+                    "EngineeringWorkflow: propose_target returned ambiguous for "
+                    "goal_id=%r candidates=%r",
+                    gid, sel.candidates,
+                )
+                return WorkflowExecutionReport(
+                    report_id=report_id,
+                    goal_id=gid,
+                    mission_id=mission_id,
+                    job_id=job_id,
+                    steps=tuple(steps),
+                    success=False,
+                    error=f"ambiguous_target: {candidates_str}",
+                    execution_sequence=tuple(s.adapter_type.value for s in steps),
+                    metadata=tuple(sorted({
+                        "goal_id": gid,
+                        "failure_stage": "propose_target",
+                        "candidates": candidates_str,
+                        "steps_completed": str(len(steps)),
+                    }.items())),
+                )
+
+            # Gate 2: RepositoryManipulation validation
+            plan_error = self._run_selection_plan_gate(
+                goal, sel.selected_file, sel.operation, op_propose.id,
+            )
+            if plan_error is not None:
+                logger.warning(
+                    "EngineeringWorkflow: selection plan invalid for goal_id=%r: %s",
+                    gid, plan_error,
+                )
+                return WorkflowExecutionReport(
+                    report_id=report_id,
+                    goal_id=gid,
+                    mission_id=mission_id,
+                    job_id=job_id,
+                    steps=tuple(steps),
+                    success=False,
+                    error=plan_error,
+                    execution_sequence=tuple(s.adapter_type.value for s in steps),
+                    metadata=tuple(sorted({
+                        "goal_id": gid,
+                        "failure_stage": "manipulation_plan",
+                        "steps_completed": str(len(steps)),
+                    }.items())),
+                )
+
+            # Derive concrete goal: output_path = workspace-relative selection
+            workspace_rel_output = str(
+                _Path(goal.repository_path) / sel.selected_file
+            )
+            goal = FounderGoal(
+                goal_id=goal.goal_id,
+                description=goal.description,
+                workspace_path=goal.workspace_path,
+                repository_path=goal.repository_path,
+                output_path=workspace_rel_output,
+            )
+            derived_write_mode = sel.operation
+
+            logger.info(
+                "EngineeringWorkflow: autonomous Phase 1 complete for goal_id=%r "
+                "selected_file=%r operation=%r",
+                gid, sel.selected_file, sel.operation,
+            )
+
+        # ── Build Phase 2 operations ───────────────────────────────────────
+        # (also the only phase for deterministic mode)
+        operations = list(self._build_operations(goal, job_id, write_mode=derived_write_mode))
+
+        # ── Validate all operations (OperationEngine) ──────────────────────
         op_results = self._operation_engine.plan_all(
             operations, completed_op_ids=frozenset()
         )
@@ -867,39 +1128,44 @@ class EngineeringWorkflow:
             if v is not None and not v.valid:
                 error_msg = (
                     f"operation_plan_invalid: {op_result.operation_id} — "
-                    + "; ".join(e.message if hasattr(e, "message") else str(e) for e in v.errors)
+                    + "; ".join(
+                        e.message if hasattr(e, "message") else str(e) for e in v.errors
+                    )
                 )
                 return WorkflowExecutionReport(
                     report_id=report_id,
                     goal_id=gid,
                     mission_id=mission_id,
                     job_id=job_id,
-                    steps=(),
+                    steps=tuple(steps),
                     success=False,
                     error=error_msg,
-                    execution_sequence=(),
+                    execution_sequence=tuple(s.adapter_type.value for s in steps),
                     metadata=tuple(sorted({
                         "goal_id": gid,
                         "failure_stage": "planning",
-                        "steps_completed": "0",
+                        "steps_completed": str(len(steps)),
                     }.items())),
                 )
 
-        # ── 4. Topological execution order (OperationEngine) ───────────────
+        # ── Topological execution order (OperationEngine) ──────────────────
         execution_order = self._operation_engine.determine_execution_order(operations)
 
-        # ── 5. Execute steps in order ─────────────────────────────────────
-        steps: list[StepExecutionRecord] = []
-        context: dict[str, str] = {}   # cross-step data (generated code, etc.)
+        # ── Execute pipeline steps in order ────────────────────────────────
+        # context carries cross-step data (generated_code, existing_content)
+        # In autonomous mode, "selection_result" key is already populated.
+
+        effective_write_mode = derived_write_mode if autonomous else self._config.write_mode
 
         for op_id in execution_order:
             op = next(o for o in operations if o.id == op_id)
             ref = op.execution_ref
 
-            # ── RepositoryManipulationPlan gate (modify mode only) ─────────
-            # Runs before the LLM call — no tokens consumed if plan is invalid.
+            # ── RepositoryManipulationPlan gate (deterministic modify only) ─
+            # Skipped in autonomous mode — selection gate already ran in Phase 1.
             if (
-                self._config.write_mode == "modify_file"
+                not autonomous
+                and effective_write_mode == "modify_file"
                 and ref is not None
                 and ref.adapter_id == "llm"
                 and ref.action_id == "generate"
@@ -907,7 +1173,8 @@ class EngineeringWorkflow:
                 plan_error = self._run_modification_plan_gate(goal, op.id)
                 if plan_error is not None:
                     logger.warning(
-                        "EngineeringWorkflow: modification plan invalid for goal_id=%r: %s",
+                        "EngineeringWorkflow: modification plan invalid for "
+                        "goal_id=%r: %s",
                         gid, plan_error,
                     )
                     return WorkflowExecutionReport(
@@ -951,19 +1218,18 @@ class EngineeringWorkflow:
                 )
 
             # Populate cross-step context
-            if ref and ref.adapter_id == "llm":
+            if ref and ref.adapter_id == "llm" and ref.action_id == "generate":
                 context["generated_code"] = step.output
             elif ref and ref.adapter_id == "filesystem" and ref.action_id == "read_file":
                 context["existing_content"] = step.output
 
-        # ── 6. Assemble success report ─────────────────────────────────────
+        # ── Assemble success report ────────────────────────────────────────
         logger.info(
-            "EngineeringWorkflow: all steps complete for goal_id=%r "
-            "steps=%d",
+            "EngineeringWorkflow: all steps complete for goal_id=%r steps=%d",
             gid, len(steps),
         )
 
-        if self._config.write_mode == "modify_file":
+        if effective_write_mode == "modify_file":
             success_metadata: dict[str, str] = {
                 "goal_id": gid,
                 "steps_completed": str(len(steps)),

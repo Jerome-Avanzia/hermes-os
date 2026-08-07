@@ -1447,3 +1447,358 @@ class TestFutureExtensibility:
         all_adapters = {a.value for a in ExecutionAdapter}
         assert "http" in all_adapters
         assert "database" in all_adapters
+
+
+# ── TestAutonomousExecution ────────────────────────────────────────────────────
+
+
+class TestAutonomousExecution:
+    """Tests for Phase 5 autonomous mode: output_path="" triggers propose_target.
+
+    Coverage:
+      - propose_target is the first step in the audit trail (autonomous mode)
+      - Ambiguity halt: confidence="ambiguous" → success=False, ordered candidates
+      - RepositoryManipulation gate conflict → success=False before generate
+      - Successful autonomous create: 7 steps (propose + 6-step pipeline)
+      - Successful autonomous modify: 8 steps (propose + 7-step pipeline)
+      - --output always overrides autonomous mode (AT-5-G)
+    """
+
+    def _make_workflow(
+        self,
+        workspace: Path,
+        repo: Path,
+        gateway: ExecutionGateway,
+        mock_llm: MagicMock,
+    ) -> EngineeringWorkflow:
+        return EngineeringWorkflow(
+            gateway=gateway,
+            llm_adapter=mock_llm,
+            filesystem_adapter=FilesystemAdapter(workspace_root=workspace),
+            git_adapter=GitAdapter(workspace_root=workspace),
+            validation_adapter=ValidationAdapter(workspace_root=workspace),
+            job_engine=JobEngine(registry=SkillRegistry()),
+            operation_engine=OperationEngine(),
+            config=WorkflowConfig(
+                llm_provider=LLMProvider.OLLAMA,
+                llm_model="test-model",
+                llm_base_url="http://localhost:11434",
+                llm_api_key="",
+                llm_max_tokens=2048,
+                llm_timeout_seconds=30,
+                commit_message="feat: autonomous test",
+            ),
+        )
+
+    def _make_selection_result_response(self, data: dict) -> "AdapterExecutionResult":
+        """Return a SelectionExecutionResult-like mock for propose_target."""
+        from hermes.models.repository_selection import (
+            RepositorySelectionResult,
+            SelectionExecutionResult,
+        )
+        sel = RepositorySelectionResult(
+            selected_file=data.get("selected_file", ""),
+            operation=data.get("operation", ""),
+            confidence=data.get("confidence", "high"),
+            basis=data.get("basis", "test basis"),
+            candidates=tuple(sorted(data.get("candidates", []))),
+        )
+        return SelectionExecutionResult(
+            request_id="req-propose",
+            operation_id="op-propose",
+            success=data.get("success", True),
+            error=data.get("error"),
+            selection_result=sel if data.get("success", True) else None,
+            adapter_metadata=(("action", "propose_target"), ("confidence", sel.confidence)),
+        )
+
+    def test_autonomous_mode_detected_via_empty_output_path(
+        self, gateway, workspace, repo
+    ):
+        """goal.output_path='' → propose_target is the first step in the report."""
+        from hermes.models.repository_selection import SelectionExecutionResult
+
+        call_log = []
+
+        def mock_execute(request, config):
+            call_log.append(request.action_id)
+            if request.action_id == "propose_target":
+                return self._make_selection_result_response({
+                    "selected_file": "my-project/hello.py",
+                    "operation": "create_file",
+                    "confidence": "high",
+                })
+            return _make_llm_success(request.request_id, request.operation_id, _GENERATED_CODE)
+
+        mock_llm = MagicMock(spec=LlmAdapter)
+        mock_llm.execute.side_effect = mock_execute
+
+        wf = self._make_workflow(workspace, repo, gateway, mock_llm)
+        goal_auto = FounderGoal(
+            goal_id="auto-001",
+            description="Add hello function",
+            workspace_path=str(workspace),
+            repository_path="my-project",
+            output_path="",  # autonomous mode
+        )
+        report = wf.execute(goal_auto)
+
+        # propose_target must be the first LLM action called
+        assert call_log[0] == "propose_target"
+        assert report.steps[0].action_id == "propose_target"
+
+    def test_autonomous_ambiguity_halts_with_ordered_candidates(
+        self, gateway, workspace, repo
+    ):
+        """confidence='ambiguous' → report.success=False, error contains ordered candidates."""
+        def mock_execute(request, config):
+            if request.action_id == "propose_target":
+                return self._make_selection_result_response({
+                    "selected_file": "",
+                    "operation": "",
+                    "confidence": "ambiguous",
+                    "candidates": ["src/z_module.py", "src/a_module.py", "src/m_module.py"],
+                })
+            return _make_llm_success(request.request_id, request.operation_id, _GENERATED_CODE)
+
+        mock_llm = MagicMock(spec=LlmAdapter)
+        mock_llm.execute.side_effect = mock_execute
+
+        wf = self._make_workflow(workspace, repo, gateway, mock_llm)
+        goal_auto = FounderGoal(
+            goal_id="auto-ambig",
+            description="Improve performance",
+            workspace_path=str(workspace),
+            repository_path="my-project",
+            output_path="",
+        )
+        report = wf.execute(goal_auto)
+
+        assert report.success is False
+        assert "ambiguous_target" in (report.error or "")
+        # Candidates must appear in alphabetical order
+        assert report.error is not None
+        candidates_in_error = report.error.replace("ambiguous_target: ", "")
+        candidate_list = [c.strip() for c in candidates_in_error.split(",")]
+        assert candidate_list == sorted(candidate_list)
+
+    def test_autonomous_ambiguity_records_candidates_in_metadata(
+        self, gateway, workspace, repo
+    ):
+        """Ambiguity halt must include candidates in report.metadata."""
+        def mock_execute(request, config):
+            if request.action_id == "propose_target":
+                return self._make_selection_result_response({
+                    "selected_file": "",
+                    "operation": "",
+                    "confidence": "ambiguous",
+                    "candidates": ["src/a.py", "src/b.py"],
+                })
+            return _make_llm_success(request.request_id, request.operation_id, _GENERATED_CODE)
+
+        mock_llm = MagicMock(spec=LlmAdapter)
+        mock_llm.execute.side_effect = mock_execute
+
+        wf = self._make_workflow(workspace, repo, gateway, mock_llm)
+        goal_auto = FounderGoal(
+            goal_id="auto-ambig-meta",
+            description="task",
+            workspace_path=str(workspace),
+            repository_path="my-project",
+            output_path="",
+        )
+        report = wf.execute(goal_auto)
+
+        meta = dict(report.metadata)
+        assert "candidates" in meta
+        assert "src/a.py" in meta["candidates"]
+        assert "src/b.py" in meta["candidates"]
+
+    def test_autonomous_manipulation_plan_conflict_halts(
+        self, gateway, workspace, repo
+    ):
+        """RepositoryManipulation conflict on selected file → success=False before generate."""
+        def mock_execute(request, config):
+            if request.action_id == "propose_target":
+                # Propose modifying a file that doesn't exist in the repo
+                return self._make_selection_result_response({
+                    "selected_file": "nonexistent_file.py",
+                    "operation": "modify_file",
+                    "confidence": "high",
+                })
+            return _make_llm_success(request.request_id, request.operation_id, _GENERATED_CODE)
+
+        mock_llm = MagicMock(spec=LlmAdapter)
+        mock_llm.execute.side_effect = mock_execute
+
+        wf = self._make_workflow(workspace, repo, gateway, mock_llm)
+        goal_auto = FounderGoal(
+            goal_id="auto-conflict",
+            description="Modify nonexistent file",
+            workspace_path=str(workspace),
+            repository_path="my-project",
+            output_path="",
+        )
+        report = wf.execute(goal_auto)
+
+        assert report.success is False
+        assert "manipulation_plan" in (report.error or "")
+        # generate must NOT have been called
+        action_ids = [s.action_id for s in report.steps]
+        assert "generate" not in action_ids
+
+    def test_autonomous_create_succeeds_in_seven_steps(
+        self, gateway, workspace, repo
+    ):
+        """Successful autonomous create: propose_target + 6-step pipeline = 7 steps."""
+        def mock_execute(request, config):
+            if request.action_id == "propose_target":
+                return self._make_selection_result_response({
+                    "selected_file": "new_module.py",
+                    "operation": "create_file",
+                    "confidence": "high",
+                })
+            return _make_llm_success(request.request_id, request.operation_id, _GENERATED_CODE)
+
+        mock_llm = MagicMock(spec=LlmAdapter)
+        mock_llm.execute.side_effect = mock_execute
+
+        wf = self._make_workflow(workspace, repo, gateway, mock_llm)
+        goal_auto = FounderGoal(
+            goal_id="auto-create",
+            description="Create a new module",
+            workspace_path=str(workspace),
+            repository_path="my-project",
+            output_path="",
+        )
+        report = wf.execute(goal_auto)
+
+        assert report.success is True, f"Expected success, got: {report.error}"
+        assert len(report.steps) == 7
+        assert report.steps[0].action_id == "propose_target"
+        assert report.steps[1].action_id == "generate"
+        assert report.steps[2].action_id == "create_file"
+
+    def test_autonomous_create_file_exists_on_disk(
+        self, gateway, workspace, repo
+    ):
+        """After autonomous create, the file must exist in the workspace."""
+        def mock_execute(request, config):
+            if request.action_id == "propose_target":
+                return self._make_selection_result_response({
+                    "selected_file": "auto_module.py",
+                    "operation": "create_file",
+                    "confidence": "high",
+                })
+            return _make_llm_success(request.request_id, request.operation_id, _GENERATED_CODE)
+
+        mock_llm = MagicMock(spec=LlmAdapter)
+        mock_llm.execute.side_effect = mock_execute
+
+        wf = self._make_workflow(workspace, repo, gateway, mock_llm)
+        goal_auto = FounderGoal(
+            goal_id="auto-disk",
+            description="Create auto module",
+            workspace_path=str(workspace),
+            repository_path="my-project",
+            output_path="",
+        )
+        wf.execute(goal_auto)
+
+        created_file = workspace / "my-project" / "auto_module.py"
+        assert created_file.exists()
+        assert created_file.read_text() == _GENERATED_CODE
+
+    def test_autonomous_modify_succeeds_in_eight_steps(
+        self, gateway, workspace, repo
+    ):
+        """Successful autonomous modify: propose_target + 7-step pipeline = 8 steps."""
+        # Pre-create the file so modify_file works
+        existing_file = workspace / "my-project" / "existing.py"
+        existing_file.write_text("# original content\n")
+        # Stage and commit it so RepositoryManipulation sees it as tracked
+        import subprocess as _sp
+        _sp.run(["git", "add", "existing.py"], cwd=workspace / "my-project", capture_output=True)
+        _sp.run(
+            ["git", "commit", "-m", "add existing"],
+            cwd=workspace / "my-project", capture_output=True,
+        )
+
+        def mock_execute(request, config):
+            if request.action_id == "propose_target":
+                return self._make_selection_result_response({
+                    "selected_file": "existing.py",
+                    "operation": "modify_file",
+                    "confidence": "high",
+                })
+            return _make_llm_success(request.request_id, request.operation_id, _GENERATED_CODE)
+
+        mock_llm = MagicMock(spec=LlmAdapter)
+        mock_llm.execute.side_effect = mock_execute
+
+        wf = self._make_workflow(workspace, repo, gateway, mock_llm)
+        goal_auto = FounderGoal(
+            goal_id="auto-modify",
+            description="Modify existing file",
+            workspace_path=str(workspace),
+            repository_path="my-project",
+            output_path="",
+        )
+        report = wf.execute(goal_auto)
+
+        assert report.success is True, f"Expected success, got: {report.error}"
+        assert len(report.steps) == 8
+        assert report.steps[0].action_id == "propose_target"
+        assert report.steps[1].action_id == "read_file"
+        assert report.steps[2].action_id == "generate"
+
+    def test_deterministic_mode_unaffected_by_phase5(
+        self, workflow, goal
+    ):
+        """When output_path is set (deterministic mode), Phase 5 code does not run.
+
+        AT-5-G: --output always overrides autonomous mode.
+        """
+        # goal fixture has output_path="my-project/hello.py" (non-empty)
+        report = workflow.execute(goal)
+
+        assert report.success is True
+        # Must be exactly 6 steps — no propose_target prepended
+        assert len(report.steps) == 6
+        assert report.steps[0].action_id == "generate"  # NOT propose_target
+
+    def test_autonomous_propose_failure_halts_with_failure_stage(
+        self, gateway, workspace, repo
+    ):
+        """If propose_target LLM call fails, report.success=False, failure_stage=propose_target."""
+        from hermes.models.llm_adapter import AdapterExecutionResult
+
+        def mock_execute(request, config):
+            if request.action_id == "propose_target":
+                from hermes.models.repository_selection import SelectionExecutionResult
+                return SelectionExecutionResult(
+                    request_id=request.request_id,
+                    operation_id=request.operation_id,
+                    success=False,
+                    error="provider_call_failed: ConnectionError: refused",
+                    selection_result=None,
+                    adapter_metadata=(),
+                )
+            return _make_llm_success(request.request_id, request.operation_id, _GENERATED_CODE)
+
+        mock_llm = MagicMock(spec=LlmAdapter)
+        mock_llm.execute.side_effect = mock_execute
+
+        wf = self._make_workflow(workspace, repo, gateway, mock_llm)
+        goal_auto = FounderGoal(
+            goal_id="auto-fail",
+            description="task",
+            workspace_path=str(workspace),
+            repository_path="my-project",
+            output_path="",
+        )
+        report = wf.execute(goal_auto)
+
+        assert report.success is False
+        meta = dict(report.metadata)
+        assert meta.get("failure_stage") == "propose_target"

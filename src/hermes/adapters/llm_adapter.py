@@ -353,7 +353,7 @@ class LlmAdapter:
         self,
         request: ExecutionRequest,
         config: AdapterConfiguration,
-    ) -> AdapterExecutionResult:
+    ) -> "AdapterExecutionResult | object":
         """Execute an LLM request through the registered provider driver.
 
         Execution steps:
@@ -387,6 +387,10 @@ class LlmAdapter:
         Returns:
             AdapterExecutionResult capturing the full execution outcome.
         """
+        # Route propose_target to its dedicated handler
+        if request.action_id == "propose_target":
+            return self._execute_propose_target(request, config)
+
         adapter_meta_base: dict[str, str] = {
             "provider": config.provider.value,
             "model": config.model,
@@ -512,5 +516,191 @@ class LlmAdapter:
             llm_response=llm_response,
             success=True,
             error=None,
+            adapter_metadata=tuple(sorted(adapter_meta.items())),
+        )
+
+    def _execute_propose_target(
+        self,
+        request: ExecutionRequest,
+        config: AdapterConfiguration,
+    ) -> "object":
+        """Execute a propose_target request: call LLM, parse JSON → SelectionExecutionResult.
+
+        Follows the same provider-call path as execute() but instead of returning
+        the raw LLM text, parses the response as structured JSON and returns a
+        SelectionExecutionResult with a RepositorySelectionResult.
+
+        JSON parsing is defensive:
+          - Strips markdown fences (```json ... ```) if present.
+          - Validates required fields: selected_file, operation, confidence, basis, candidates.
+          - Validates confidence is "high" or "ambiguous".
+          - Sorts candidates alphabetically regardless of LLM ordering.
+
+        Returns SelectionExecutionResult (not AdapterExecutionResult).
+        """
+        import json
+
+        from hermes.models.repository_selection import (
+            RepositorySelectionResult,
+            SelectionExecutionResult,
+        )
+
+        adapter_meta_base: dict[str, str] = {
+            "provider": config.provider.value,
+            "model": config.model,
+            "action": request.action_id,
+        }
+
+        # ── 1. Validate ────────────────────────────────────────────────────
+        validation = self.validate(request, config)
+        if not validation.valid:
+            logger.warning(
+                "LlmAdapter._execute_propose_target: validation failed "
+                "request_id=%r: %r",
+                request.request_id, validation.errors,
+            )
+            return SelectionExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=False,
+                error="; ".join(validation.errors),
+                selection_result=None,
+                adapter_metadata=tuple(sorted(adapter_meta_base.items())),
+            )
+
+        # ── 2. Build normalized request ────────────────────────────────────
+        llm_request = self.build_llm_request(request, config)
+
+        # ── 3. Resolve driver ──────────────────────────────────────────────
+        driver = self._drivers.get(config.provider)
+        if driver is None:
+            return SelectionExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=False,
+                error=f"no_driver_for_{config.provider.value}",
+                selection_result=None,
+                adapter_metadata=tuple(sorted(adapter_meta_base.items())),
+            )
+
+        # ── 4. Build provider payload ──────────────────────────────────────
+        payload = driver.build_payload(llm_request, config)
+
+        # ── 5. Determine endpoint ──────────────────────────────────────────
+        endpoint = config.base_url.rstrip("/") + driver.endpoint_path
+
+        # ── 6. Call provider ───────────────────────────────────────────────
+        try:
+            raw = driver.call_provider(
+                endpoint, payload, config.timeout_seconds, config.api_key,
+            )
+        except Exception as exc:
+            return SelectionExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=False,
+                error=f"provider_call_failed: {type(exc).__name__}: {exc}",
+                selection_result=None,
+                adapter_metadata=tuple(sorted(adapter_meta_base.items())),
+            )
+
+        # ── 7. Parse LLM response ──────────────────────────────────────────
+        try:
+            llm_response = driver.parse_response(raw, llm_request)
+        except Exception as exc:
+            return SelectionExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=False,
+                error=f"response_parse_failed: {type(exc).__name__}: {exc}",
+                selection_result=None,
+                adapter_metadata=tuple(sorted(adapter_meta_base.items())),
+            )
+
+        # ── 8. Parse JSON from content ─────────────────────────────────────
+        content = llm_response.content.strip()
+
+        # Strip markdown fences if present (```json ... ``` or ``` ... ```)
+        if content.startswith("```"):
+            lines = content.splitlines()
+            inner_lines = []
+            for line in lines[1:]:
+                if line.strip().startswith("```"):
+                    break
+                inner_lines.append(line)
+            content = "\n".join(inner_lines).strip()
+
+        try:
+            data = json.loads(content)
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning(
+                "LlmAdapter._execute_propose_target: JSON parse failed "
+                "request_id=%r: %s",
+                request.request_id, exc,
+            )
+            return SelectionExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=False,
+                error=f"json_parse_failed: {type(exc).__name__}: {exc}",
+                selection_result=None,
+                adapter_metadata=tuple(sorted(adapter_meta_base.items())),
+            )
+
+        # ── 9. Schema validation ───────────────────────────────────────────
+        required_fields = {"selected_file", "operation", "confidence", "basis", "candidates"}
+        missing = required_fields - set(data.keys())
+        if missing:
+            return SelectionExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=False,
+                error=f"json_schema_invalid: missing fields {sorted(missing)}",
+                selection_result=None,
+                adapter_metadata=tuple(sorted(adapter_meta_base.items())),
+            )
+
+        confidence = str(data.get("confidence", ""))
+        if confidence not in ("high", "ambiguous"):
+            return SelectionExecutionResult(
+                request_id=request.request_id,
+                operation_id=request.operation_id,
+                success=False,
+                error=(
+                    f"json_schema_invalid: confidence must be 'high' or 'ambiguous', "
+                    f"got {confidence!r}"
+                ),
+                selection_result=None,
+                adapter_metadata=tuple(sorted(adapter_meta_base.items())),
+            )
+
+        candidates_raw = data.get("candidates", [])
+        if not isinstance(candidates_raw, list):
+            candidates_raw = []
+        candidates = tuple(sorted(str(c) for c in candidates_raw))
+
+        selection_result = RepositorySelectionResult(
+            selected_file=str(data.get("selected_file", "")),
+            operation=str(data.get("operation", "")),
+            confidence=confidence,
+            basis=str(data.get("basis", "")),
+            candidates=candidates,
+        )
+
+        adapter_meta = dict(adapter_meta_base)
+        adapter_meta["confidence"] = confidence
+
+        logger.info(
+            "LlmAdapter._execute_propose_target: complete request_id=%r "
+            "confidence=%r selected_file=%r",
+            request.request_id, confidence, selection_result.selected_file,
+        )
+
+        return SelectionExecutionResult(
+            request_id=request.request_id,
+            operation_id=request.operation_id,
+            success=True,
+            error=None,
+            selection_result=selection_result,
             adapter_metadata=tuple(sorted(adapter_meta.items())),
         )

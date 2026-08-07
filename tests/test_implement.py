@@ -544,9 +544,47 @@ class TestImplementCLI:
 
         assert result.exit_code == 1
 
-    def test_implement_output_required(self, tmp_path):
-        result = runner.invoke(app, ["implement", "Add validation"])
-        assert result.exit_code != 0
+    def test_implement_output_optional_triggers_autonomous_mode(self, tmp_path):
+        """When --output is omitted, implement runs in autonomous mode (goal.output_path='')."""
+        report = _make_success_report()
+        env_cfg, caps, driver = self._mock_env_cfg()
+
+        captured_goals = []
+
+        def capture_execute(goal):
+            captured_goals.append(goal)
+            return report
+
+        with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
+             patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
+             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
+            mock_ri.return_value.scan.return_value = self._empty_snapshot()
+            mock_wf_cls.return_value.execute.side_effect = capture_execute
+
+            result = runner.invoke(app, ["implement", "Add validation"])
+
+        # Must succeed at CLI level (no longer a required argument error)
+        assert result.exit_code == 0, result.output
+        # Goal must have empty output_path → autonomous mode
+        assert len(captured_goals) == 1
+        assert captured_goals[0].output_path == ""
+
+    def test_implement_autonomous_mode_prints_autonomous_label(self, tmp_path):
+        """When --output is omitted, stdout must show '(autonomous)' not the path."""
+        report = _make_success_report()
+        env_cfg, caps, driver = self._mock_env_cfg()
+
+        with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
+             patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
+             patch("hermes.cli.commands.implement.EngineeringWorkflow") as mock_wf_cls, \
+             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
+            mock_ri.return_value.scan.return_value = self._empty_snapshot()
+            mock_wf_cls.return_value.execute.return_value = report
+
+            result = runner.invoke(app, ["implement", "Add validation"])
+
+        assert "(autonomous)" in result.output
 
     def test_implement_prints_task_and_output(self, tmp_path):
         report = _make_success_report()
