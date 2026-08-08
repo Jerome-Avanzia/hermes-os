@@ -2,10 +2,13 @@
 # AT-7 Scenario 1 fixture setup.
 # Creates hermes-text-utils under $HERMES_REPOS (default: /opt/avanzia/repos).
 # Idempotent: safe to re-run.
+#
+# Prerequisites: the hermes container must be running (docker exec hermes ...).
 set -euo pipefail
 
 REPOS="${HERMES_REPOS:-/opt/avanzia/repos}"
 BASE="$REPOS/hermes-text-utils"
+CONTAINER_BASE="/data/repos/hermes-text-utils"
 
 echo "==> Creating fixture at $BASE"
 rm -rf "$BASE"
@@ -54,11 +57,12 @@ def test_single_oversized_word():
     assert truncate("averylongword", 5) == "av..."
 PYTHON
 
-# Install pytest into a local venv so RepositoryIntelligence detects
-# .venv/bin/pytest and sets the test_command (detection priority 6).
-echo "==> Installing pytest into .venv"
-python3 -m venv .venv
-.venv/bin/pip install -q "pytest>=8.0"
+# Create the .venv using the container's Python so RepositoryIntelligence
+# detects .venv/bin/pytest (detection priority 6) without requiring any
+# Python packages on the VPS host.
+echo "==> Installing pytest into .venv via container Python"
+docker exec hermes python3 -m venv "$CONTAINER_BASE/.venv"
+docker exec hermes "$CONTAINER_BASE/.venv/bin/pip" install -q "pytest>=8.0"
 
 git add .
 git commit -q -m "feat: AT-7 test scaffolding — text_utils tests"
