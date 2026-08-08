@@ -87,14 +87,21 @@ class OllamaProvider(AIProvider):
         headers: dict[str, str] = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        logger.info(
-            "Streaming chat to %s model=%s messages=%d auth=%s",
-            url, self._model, len(messages), "yes" if self._api_key else "no",
+        masked_key = (self._api_key[:4] + "…" + self._api_key[-4:]) if len(self._api_key) > 8 else ("***" if self._api_key else "none")
+        logger.warning(
+            "DEBUG REQUEST — url=%s model=%r auth-header=%s payload-model=%r",
+            url, self._model, masked_key, payload.get("model"),
         )
 
         try:
             with httpx.Client(timeout=self._timeout) as client:
                 with client.stream("POST", url, json=payload, headers=headers) as response:
+                    if response.status_code >= 400:
+                        body = response.read().decode(errors="replace")
+                        logger.warning(
+                            "DEBUG RESPONSE — status=%d body=%r",
+                            response.status_code, body[:500],
+                        )
                     response.raise_for_status()
                     for line in response.iter_lines():
                         if not line:
