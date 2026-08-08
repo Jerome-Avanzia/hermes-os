@@ -87,20 +87,37 @@ class OllamaProvider(AIProvider):
         headers: dict[str, str] = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        masked_key = (self._api_key[:4] + "…" + self._api_key[-4:]) if len(self._api_key) > 8 else ("***" if self._api_key else "none")
+
+        # -- Temporary instrumentation: log exact request and response --------
+        masked_key = ("*" * (len(self._api_key) - 4) + self._api_key[-4:]) if len(self._api_key) > 4 else ("*" * len(self._api_key) if self._api_key else "none")
+        safe_payload = {k: v for k, v in payload.items() if k != "messages"}
+        safe_payload["messages_count"] = len(payload.get("messages", []))
         logger.warning(
-            "DEBUG REQUEST — url=%s model=%r auth-header=%s payload-model=%r",
-            url, self._model, masked_key, payload.get("model"),
+            "DEBUG REQUEST\n"
+            "  method:            POST\n"
+            "  url:               %s\n"
+            "  model (field):     %r\n"
+            "  payload.model:     %r\n"
+            "  Authorization:     %s\n"
+            "  body (no msgs):    %s",
+            url,
+            self._model,
+            payload.get("model"),
+            f"Bearer {masked_key}" if self._api_key else "not set",
+            safe_payload,
         )
+        # -- End instrumentation ----------------------------------------------
 
         try:
             with httpx.Client(timeout=self._timeout) as client:
                 with client.stream("POST", url, json=payload, headers=headers) as response:
                     if response.status_code >= 400:
-                        body = response.read().decode(errors="replace")
+                        resp_body = response.read().decode(errors="replace")
                         logger.warning(
-                            "DEBUG RESPONSE — status=%d body=%r",
-                            response.status_code, body[:500],
+                            "DEBUG RESPONSE\n"
+                            "  status:  %d\n"
+                            "  body:    %s",
+                            response.status_code, resp_body[:1000],
                         )
                     response.raise_for_status()
                     for line in response.iter_lines():
