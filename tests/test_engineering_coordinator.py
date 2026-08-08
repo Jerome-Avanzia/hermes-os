@@ -23,11 +23,58 @@ from hermes.models.engineering_plan import (
     EngineeringPlan,
     EngineeringPlanResult,
     PlannedOperation,
+    PlanningMetadata,
 )
 from hermes.models.engineering_workflow import FounderGoal, WorkflowExecutionReport
+from hermes.models.repository_intelligence import RepositoryFile, RepositorySnapshot
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _make_snapshot(
+    *,
+    snapshot_id: str = "snap-abc123",
+    file_count: int = 3,
+    files: tuple | None = None,
+) -> RepositorySnapshot:
+    if files is None:
+        files = (
+            RepositoryFile(path="src/hello.py", extension=".py", size_bytes=100, is_directory=False),
+            RepositoryFile(path="src/utils.py", extension=".py", size_bytes=200, is_directory=False),
+            RepositoryFile(path="tests/test_hello.py", extension=".py", size_bytes=150, is_directory=False),
+        )
+    return RepositorySnapshot(
+        snapshot_id=snapshot_id,
+        repository_path="my-project",
+        scanned_at="2026-08-08T00:00:00+00:00",
+        primary_language="python",
+        languages=(),
+        build_system=None,
+        entry_points=(),
+        test_locations=(),
+        config_files=(),
+        documentation=(),
+        files=files,
+        file_count=file_count,
+        directory_count=1,
+        total_size_bytes=450,
+        git_present=True,
+        metadata=(),
+    )
+
+
+def _make_planning_metadata(
+    *,
+    context: str = "repository_snapshot_v1",
+    entries: str = "3",
+    snapshot_id: str = "snap-abc123",
+) -> PlanningMetadata:
+    return PlanningMetadata(
+        planning_context=context,
+        planning_snapshot_entries=entries,
+        planning_snapshot_id=snapshot_id,
+    )
 
 
 def _make_goal(output_path: str = "", workspace_path: str = "/workspace") -> FounderGoal:
@@ -104,6 +151,7 @@ def _make_coordinator(
 class TestAutonomousMode:
     def test_planner_called_in_autonomous_mode(self):
         goal = _make_goal(output_path="")
+        snapshot = _make_snapshot()
         plan = _make_plan("high")
         coordinator, mock_planner, mock_workflow = _make_coordinator()
         mock_planner.plan.return_value = EngineeringPlanResult(
@@ -111,9 +159,9 @@ class TestAutonomousMode:
         )
         mock_workflow.execute.return_value = _make_success_report()
 
-        coordinator.execute(goal)
+        coordinator.execute(goal, snapshot)
 
-        mock_planner.plan.assert_called_once_with(goal)
+        mock_planner.plan.assert_called_once_with(goal, snapshot)
 
     def test_workflow_called_with_plan_and_goal(self):
         goal = _make_goal(output_path="")
@@ -124,7 +172,7 @@ class TestAutonomousMode:
         )
         mock_workflow.execute.return_value = _make_success_report()
 
-        coordinator.execute(goal)
+        coordinator.execute(goal, _make_snapshot())
 
         mock_workflow.execute.assert_called_once_with(plan, goal)
 
@@ -137,7 +185,7 @@ class TestAutonomousMode:
             error="json_parse_error: unexpected token",
         )
 
-        report = coordinator.execute(goal)
+        report = coordinator.execute(goal, _make_snapshot())
 
         assert report.success is False
         mock_workflow.execute.assert_not_called()
@@ -151,7 +199,7 @@ class TestAutonomousMode:
             error="gateway_dispatch_failed: no adapter",
         )
 
-        report = coordinator.execute(goal)
+        report = coordinator.execute(goal, _make_snapshot())
 
         assert "gateway_dispatch_failed" in (report.error or "")
 
@@ -162,7 +210,7 @@ class TestAutonomousMode:
             success=False, plan=None, error="some_error"
         )
 
-        report = coordinator.execute(goal)
+        report = coordinator.execute(goal, _make_snapshot())
 
         meta = dict(report.metadata)
         assert meta.get("failure_stage") == "planning"
@@ -175,7 +223,7 @@ class TestAutonomousMode:
             success=True, plan=plan, error=None
         )
 
-        report = coordinator.execute(goal)
+        report = coordinator.execute(goal, _make_snapshot())
 
         assert report.success is False
 
@@ -187,7 +235,7 @@ class TestAutonomousMode:
             success=True, plan=plan, error=None
         )
 
-        report = coordinator.execute(goal)
+        report = coordinator.execute(goal, _make_snapshot())
 
         assert report.error is not None
         assert report.error.startswith("ambiguous_plan:")
@@ -200,7 +248,7 @@ class TestAutonomousMode:
             success=True, plan=plan, error=None
         )
 
-        report = coordinator.execute(goal)
+        report = coordinator.execute(goal, _make_snapshot())
 
         assert "src/a.py" in (report.error or "")
         assert "src/b.py" in (report.error or "")
@@ -213,7 +261,7 @@ class TestAutonomousMode:
             success=True, plan=plan, error=None
         )
 
-        coordinator.execute(goal)
+        coordinator.execute(goal, _make_snapshot())
 
         mock_workflow.execute.assert_not_called()
 
@@ -227,7 +275,7 @@ class TestDeterministicMode:
         coordinator, mock_planner, mock_workflow = _make_coordinator()
         mock_workflow.execute.return_value = _make_success_report()
 
-        coordinator.execute(goal)
+        coordinator.execute(goal, _make_snapshot())
 
         mock_planner.plan.assert_not_called()
 
@@ -236,7 +284,7 @@ class TestDeterministicMode:
         coordinator, mock_planner, mock_workflow = _make_coordinator()
         mock_workflow.execute.return_value = _make_success_report()
 
-        coordinator.execute(goal)
+        coordinator.execute(goal, _make_snapshot())
 
         mock_workflow.execute.assert_called_once()
 
@@ -245,7 +293,7 @@ class TestDeterministicMode:
         coordinator, mock_planner, mock_workflow = _make_coordinator()
         mock_workflow.execute.return_value = _make_success_report()
 
-        coordinator.execute(goal)
+        coordinator.execute(goal, _make_snapshot())
 
         call_args = mock_workflow.execute.call_args
         # Second argument is the goal
@@ -265,7 +313,7 @@ class TestDeterministicMode:
         coordinator, mock_planner, mock_workflow = _make_coordinator()
         mock_workflow.execute.return_value = _make_success_report()
 
-        coordinator.execute(goal)
+        coordinator.execute(goal, _make_snapshot())
 
         call_args = mock_workflow.execute.call_args
         plan = call_args[0][0]
@@ -287,7 +335,7 @@ class TestDeterministicMode:
         coordinator, mock_planner, mock_workflow = _make_coordinator()
         mock_workflow.execute.return_value = _make_success_report()
 
-        coordinator.execute(goal)
+        coordinator.execute(goal, _make_snapshot())
 
         call_args = mock_workflow.execute.call_args
         plan = call_args[0][0]
@@ -298,7 +346,7 @@ class TestDeterministicMode:
         coordinator, mock_planner, mock_workflow = _make_coordinator()
         mock_workflow.execute.return_value = _make_success_report()
 
-        coordinator.execute(goal)
+        coordinator.execute(goal, _make_snapshot())
 
         call_args = mock_workflow.execute.call_args
         plan = call_args[0][0]
@@ -309,7 +357,7 @@ class TestDeterministicMode:
         coordinator, mock_planner, mock_workflow = _make_coordinator()
         mock_workflow.execute.return_value = _make_success_report()
 
-        coordinator.execute(goal)
+        coordinator.execute(goal, _make_snapshot())
 
         call_args = mock_workflow.execute.call_args
         plan = call_args[0][0]
@@ -327,7 +375,7 @@ class TestReportIDs:
             success=False, plan=None, error="error"
         )
 
-        report = coordinator.execute(goal)
+        report = coordinator.execute(goal, _make_snapshot())
 
         assert report.goal_id == "test-goal"
 
@@ -338,6 +386,96 @@ class TestReportIDs:
             success=False, plan=None, error="error"
         )
 
-        report = coordinator.execute(goal)
+        report = coordinator.execute(goal, _make_snapshot())
 
         assert report.mission_id == "mission-test-goal"
+
+
+class TestCoordinatorSnapshotMetadata:
+    def test_autonomous_success_report_has_planning_context(self):
+        goal = _make_goal(output_path="")
+        snapshot = _make_snapshot()
+        plan = _make_plan("high")
+        coordinator, mock_planner, mock_workflow = _make_coordinator()
+        mock_planner.plan.return_value = EngineeringPlanResult(
+            success=True,
+            plan=plan,
+            error=None,
+            planning_metadata=_make_planning_metadata(
+                context="repository_snapshot_v1",
+                entries="5",
+                snapshot_id="snap-test-001",
+            ),
+        )
+        mock_workflow.execute.return_value = _make_success_report()
+
+        report = coordinator.execute(goal, snapshot)
+
+        meta = dict(report.metadata)
+        assert meta.get("planning_context") == "repository_snapshot_v1"
+
+    def test_autonomous_success_report_has_snapshot_entries(self):
+        goal = _make_goal(output_path="")
+        snapshot = _make_snapshot()
+        plan = _make_plan("high")
+        coordinator, mock_planner, mock_workflow = _make_coordinator()
+        mock_planner.plan.return_value = EngineeringPlanResult(
+            success=True,
+            plan=plan,
+            error=None,
+            planning_metadata=_make_planning_metadata(entries="5"),
+        )
+        mock_workflow.execute.return_value = _make_success_report()
+
+        report = coordinator.execute(goal, snapshot)
+
+        meta = dict(report.metadata)
+        assert meta.get("planning_snapshot_entries") == "5"
+
+    def test_autonomous_success_report_has_snapshot_id(self):
+        goal = _make_goal(output_path="")
+        snapshot = _make_snapshot()
+        plan = _make_plan("high")
+        coordinator, mock_planner, mock_workflow = _make_coordinator()
+        mock_planner.plan.return_value = EngineeringPlanResult(
+            success=True,
+            plan=plan,
+            error=None,
+            planning_metadata=_make_planning_metadata(snapshot_id="snap-test-001"),
+        )
+        mock_workflow.execute.return_value = _make_success_report()
+
+        report = coordinator.execute(goal, snapshot)
+
+        meta = dict(report.metadata)
+        assert meta.get("planning_snapshot_id") == "snap-test-001"
+
+    def test_deterministic_mode_report_has_no_planning_context(self):
+        goal = _make_goal(output_path="my-project/hello.py")
+        snapshot = _make_snapshot()
+        coordinator, mock_planner, mock_workflow = _make_coordinator()
+        mock_workflow.execute.return_value = _make_success_report()
+
+        report = coordinator.execute(goal, snapshot)
+
+        meta = dict(report.metadata)
+        assert "planning_context" not in meta
+
+    def test_existing_workflow_metadata_preserved(self):
+        goal = _make_goal(output_path="")
+        snapshot = _make_snapshot()
+        plan = _make_plan("high")
+        coordinator, mock_planner, mock_workflow = _make_coordinator()
+        mock_planner.plan.return_value = EngineeringPlanResult(
+            success=True,
+            plan=plan,
+            error=None,
+            planning_metadata=_make_planning_metadata(),
+        )
+        mock_workflow.execute.return_value = _make_success_report()  # has goal_id in metadata
+
+        report = coordinator.execute(goal, snapshot)
+
+        meta = dict(report.metadata)
+        assert meta.get("goal_id") == "test-goal"  # from _make_success_report
+        assert "planning_context" in meta  # added by coordinator

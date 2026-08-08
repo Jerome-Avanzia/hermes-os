@@ -520,11 +520,7 @@ class CorrectionEngine:
         except OSError:
             current_code = "(file unreadable)"
 
-        # Strip repository context blob if present (injected by implement.py for
-        # the initial planning call; noise during repair).
         task = goal.description
-        if "\n\nRepository context:\n" in task:
-            task = task.split("\n\nRepository context:\n")[0].strip()
 
         repo_root = _Path(goal.workspace_path) / goal.repository_path
         test_context = self._build_test_context(error_excerpt, repo_root)

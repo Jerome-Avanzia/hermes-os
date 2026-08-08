@@ -20,7 +20,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from hermes.cli.commands.implement import _snapshot_to_context
 from hermes.cli.main import app
 from hermes.models.engineering_workflow import WorkflowConfig
 from hermes.models.execution_gateway import ExecutionAdapter, ExecutionStatus
@@ -233,185 +232,6 @@ class TestWorkflowConfigWriteModeField:
         assert config.write_mode == "modify_file"
 
 
-# ── _snapshot_to_context ──────────────────────────────────────────────────────
-
-
-class TestSnapshotToContext:
-    def test_empty_snapshot_produces_string(self):
-        snap = _make_snapshot(primary_language="", git_present=False)
-        result = _snapshot_to_context(snap)
-        assert isinstance(result, str)
-        assert len(result) > 0
-
-    def test_primary_language_in_output(self):
-        snap = _make_snapshot(primary_language="python")
-        result = _snapshot_to_context(snap)
-        assert "python" in result
-
-    def test_no_primary_language_omits_line(self):
-        snap = _make_snapshot(primary_language="")
-        result = _snapshot_to_context(snap)
-        assert "Primary language" not in result
-
-    def test_languages_summary_in_output(self):
-        snap = _make_snapshot(languages=(
-            LanguageDetection(language="python", file_count=10, confidence="primary", extensions=(".py",)),
-            LanguageDetection(language="typescript", file_count=3, confidence="secondary", extensions=(".ts",)),
-        ))
-        result = _snapshot_to_context(snap)
-        assert "python" in result
-        assert "typescript" in result
-
-    def test_build_system_in_output(self):
-        snap = _make_snapshot(build_system=BuildSystemDetection(
-            name="poetry", config_file="pyproject.toml",
-            build_command="poetry build", test_command="pytest",
-        ))
-        result = _snapshot_to_context(snap)
-        assert "poetry" in result
-        assert "pyproject.toml" in result
-        assert "pytest" in result
-
-    def test_no_build_system_omits_line(self):
-        snap = _make_snapshot(build_system=None)
-        result = _snapshot_to_context(snap)
-        assert "Build system" not in result
-
-    def test_entry_points_in_output(self):
-        snap = _make_snapshot(entry_points=(
-            EntryPoint(path="src/main.py", kind="main", language="python"),
-            EntryPoint(path="src/cli.py", kind="cli", language="python"),
-        ))
-        result = _snapshot_to_context(snap)
-        assert "src/main.py" in result
-        assert "main" in result
-
-    def test_no_entry_points_omits_line(self):
-        snap = _make_snapshot(entry_points=())
-        result = _snapshot_to_context(snap)
-        assert "Entry points" not in result
-
-    def test_test_locations_in_output(self):
-        snap = _make_snapshot(test_locations=(
-            TestLocation(path="tests", kind="directory", framework="pytest", file_count=12),
-        ))
-        result = _snapshot_to_context(snap)
-        assert "tests" in result
-        assert "pytest" in result
-        assert "12" in result
-
-    def test_git_present_in_output(self):
-        snap = _make_snapshot(git_present=True)
-        result = _snapshot_to_context(snap)
-        assert "git: yes" in result
-
-    def test_git_absent_omits_marker(self):
-        snap = _make_snapshot(git_present=False)
-        result = _snapshot_to_context(snap)
-        assert "git: yes" not in result
-
-    def test_source_files_listed(self):
-        files = tuple(
-            RepositoryFile(path=f"src/module{i}.py", extension=".py", size_bytes=100, is_directory=False)
-            for i in range(5)
-        )
-        snap = _make_snapshot(files=files, file_count=5)
-        result = _snapshot_to_context(snap)
-        assert "src/module0.py" in result
-
-    def test_source_files_capped_at_30(self):
-        files = tuple(
-            RepositoryFile(path=f"src/f{i}.py", extension=".py", size_bytes=10, is_directory=False)
-            for i in range(50)
-        )
-        snap = _make_snapshot(files=files, file_count=50)
-        result = _snapshot_to_context(snap)
-        # Only 30 shown
-        assert "30 shown" in result
-        assert "f29.py" in result
-        assert "f30.py" not in result
-
-    def test_directories_excluded_from_source_file_list(self):
-        files = (
-            RepositoryFile(path="src", extension="", size_bytes=0, is_directory=True),
-            RepositoryFile(path="src/main.py", extension=".py", size_bytes=100, is_directory=False),
-        )
-        snap = _make_snapshot(files=files, file_count=1)
-        result = _snapshot_to_context(snap)
-        lines = result.splitlines()
-        # "src" should not appear as a standalone file entry
-        file_lines = [l for l in lines if l.strip().startswith("src") and not l.strip().startswith("src/")]
-        assert all("src/main.py" not in l for l in file_lines)
-
-    def test_non_source_extensions_excluded(self):
-        files = (
-            RepositoryFile(path="README.md", extension=".md", size_bytes=100, is_directory=False),
-            RepositoryFile(path="data.json", extension=".json", size_bytes=100, is_directory=False),
-            RepositoryFile(path="main.py", extension=".py", size_bytes=100, is_directory=False),
-        )
-        snap = _make_snapshot(files=files, file_count=3)
-        result = _snapshot_to_context(snap)
-        assert "main.py" in result
-        # .md and .json are not in the source extensions set
-        source_section = result.split("Source files")[1] if "Source files" in result else ""
-        assert "README.md" not in source_section
-        assert "data.json" not in source_section
-
-    def test_file_count_in_output(self):
-        snap = _make_snapshot(file_count=42, directory_count=7)
-        result = _snapshot_to_context(snap)
-        assert "42" in result
-        assert "7" in result
-
-    def test_output_is_deterministic(self):
-        snap = _make_snapshot(
-            primary_language="python",
-            languages=(LanguageDetection("python", 5, "primary", (".py",)),),
-            git_present=True,
-            file_count=5,
-        )
-        assert _snapshot_to_context(snap) == _snapshot_to_context(snap)
-
-    def test_output_is_newline_separated_string(self):
-        snap = _make_snapshot(primary_language="rust", file_count=10)
-        result = _snapshot_to_context(snap)
-        assert "\n" in result
-        assert not result.endswith("\n")
-
-    def test_full_python_project_snapshot(self):
-        snap = _make_snapshot(
-            primary_language="python",
-            languages=(
-                LanguageDetection("python", 20, "primary", (".py",)),
-                LanguageDetection("typescript", 3, "secondary", (".ts",)),
-            ),
-            build_system=BuildSystemDetection("poetry", "pyproject.toml", "poetry build", "pytest"),
-            entry_points=(
-                EntryPoint("src/main.py", "main", "python"),
-                EntryPoint("src/api.py", "api", "python"),
-            ),
-            test_locations=(
-                TestLocation("tests", "directory", "pytest", 15),
-            ),
-            files=(
-                RepositoryFile("src/main.py", ".py", 500, False),
-                RepositoryFile("src/api.py", ".py", 1200, False),
-                RepositoryFile("src/models.py", ".py", 800, False),
-                RepositoryFile("tests/test_api.py", ".py", 600, False),
-            ),
-            file_count=23,
-            directory_count=4,
-            git_present=True,
-        )
-        result = _snapshot_to_context(snap)
-        assert "python" in result
-        assert "poetry" in result
-        assert "src/main.py" in result
-        assert "tests" in result
-        assert "pytest" in result
-        assert "git: yes" in result
-
-
 # ── CLI integration ───────────────────────────────────────────────────────────
 
 
@@ -484,7 +304,7 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_coordinator_execute(goal):
+        def capture_coordinator_execute(goal, snapshot):
             captured_goals.append(goal)
             return report
 
@@ -579,7 +399,7 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_coordinator_execute(goal):
+        def capture_coordinator_execute(goal, snapshot):
             captured_goals.append(goal)
             return report
 
@@ -601,7 +421,7 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_coordinator_execute(goal):
+        def capture_coordinator_execute(goal, snapshot):
             captured_goals.append(goal)
             return report
 
@@ -622,7 +442,7 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_coordinator_execute(goal):
+        def capture_coordinator_execute(goal, snapshot):
             captured_goals.append(goal)
             return report
 
@@ -641,13 +461,15 @@ class TestImplementCLI:
 
         assert "Add JWT authentication" in captured_goals[0].description
 
-    def test_implement_repo_context_injected_into_goal_description(self, tmp_path):
+    def test_implement_goal_description_is_task_only(self, tmp_path):
+        """goal.description must be the task string only; repository context
+        flows via the RepositorySnapshot parameter, not via description injection."""
         report = _make_success_report()
         env_cfg, caps, driver = self._mock_env_cfg()
 
         captured_goals = []
 
-        def capture_coordinator_execute(goal):
+        def capture_coordinator_execute(goal, snapshot):
             captured_goals.append(goal)
             return report
 
@@ -660,11 +482,36 @@ class TestImplementCLI:
             mock_ri.return_value.scan.return_value = snap
             mock_coord_cls.return_value.execute.side_effect = capture_coordinator_execute
 
-            runner.invoke(app, ["implement", "task", "--output", "src/f.py"])
+            runner.invoke(app, ["implement", "Add fallback handler", "--output", "src/f.py"])
 
         desc = captured_goals[0].description
-        assert "Repository context" in desc
-        assert "python" in desc
+        assert "Add fallback handler" in desc
+        assert "Repository context" not in desc
+
+    def test_implement_snapshot_passed_to_coordinator(self, tmp_path):
+        """The RepositorySnapshot from scan() must be passed to coordinator.execute()."""
+        report = _make_success_report()
+        env_cfg, caps, driver = self._mock_env_cfg()
+
+        captured_snapshots = []
+
+        def capture_coordinator_execute(goal, snapshot):
+            captured_snapshots.append(snapshot)
+            return report
+
+        snap = _make_snapshot(file_count=7)
+
+        with patch("hermes.cli.commands.implement.RepositoryIntelligence") as mock_ri, \
+             patch("hermes.cli.commands.implement.configure_from_env", return_value=(env_cfg, caps, driver)), \
+             patch("hermes.cli.commands.implement.EngineeringCoordinator") as mock_coord_cls, \
+             patch("hermes.cli.commands.implement.Path.cwd", return_value=tmp_path):
+            mock_ri.return_value.scan.return_value = snap
+            mock_coord_cls.return_value.execute.side_effect = capture_coordinator_execute
+
+            runner.invoke(app, ["implement", "Add something", "--output", "src/f.py"])
+
+        assert len(captured_snapshots) == 1
+        assert captured_snapshots[0] is snap
 
     def test_implement_write_mode_defaults_to_create_file(self, tmp_path):
         """Phase 6: implement.py no longer derives write_mode from file existence.
@@ -698,7 +545,7 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_coordinator_execute(goal):
+        def capture_coordinator_execute(goal, snapshot):
             captured_goals.append(goal)
             return report
 
@@ -720,7 +567,7 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_coordinator_execute(goal):
+        def capture_coordinator_execute(goal, snapshot):
             captured_goals.append(goal)
             return report
 
@@ -745,7 +592,7 @@ class TestImplementCLI:
 
         captured_goals = []
 
-        def capture_coordinator_execute(goal):
+        def capture_coordinator_execute(goal, snapshot):
             captured_goals.append(goal)
             return report
 

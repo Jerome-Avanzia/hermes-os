@@ -18,7 +18,7 @@ The planner is the sole owner of:
 The planner does NOT:
   - Validate plan operations against repository state (RepositoryManipulation's role)
   - Execute any file operations (EngineeringWorkflow's role)
-  - Know about filesystem state beyond what the FounderGoal description contains
+  Receives a RepositorySnapshot that informs file target selection in the planning prompt.
 
 LlmAdapter invariant: the planner calls LlmAdapter with action_id="generate" and
 receives a raw AdapterExecutionResult. LlmAdapter never interprets the response
@@ -40,7 +40,9 @@ from hermes.models.engineering_plan import (
     EngineeringPlanResult,
     PlannedOperation,
 )
+from hermes.models.engineering_plan import PlanningMetadata
 from hermes.models.engineering_workflow import FounderGoal
+from hermes.models.repository_intelligence import RepositorySnapshot
 from hermes.models.execution_gateway import ExecutionAdapter
 from hermes.models.llm_adapter import AdapterConfiguration
 from hermes.models.operation import OperationDependency, OperationExecutionReference, OperationType
@@ -84,6 +86,35 @@ _PLANNING_SYSTEM_PROMPT = (
 )
 
 
+def _build_planning_system_prompt(snapshot: RepositorySnapshot) -> str:
+    """Build the planning system prompt enriched with repository structure.
+
+    The base planning prompt is combined with a Repository structure section
+    derived from the snapshot. This section contains the complete file listing
+    (no cap — full RepositorySnapshot.files is used) to enable accurate target
+    selection.
+
+    Full RepositorySnapshot transmission is intentional for AT-8. Snapshot
+    compression or summarisation is explicitly out of scope for Phase 8.
+    """
+    lines: list[str] = [_PLANNING_SYSTEM_PROMPT, "", "Repository structure:"]
+
+    if snapshot.primary_language:
+        lines.append(f"Primary language: {snapshot.primary_language}")
+
+    all_files = [f.path for f in snapshot.files if not f.is_directory]
+    lines.append(f"Files ({len(all_files)} total):")
+    for path in all_files:
+        lines.append(f"  {path}")
+
+    if snapshot.test_locations:
+        lines.append("Test locations:")
+        for tl in snapshot.test_locations:
+            lines.append(f"  {tl.path} [{tl.framework}]")
+
+    return "\n".join(lines)
+
+
 class EngineeringPlanner:
     """Decomposes a FounderGoal into a multi-operation EngineeringPlan.
 
@@ -105,11 +136,13 @@ class EngineeringPlanner:
         self._llm_config = llm_config
         self._operation_engine = operation_engine
 
-    def plan(self, goal: FounderGoal) -> EngineeringPlanResult:
+    def plan(self, goal: FounderGoal, snapshot: RepositorySnapshot) -> EngineeringPlanResult:
         """Decompose goal into an EngineeringPlan via an LLM planning call.
 
         Args:
-            goal: The FounderGoal containing the enriched task description.
+            goal: The FounderGoal containing the task description.
+            snapshot: The RepositorySnapshot that provides repository structure
+                for the planning prompt.
 
         Returns:
             EngineeringPlanResult with success=True and a populated plan on
@@ -120,7 +153,7 @@ class EngineeringPlanner:
 
         # ── 1. Build and dispatch through gateway ─────────────────────────────
         payload = {
-            "system_prompt": _PLANNING_SYSTEM_PROMPT,
+            "system_prompt": _build_planning_system_prompt(snapshot),
             "prompt": goal.description,
         }
         request = self._gateway.build_request(
@@ -254,11 +287,17 @@ class EngineeringPlanner:
             candidates=candidates,
         )
 
+        planning_meta = PlanningMetadata(
+            planning_context="repository_snapshot_v1",
+            planning_snapshot_entries=str(snapshot.file_count),
+            planning_snapshot_id=snapshot.snapshot_id,
+        )
+
         logger.info(
             "EngineeringPlanner: plan built for goal_id=%r confidence=%r ops=%d",
             goal.goal_id, confidence, len(planned_ops),
         )
-        return EngineeringPlanResult(success=True, plan=plan, error=None)
+        return EngineeringPlanResult(success=True, plan=plan, error=None, planning_metadata=planning_meta)
 
 
 __all__ = ["EngineeringPlanner"]

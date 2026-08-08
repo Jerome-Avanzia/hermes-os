@@ -26,6 +26,7 @@ from hermes.kernel.engineering_planner import EngineeringPlanner
 from hermes.kernel.execution_gateway import ExecutionGateway
 from hermes.kernel.operation_engine import OperationEngine
 from hermes.models.engineering_workflow import FounderGoal
+from hermes.models.repository_intelligence import RepositoryFile, RepositorySnapshot
 from hermes.models.execution_gateway import (
     AdapterRegistration,
     ExecutionAdapter,
@@ -52,6 +53,38 @@ def _make_llm_config() -> AdapterConfiguration:
         max_tokens=4096,
         timeout_seconds=30,
         temperature=0.0,
+    )
+
+
+def _make_snapshot(
+    *,
+    snapshot_id: str = "snap-abc123",
+    file_count: int = 3,
+    files: tuple | None = None,
+) -> RepositorySnapshot:
+    if files is None:
+        files = (
+            RepositoryFile(path="src/hello.py", extension=".py", size_bytes=100, is_directory=False),
+            RepositoryFile(path="src/utils.py", extension=".py", size_bytes=200, is_directory=False),
+            RepositoryFile(path="tests/test_hello.py", extension=".py", size_bytes=150, is_directory=False),
+        )
+    return RepositorySnapshot(
+        snapshot_id=snapshot_id,
+        repository_path="my-project",
+        scanned_at="2026-08-08T00:00:00+00:00",
+        primary_language="python",
+        languages=(),
+        build_system=None,
+        entry_points=(),
+        test_locations=(),
+        config_files=(),
+        documentation=(),
+        files=files,
+        file_count=file_count,
+        directory_count=1,
+        total_size_bytes=450,
+        git_present=True,
+        metadata=(),
     )
 
 
@@ -195,7 +228,7 @@ class TestPlannerTwoOperations:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _TWO_OP_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is True
         assert result.plan is not None
         assert len(result.plan.operations) == 2
@@ -205,7 +238,7 @@ class TestPlannerTwoOperations:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _TWO_OP_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         op_ids = [op.operation_id for op in result.plan.operations]
         assert "op-0" in op_ids
         assert "op-1" in op_ids
@@ -215,7 +248,7 @@ class TestPlannerTwoOperations:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _TWO_OP_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         intents = {op.operation_id: op.intent for op in result.plan.operations}
         assert intents["op-0"] == "create"
         assert intents["op-1"] == "modify"
@@ -225,7 +258,7 @@ class TestPlannerTwoOperations:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _TWO_OP_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         op1 = next(op for op in result.plan.operations if op.operation_id == "op-1")
         assert op1.depends_on == ("op-0",)
 
@@ -234,7 +267,7 @@ class TestPlannerTwoOperations:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _TWO_OP_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.plan.operations[0].operation_id == "op-0"
         assert result.plan.operations[1].operation_id == "op-1"
 
@@ -243,7 +276,7 @@ class TestPlannerTwoOperations:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _TWO_OP_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.plan.confidence == "high"
 
     def test_two_op_plan_goal_id(self):
@@ -252,7 +285,7 @@ class TestPlannerTwoOperations:
             req.request_id, req.operation_id, _TWO_OP_PLAN
         )
         goal = _make_goal("my-goal-id")
-        result = planner.plan(goal)
+        result = planner.plan(goal, _make_snapshot())
         assert result.plan.goal_id == "my-goal-id"
         assert result.plan.plan_id == "plan-my-goal-id"
 
@@ -263,7 +296,7 @@ class TestPlannerSingleOperation:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _ONE_OP_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is True
         assert len(result.plan.operations) == 1
 
@@ -272,7 +305,7 @@ class TestPlannerSingleOperation:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _ONE_OP_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         op = result.plan.operations[0]
         assert op.depends_on == ()
 
@@ -283,7 +316,7 @@ class TestPlannerAmbiguousConfidence:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _AMBIGUOUS_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is True
         assert result.plan is not None
 
@@ -292,7 +325,7 @@ class TestPlannerAmbiguousConfidence:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _AMBIGUOUS_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.plan.confidence == "ambiguous"
 
     def test_ambiguous_plan_candidates_populated(self):
@@ -300,7 +333,7 @@ class TestPlannerAmbiguousConfidence:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _AMBIGUOUS_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert "src/api.py" in result.plan.candidates
         assert "src/handlers.py" in result.plan.candidates
 
@@ -309,7 +342,7 @@ class TestPlannerAmbiguousConfidence:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, _AMBIGUOUS_PLAN
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.plan.operations == ()
 
 
@@ -323,7 +356,7 @@ class TestPlannerGatewayFailure:
             llm_config=_make_llm_config(),
             operation_engine=OperationEngine(),
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
         assert result.error is not None
         assert "gateway_dispatch_failed" in result.error
@@ -343,7 +376,7 @@ class TestPlannerGatewayFailure:
             llm_config=_make_llm_config(),
             operation_engine=OperationEngine(),
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
         assert "gateway_dispatch_failed" in (result.error or "")
 
@@ -356,7 +389,7 @@ class TestPlannerGatewayFailure:
             llm_config=_make_llm_config(),
             operation_engine=OperationEngine(),
         )
-        planner.plan(_make_goal())
+        planner.plan(_make_goal(), _make_snapshot())
         mock_llm.execute.assert_not_called()
 
 
@@ -366,7 +399,7 @@ class TestPlannerLLMAdapterFailure:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_failure(
             req.request_id, req.operation_id, "connection_refused"
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
         assert result.plan is None
 
@@ -375,7 +408,7 @@ class TestPlannerLLMAdapterFailure:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_failure(
             req.request_id, req.operation_id, "my_specific_error"
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert "my_specific_error" in (result.error or "")
 
 
@@ -385,7 +418,7 @@ class TestPlannerMalformedJSON:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, "not valid json {"
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
 
     def test_malformed_json_error_prefix(self):
@@ -393,7 +426,7 @@ class TestPlannerMalformedJSON:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, "not valid json {"
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.error is not None
         assert result.error.startswith("json_parse_error")
 
@@ -402,7 +435,7 @@ class TestPlannerMalformedJSON:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, ""
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
 
 
@@ -413,7 +446,7 @@ class TestPlannerMissingFields:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, data
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
 
     def test_missing_operations_failure(self):
@@ -422,7 +455,7 @@ class TestPlannerMissingFields:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, data
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
 
     def test_missing_operation_id_failure(self):
@@ -436,7 +469,7 @@ class TestPlannerMissingFields:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, data
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
 
     def test_missing_target_failure(self):
@@ -450,7 +483,7 @@ class TestPlannerMissingFields:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, data
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
 
     def test_missing_goal_field_failure(self):
@@ -464,7 +497,7 @@ class TestPlannerMissingFields:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, data
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
 
 
@@ -486,7 +519,7 @@ class TestPlannerInvalidIntent:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, data
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
         assert result.error is not None
         assert "intent" in result.error.lower()
@@ -502,7 +535,7 @@ class TestPlannerInvalidIntent:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, data
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
 
 
@@ -524,7 +557,7 @@ class TestPlannerDependsOnDefaults:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, data
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is True
         assert result.plan.operations[0].depends_on == ()
 
@@ -557,7 +590,7 @@ class TestPlannerCycleDetection:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, data
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
 
     def test_cycle_error_prefix(self):
@@ -586,7 +619,7 @@ class TestPlannerCycleDetection:
         mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
             req.request_id, req.operation_id, data
         )
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.error is not None
         assert result.error.startswith("plan_cycle_detected")
 
@@ -595,6 +628,62 @@ class TestPlannerNeverRaises:
     def test_llm_exception_captured(self):
         planner, mock_llm = _make_planner()
         mock_llm.execute.side_effect = RuntimeError("unexpected crash")
-        result = planner.plan(_make_goal())
+        result = planner.plan(_make_goal(), _make_snapshot())
         assert result.success is False
         assert result.error is not None
+
+
+class TestPlannerSnapshotMetadata:
+    def test_success_sets_planning_context(self):
+        planner, mock_llm = _make_planner()
+        mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
+            req.request_id, req.operation_id, _ONE_OP_PLAN
+        )
+        result = planner.plan(_make_goal(), _make_snapshot())
+        assert result.planning_metadata.planning_context == "repository_snapshot_v1"
+
+    def test_success_sets_snapshot_entries(self):
+        planner, mock_llm = _make_planner()
+        mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
+            req.request_id, req.operation_id, _ONE_OP_PLAN
+        )
+        snap = _make_snapshot(file_count=7)
+        result = planner.plan(_make_goal(), snap)
+        assert result.planning_metadata.planning_snapshot_entries == "7"
+
+    def test_success_sets_snapshot_id(self):
+        planner, mock_llm = _make_planner()
+        mock_llm.execute.side_effect = lambda req, cfg: _make_llm_success(
+            req.request_id, req.operation_id, _ONE_OP_PLAN
+        )
+        snap = _make_snapshot(snapshot_id="snap-xyz999")
+        result = planner.plan(_make_goal(), snap)
+        assert result.planning_metadata.planning_snapshot_id == "snap-xyz999"
+
+    def test_failure_leaves_planning_metadata_empty(self):
+        planner, mock_llm = _make_planner()
+        mock_llm.execute.side_effect = lambda req, cfg: _make_llm_failure(
+            req.request_id, req.operation_id, "connection_refused"
+        )
+        result = planner.plan(_make_goal(), _make_snapshot())
+        assert result.planning_metadata.planning_context == ""
+        assert result.planning_metadata.planning_snapshot_entries == ""
+        assert result.planning_metadata.planning_snapshot_id == ""
+
+    def test_planning_prompt_contains_file_listing(self):
+        """The LLM receives a system prompt that includes the repository file listing."""
+        planner, mock_llm = _make_planner()
+        captured_requests = []
+        def capture(req, cfg):
+            captured_requests.append(req)
+            return _make_llm_success(req.request_id, req.operation_id, _ONE_OP_PLAN)
+        mock_llm.execute.side_effect = capture
+        snap = _make_snapshot(files=(
+            RepositoryFile("src/routing/dispatcher.py", ".py", 100, False),
+            RepositoryFile("src/utils/helpers.py", ".py", 200, False),
+        ), file_count=2)
+        planner.plan(_make_goal(), snap)
+        assert len(captured_requests) == 1
+        system_prompt = dict(captured_requests[0].payload)["system_prompt"]
+        assert "src/routing/dispatcher.py" in system_prompt
+        assert "src/utils/helpers.py" in system_prompt

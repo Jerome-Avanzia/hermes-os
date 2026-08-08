@@ -23,7 +23,7 @@ All contracts are immutable after construction.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 # ── PlannedOperation ──────────────────────────────────────────────────────────
@@ -78,6 +78,34 @@ class EngineeringPlan:
     candidates: tuple[str, ...] = ()         # populated when confidence="ambiguous"
 
 
+# ── PlanningMetadata ──────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningMetadata:
+    """Immutable planning provenance captured during EngineeringPlanner.plan().
+
+    Groups snapshot identity fields separately from the engineering plan so
+    that provenance fields can grow independently of the plan structure.
+
+    planning_context          → "repository_snapshot_v1" when plan() received a
+                                RepositorySnapshot; "" when no snapshot was used
+    planning_snapshot_entries → str(snapshot.file_count) from the snapshot that
+                                informed planning; "" when no snapshot was used.
+                                Counts files included in RepositorySnapshot
+                                (excluded: .git, .venv, caches — per
+                                RepositoryIntelligence filtering rules)
+    planning_snapshot_id      → snapshot.snapshot_id (SHA256-derived) from the
+                                snapshot that informed planning; "" when none
+
+    Immutable after construction.
+    """
+
+    planning_context: str           # "repository_snapshot_v1" | ""
+    planning_snapshot_entries: str  # str(int) | ""
+    planning_snapshot_id: str       # snapshot SHA256-derived ID | ""
+
+
 # ── EngineeringPlanResult ─────────────────────────────────────────────────────
 
 
@@ -85,10 +113,12 @@ class EngineeringPlan:
 class EngineeringPlanResult:
     """Immutable result of an EngineeringPlanner.plan() call.
 
-    success  → True iff the LLM call, JSON parse, and validation all succeeded
-    plan     → None on LLM failure or JSON parse failure; populated (even when
-               confidence="ambiguous") on successful LLM call + parse
-    error    → description of the failure; None when success=True
+    success           → True iff the LLM call, JSON parse, and validation all succeeded
+    plan              → None on LLM failure or JSON parse failure; populated (even when
+                        confidence="ambiguous") on successful LLM call + parse
+    error             → description of the failure; None when success=True
+    planning_metadata → snapshot provenance recorded when plan() ran; empty when
+                        success=False or when no snapshot was provided
 
     Immutable after construction.
     """
@@ -96,6 +126,13 @@ class EngineeringPlanResult:
     success: bool
     plan: EngineeringPlan | None
     error: str | None
+    planning_metadata: PlanningMetadata = field(
+        default_factory=lambda: PlanningMetadata(
+            planning_context="",
+            planning_snapshot_entries="",
+            planning_snapshot_id="",
+        )
+    )
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -105,4 +142,5 @@ __all__ = [
     "PlannedOperation",
     "EngineeringPlan",
     "EngineeringPlanResult",
+    "PlanningMetadata",
 ]

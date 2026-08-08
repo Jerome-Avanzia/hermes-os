@@ -29,12 +29,14 @@ It never raises exceptions — all failures are captured in WorkflowExecutionRep
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path as _Path
 
 from hermes.kernel.engineering_planner import EngineeringPlanner
 from hermes.models.engineering_plan import EngineeringPlan, PlannedOperation
 from hermes.models.engineering_workflow import FounderGoal, WorkflowExecutionReport
+from hermes.models.repository_intelligence import RepositorySnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +59,11 @@ class EngineeringCoordinator:
         self._planner = planner
         self._workflow = workflow
 
-    def execute(self, goal: FounderGoal) -> WorkflowExecutionReport:
+    def execute(self, goal: FounderGoal, snapshot: RepositorySnapshot) -> WorkflowExecutionReport:
         """Execute the engineering workflow for the given goal.
 
         Autonomous mode (goal.output_path == ""):
-          1. Call planner.plan(goal) to decompose into an EngineeringPlan.
+          1. Call planner.plan(goal, snapshot) to decompose into an EngineeringPlan.
           2. On planner failure: return failure report with failure_stage="planning".
           3. On ambiguous confidence: return failure report with error starting
              "ambiguous_plan:".
@@ -74,6 +76,7 @@ class EngineeringCoordinator:
 
         Args:
             goal: The FounderGoal to execute.
+            snapshot: The RepositorySnapshot that informs planning in autonomous mode.
 
         Returns:
             WorkflowExecutionReport capturing the full execution outcome.
@@ -87,7 +90,7 @@ class EngineeringCoordinator:
             logger.info(
                 "EngineeringCoordinator: autonomous mode for goal_id=%r", goal.goal_id
             )
-            plan_result = self._planner.plan(goal)
+            plan_result = self._planner.plan(goal, snapshot)
 
             if not plan_result.success:
                 logger.warning(
@@ -138,7 +141,17 @@ class EngineeringCoordinator:
                 "EngineeringCoordinator: autonomous plan ready for goal_id=%r ops=%d",
                 goal.goal_id, len(plan.operations),
             )
-            return self._workflow.execute(plan, goal)  # type: ignore[union-attr]
+            workflow_report = self._workflow.execute(plan, goal)
+            # Merge planning provenance into the report metadata (I-9: workflow never plans;
+            # coordinator adds planning metadata after workflow returns).
+            pm = plan_result.planning_metadata
+            extra: dict[str, str] = {
+                "planning_context": pm.planning_context,
+                "planning_snapshot_entries": pm.planning_snapshot_entries,
+                "planning_snapshot_id": pm.planning_snapshot_id,
+            }
+            merged_metadata = tuple(sorted({**dict(workflow_report.metadata), **extra}.items()))
+            return dataclasses.replace(workflow_report, metadata=merged_metadata)
 
         # ── Deterministic mode ────────────────────────────────────────────────
         logger.info(

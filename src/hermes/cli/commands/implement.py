@@ -7,7 +7,7 @@ Architecture:
        ↓
   RepositoryIntelligence.scan()   → RepositorySnapshot (what is in the repo)
        ↓
-  _snapshot_to_context()          → compact LLM-readable context string
+  RepositorySnapshot              → passed to EngineeringCoordinator for planning context
        ↓
   configure_from_env()            → OllamaEnvConfig + WorkflowConfig
        ↓
@@ -91,8 +91,6 @@ def implement(
         typer.echo(f"Error: failed to scan repository — {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    context_str = _snapshot_to_context(snapshot)
-
     # ── 2. Configure Ollama from environment ──────────────────────────────────
     try:
         env_cfg, capabilities, driver = configure_from_env()
@@ -117,18 +115,15 @@ def implement(
         test_command=test_command,
     )
 
-    # ── 3. Build FounderGoal with repository context injected into description ─
+    # ── 3. Build FounderGoal ──────────────────────────────────────────────────
     goal_id = str(uuid.uuid4())[:8]
-    enriched_description = (
-        f"{task}\n\n"
-        f"Repository context:\n"
-        f"{context_str}"
-    )
 
     # output_path="" → autonomous mode; coordinator/planner derives the file(s).
+    # goal.description is the task only — repository context flows via the
+    # RepositorySnapshot passed formally to EngineeringCoordinator.execute().
     goal = FounderGoal(
         goal_id=goal_id,
-        description=enriched_description,
+        description=task,
         workspace_path=str(workspace_root),
         repository_path=repo,
         output_path=output if output is not None else "",
@@ -218,7 +213,7 @@ def implement(
     typer.echo("")
 
     start_time = time.monotonic()
-    report = coordinator.execute(goal)
+    report = coordinator.execute(goal, snapshot)
     elapsed = time.monotonic() - start_time
 
     # ── 6. Print report ───────────────────────────────────────────────────────
@@ -229,71 +224,6 @@ def implement(
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-
-def _snapshot_to_context(snapshot: RepositorySnapshot) -> str:
-    """Serialise a RepositorySnapshot into a compact LLM-readable context string.
-
-    Produces a deterministic, token-efficient summary of the repository
-    structure for injection into the Ollama code generation prompt. Limits
-    source file listing to 30 files to stay within typical context budgets.
-    """
-    lines: list[str] = []
-
-    if snapshot.primary_language:
-        lines.append(f"Primary language: {snapshot.primary_language}")
-
-    if snapshot.languages:
-        lang_summary = ", ".join(
-            f"{lang.language} ({lang.file_count})"
-            for lang in snapshot.languages[:6]
-        )
-        lines.append(f"Languages: {lang_summary}")
-
-    if snapshot.build_system:
-        bs = snapshot.build_system
-        lines.append(
-            f"Build system: {bs.name} ({bs.config_file})"
-            f"  |  build: {bs.build_command}  |  test: {bs.test_command}"
-        )
-
-    if snapshot.entry_points:
-        ep_summary = ", ".join(
-            f"{e.path} [{e.kind}]"
-            for e in snapshot.entry_points[:6]
-        )
-        lines.append(f"Entry points: {ep_summary}")
-
-    if snapshot.test_locations:
-        tl_summary = ", ".join(
-            f"{t.path} [{t.framework}, {t.file_count} files]"
-            for t in snapshot.test_locations[:4]
-        )
-        lines.append(f"Test locations: {tl_summary}")
-
-    # Source files — capped at 30 to avoid prompt bloat
-    _SOURCE_EXTS = frozenset({
-        ".py", ".pyi", ".ts", ".tsx", ".js", ".jsx",
-        ".rs", ".go", ".java", ".kt", ".rb", ".cs",
-        ".c", ".cpp", ".h", ".hpp", ".swift", ".ex", ".exs",
-    })
-    source_files = [
-        f.path for f in snapshot.files
-        if f.extension in _SOURCE_EXTS and not f.is_directory
-    ][:30]
-
-    if source_files:
-        lines.append(f"Source files ({len(source_files)} shown of {snapshot.file_count} total):")
-        for path in source_files:
-            lines.append(f"  {path}")
-
-    lines.append(
-        f"Repository: {snapshot.file_count} files, "
-        f"{snapshot.directory_count} directories"
-        + ("  |  git: yes" if snapshot.git_present else "")
-    )
-
-    return "\n".join(lines)
 
 
 def _print_report(report, *, elapsed_seconds: float) -> None:  # type: ignore[no-untyped-def]
