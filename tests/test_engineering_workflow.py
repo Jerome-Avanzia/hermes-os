@@ -816,29 +816,33 @@ class TestModifyPlan:
 class TestBulkValidationGate:
     """Bulk RepositoryManipulation validation before any LLM call."""
 
-    def test_modify_nonexistent_file_fails_before_generate(
+    def test_modify_nonexistent_file_intent_corrected_to_create(
         self,
         workflow: EngineeringWorkflow,
         goal: FounderGoal,
         mock_llm: MagicMock,
         repo: Path,
     ):
+        """LLM intent="modify" on a non-existent file is auto-corrected to "create".
+
+        The workflow must not fail at plan_validation for this case — it must
+        correct the intent and proceed to execution (LLM is called).
+        """
         plan = EngineeringPlan(
             plan_id=f"plan-{goal.goal_id}",
             goal_id=goal.goal_id,
             confidence="high",
-            basis="modify a file that doesn't exist",
+            basis="modify a file that doesn't exist — intent should be corrected",
             operations=(PlannedOperation(
                 operation_id="op-0",
                 target="nonexistent_file.py",
                 intent="modify",
-                goal="Modify nonexistent file",
+                goal="Implement nonexistent_file.py",
             ),),
         )
-        report = workflow.execute(plan, goal)
-        assert report.success is False
-        assert "plan_validation_conflict" in (report.error or "")
-        mock_llm.execute.assert_not_called()
+        workflow.execute(plan, goal)
+        # Intent was corrected: workflow proceeded past plan_validation and called LLM.
+        mock_llm.execute.assert_called()
 
     def test_duplicate_target_fails_before_generate(
         self,
@@ -878,17 +882,26 @@ class TestBulkValidationGate:
         goal: FounderGoal,
         repo: Path,
     ):
+        """Duplicate targets produce failure_stage=plan_validation in metadata."""
         plan = EngineeringPlan(
             plan_id=f"plan-{goal.goal_id}",
             goal_id=goal.goal_id,
             confidence="high",
-            basis="b",
-            operations=(PlannedOperation(
-                operation_id="op-0",
-                target="nonexistent.py",
-                intent="modify",
-                goal="Modify nonexistent",
-            ),),
+            basis="two ops targeting the same file",
+            operations=(
+                PlannedOperation(
+                    operation_id="op-0",
+                    target="dup.py",
+                    intent="create",
+                    goal="Create dup.py",
+                ),
+                PlannedOperation(
+                    operation_id="op-1",
+                    target="dup.py",
+                    intent="create",
+                    goal="Create dup.py again",
+                ),
+            ),
         )
         report = workflow.execute(plan, goal)
         meta = dict(report.metadata)

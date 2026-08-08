@@ -46,6 +46,7 @@ Architecture invariants preserved:
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path as _Path
 
@@ -243,6 +244,26 @@ class EngineeringWorkflow:
         all_steps: list[StepExecutionRecord] = []
         completed_count = 0
         total_correction_attempts = 0
+
+        # ── 0. Resolve LLM intent against actual filesystem state ─────────────
+        # The LLM may produce wrong intent (e.g. "modify" for a file that does
+        # not yet exist, or "create" for a file that already exists). Correct
+        # before RepositoryManipulation validation and CorrectionEngine
+        # execution so both layers see consistent intent.
+        repo_root = _Path(goal.workspace_path) / goal.repository_path
+        corrected_ops = []
+        for op in plan.operations:
+            file_exists = (repo_root / op.target).exists()
+            correct_intent = "modify" if file_exists else "create"
+            if op.intent != correct_intent:
+                logger.info(
+                    "EngineeringWorkflow: correcting intent op_id=%r target=%r "
+                    "%r -> %r (file_exists=%s)",
+                    op.operation_id, op.target, op.intent, correct_intent, file_exists,
+                )
+                op = dataclasses.replace(op, intent=correct_intent)
+            corrected_ops.append(op)
+        plan = dataclasses.replace(plan, operations=tuple(corrected_ops))
 
         # ── 1. Bulk RepositoryManipulation validation ──────────────────────────
         repo_ops: list[RepositoryOperation] = []
