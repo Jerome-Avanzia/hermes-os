@@ -1,35 +1,42 @@
 id: brand-strategy
 name: Brand Strategy
-version: 1.0.0
+version: 1.1.0
 status: active
 owner: Marketing
 department_id: marketing
 
 capabilities:
   - brand-strategy
+  - identity-review
 
-description: Provides brand positioning and brand personality guidance.
+description: Provides brand positioning, brand personality guidance, and identity document review.
 
 provides:
   - brand positioning guidance
   - brand personality guidance
+  - identity document review and assessment
 
 inputs:
   - business profile
   - target market
   - competitive landscape
+  - identity documents with acceptance criteria
 
 outputs:
   - brand positioning framework
   - brand personality guidelines
+  - structured identity review with Pass / Needs Revision / Question ratings
 
 keywords:
   - brand strategy
   - brand
   - branding
   - positioning
+  - identity review
+  - brand audit
 
 sop_refs:
   - brand-strategy/brand-audit
+  - brand-strategy/identity-review
 
 depends_on: []

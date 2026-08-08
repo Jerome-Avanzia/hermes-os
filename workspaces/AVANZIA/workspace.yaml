@@ -7,10 +7,17 @@ profiles:
   - default
   - business
   - developer
+  - brand-strategist
 organization:
   purpose: knowledge/AVANZIA/01-purpose.md
   vision: knowledge/AVANZIA/02-vision.md
   mission: knowledge/AVANZIA/03-mission.md
+  values: knowledge/AVANZIA/13-values.md
   positioning: knowledge/AVANZIA/04-positioning.md
+  target_customers: knowledge/AVANZIA/14-target-customers.md
   services: knowledge/AVANZIA/05-services.md
   brand: knowledge/AVANZIA/06-brand-personality.md
+  tone_of_voice: knowledge/AVANZIA/15-tone-of-voice.md
+  visual_identity: knowledge/AVANZIA/16-visual-identity-direction.md
+  site_map: knowledge/AVANZIA/10-site-map.md
+  homepage_copy: knowledge/AVANZIA/09-homepage-copy-v1.md
