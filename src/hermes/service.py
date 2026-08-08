@@ -53,6 +53,7 @@ from hermes.models.operation import InvalidTransitionError, transition_operation
 from hermes.providers.ai_provider import AIProvider
 from hermes.providers.ollama_provider import ChatMessage
 from hermes.kernel.workspace_engine import WorkspaceNotFoundError  # noqa: F401 — re-exported for Gateway
+from hermes.kernel.engineering_job_runner import EngineeringJobNotFoundError, EngineeringJobRunner  # noqa: F401
 from hermes.runtime.context_engine import ContextEngine
 from hermes.runtime.docker_provider import DockerProvider
 from hermes.runtime.github_provider import GitHubProvider
@@ -109,6 +110,7 @@ class HermesService:
         acknowledgement_store: AcknowledgementStore | None = None,
         people_registry: PeopleRegistry | None = None,
         goal_registry: GoalRegistry | None = None,
+        engineering_job_runner: "EngineeringJobRunner | None" = None,
     ) -> None:
         self.context_engine = context_engine or ContextEngine()
         self.planner = planner or Planner()
@@ -126,12 +128,30 @@ class HermesService:
         self.acknowledgement_store = acknowledgement_store
         self.people_registry = people_registry or PeopleRegistry()
         self.goal_registry = goal_registry or GoalRegistry()
+        self.engineering_job_runner = engineering_job_runner
         self._context_graph: ContextGraph | None = None
         self._github_runtime: GitHubRuntime | None = None
         self._infrastructure_runtime: InfrastructureRuntime | None = None
         self._n8n_runtime: N8nRuntime | None = None
         self._nocodb_runtime: NocodbRuntime | None = None
         self._llm_runtime: LlmRuntime | None = None
+
+    # -- Engineering Job Runner -----------------------------------------------
+
+    def create_engineering_job(self, workspace_id: str, task: str, repo: str) -> "EngineeringJobRunner":
+        if self.engineering_job_runner is None:
+            raise RuntimeError("EngineeringJobRunner not configured")
+        return self.engineering_job_runner.create(workspace_id, task, repo)
+
+    def get_engineering_job(self, workspace_id: str, job_id: str) -> "EngineeringJobRunner":
+        if self.engineering_job_runner is None:
+            raise RuntimeError("EngineeringJobRunner not configured")
+        return self.engineering_job_runner._store.load(workspace_id, job_id)
+
+    def list_engineering_jobs(self, workspace_id: str) -> list:
+        if self.engineering_job_runner is None:
+            return []
+        return self.engineering_job_runner._store.list(workspace_id)
 
     # -- Workspace validation --------------------------------------------------
 

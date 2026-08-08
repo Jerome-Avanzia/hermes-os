@@ -12,6 +12,7 @@ Workspace validation is a service-layer concern — the Gateway only
 translates WorkspaceNotFoundError into HTTP 404 responses.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -92,6 +93,11 @@ class CreateDecisionRequest(BaseModel):
     create_operation: bool = False
 
 
+class DispatchEngineeringJobRequest(BaseModel):
+    task: str
+    repo: str
+
+
 # -- Application singletons ------------------------------------------------
 
 
@@ -130,6 +136,12 @@ def _build_hermes_service(model: str | None = None) -> HermesService:
 
 _hermes_service = _build_hermes_service()
 
+from hermes.kernel.engineering_job_runner import EngineeringJobRunner, EngineeringJobNotFoundError, EngineeringJobStore  # noqa: E402
+
+_engineering_job_store = EngineeringJobStore()
+_engineering_job_runner = EngineeringJobRunner(job_store=_engineering_job_store)
+_hermes_service.engineering_job_runner = _engineering_job_runner
+
 
 # -- Exception handlers ----------------------------------------------------
 
@@ -140,6 +152,11 @@ async def workspace_not_found_handler(request: Request, exc: WorkspaceNotFoundEr
         status_code=404,
         content={"error": str(exc)},
     )
+
+
+@app.exception_handler(EngineeringJobNotFoundError)
+async def engineering_job_not_found_handler(request: Request, exc: EngineeringJobNotFoundError) -> JSONResponse:
+    return JSONResponse(status_code=404, content={"error": str(exc)})
 
 
 # -- SSE helpers ------------------------------------------------------------
@@ -864,6 +881,36 @@ async def get_workflow(workflow_id: str) -> JSONResponse:
             content={"error": f"Workflow not found: {workflow_id}"},
         )
     return JSONResponse(content=wf)
+
+
+@app.post("/v1/workspaces/{workspace_id}/engineering/jobs", status_code=202)
+async def dispatch_engineering_job(workspace_id: str, request: DispatchEngineeringJobRequest) -> dict:
+    _hermes_service.validate_workspace(workspace_id)
+    workspace = _workspace_engine.resolve(workspace_id)
+    job = _hermes_service.create_engineering_job(workspace_id, request.task, request.repo)
+    asyncio.create_task(
+        asyncio.to_thread(
+            _engineering_job_runner.run,
+            workspace_id,
+            workspace.workspace.path,
+            job.job_id,
+        )
+    )
+    return {"job_id": job.job_id, "status": job.status, "dispatched_at": job.dispatched_at}
+
+
+@app.get("/v1/workspaces/{workspace_id}/engineering/jobs/{job_id}")
+async def get_engineering_job(workspace_id: str, job_id: str) -> dict:
+    _hermes_service.validate_workspace(workspace_id)
+    job = _hermes_service.get_engineering_job(workspace_id, job_id)
+    return job.to_dict()
+
+
+@app.get("/v1/workspaces/{workspace_id}/engineering/jobs")
+async def list_engineering_jobs(workspace_id: str) -> list[dict]:
+    _hermes_service.validate_workspace(workspace_id)
+    jobs = _hermes_service.list_engineering_jobs(workspace_id)
+    return [j.to_dict() for j in jobs]
 
 
 @app.get("/health")
