@@ -7,6 +7,7 @@ and async streaming for the conversational chat pipeline.
 
 import json
 import logging
+import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -128,6 +129,24 @@ class OllamaProvider(AIProvider):
                 f"Cannot connect to Ollama at {self._base_url}. "
                 "Is Ollama running?"
             ) from exc
+
+    @staticmethod
+    def from_env(model: str | None = None) -> "OllamaProvider":
+        """Build an OllamaProvider from environment variables.
+
+        Reads OLLAMA_MODE to select the correct endpoint:
+          - OLLAMA_MODE=local (default): OLLAMA_LOCAL_URL (default: http://localhost:11434)
+          - OLLAMA_MODE=cloud:           OLLAMA_CLOUD_URL (default: https://ollama.com)
+
+        Model: *model* argument takes precedence, then OLLAMA_MODEL, then DEFAULT_MODEL.
+        """
+        mode = os.environ.get("OLLAMA_MODE", "local").strip().lower()
+        if mode == "cloud":
+            base_url = os.environ.get("OLLAMA_CLOUD_URL", "https://ollama.com").rstrip("/")
+        else:
+            base_url = os.environ.get("OLLAMA_LOCAL_URL", DEFAULT_BASE_URL).rstrip("/")
+        resolved_model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+        return OllamaProvider(model=resolved_model, base_url=base_url)
 
     @staticmethod
     def _build_kernel_prompt(

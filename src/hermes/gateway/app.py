@@ -112,9 +112,7 @@ class DispatchJobRequest(BaseModel):
 
 
 def _build_provider(model: str | None = None) -> OllamaProvider:
-    ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-    ollama_model = model or os.environ.get("OLLAMA_MODEL", "llama3.2")
-    return OllamaProvider(model=ollama_model, base_url=ollama_url)
+    return OllamaProvider.from_env(model=model)
 
 
 _profile_loader = ProfileLoader()

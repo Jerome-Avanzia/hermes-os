@@ -25,7 +25,6 @@ Architecture:
 
 from __future__ import annotations
 
-import os
 import sys
 from datetime import datetime, timezone
 
@@ -107,10 +106,8 @@ def run(
         raise typer.Exit(code=1) from error
 
     # -- 4. Build conductor ---------------------------------------------------
-    ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-    ollama_model = os.environ.get("OLLAMA_MODEL", "llama3.2")
     conductor = Conductor(
-        provider=OllamaProvider(model=ollama_model, base_url=ollama_url),
+        provider=OllamaProvider.from_env(),
         profile_loader=profile_loader,
     )
 
@@ -129,7 +126,7 @@ def run(
     typer.echo(f"Profile:    {profile}")
     typer.echo(f"Capability: {capability}")
     typer.echo(f"SOP(s):     {', '.join(sop.id for sop in sops)}")
-    typer.echo(f"Model:      {ollama_model}")
+    typer.echo(f"Model:      {conductor._provider._model}")
     typer.echo("")
 
     # -- 7. Stream and collect output -----------------------------------------
