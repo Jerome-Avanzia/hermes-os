@@ -23,6 +23,10 @@ services:
       # Bundled application data — shipped with the image, read-only.
       - ./knowledge:/data/knowledge:ro
       - ./skills:/data/skills:ro
+      # Workspace registry and runtime data (jobs, operations, heartbeats).
+      # Must be writable — bind-mounted from the host so the container user
+      # owns the path regardless of HERMES_UID.
+      - ./workspaces:/app/workspaces
       # Canonical production log directory.
       - /opt/avanzia/logs:/data/logs
     command: ["--host", "0.0.0.0", "--port", "8000"]
