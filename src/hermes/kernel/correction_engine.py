@@ -47,6 +47,7 @@ Architecture invariants preserved:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path as _Path
 
 from hermes.adapters.filesystem_adapter import FilesystemAdapter
@@ -431,6 +432,70 @@ class CorrectionEngine:
 
         return {}
 
+    def _find_failing_test_files(
+        self,
+        error_excerpt: str,
+        repo_root: _Path,
+    ) -> list[_Path]:
+        """Extract test file paths reported as failing in pytest output.
+
+        Matches two pytest output patterns:
+          FAILED tests/foo.py::TestClass::test_method
+          tests/foo.py:14: AssertionError
+
+        Returns only paths that exist on disk relative to repo_root.
+        Returns an empty list when no recognisable paths are found — the
+        caller falls back to all test files.
+        """
+        pattern = re.compile(
+            r'(?:^FAILED\s+|^)([\w./\\-]+\.py)(?:::|:\d+)',
+            re.MULTILINE,
+        )
+        found: set[_Path] = set()
+        for m in pattern.finditer(error_excerpt):
+            candidate = repo_root / m.group(1)
+            if candidate.is_file():
+                found.add(candidate.resolve())
+        return sorted(found)
+
+    def _build_test_context(
+        self,
+        error_excerpt: str,
+        repo_root: _Path,
+    ) -> str:
+        """Build the test-files section for a correction prompt.
+
+        Attempts to identify only the test files that pytest reported as
+        failing. Falls back to all *.py files under tests/ if none can be
+        identified reliably from the output.
+
+        Returns an empty string when no test files are found at all.
+        """
+        test_files = self._find_failing_test_files(error_excerpt, repo_root)
+
+        if not test_files:
+            # Fallback: include all test files so the LLM always sees the contract.
+            test_files = sorted(repo_root.glob("tests/**/*.py"))
+
+        if not test_files:
+            return ""
+
+        parts: list[str] = [
+            "Test files (define the contract the implementation must satisfy):\n"
+        ]
+        for path in test_files:
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+                try:
+                    rel = path.relative_to(repo_root)
+                except ValueError:
+                    rel = path
+                parts.append(f"--- {rel} ---\n{content}\n--- end ---\n\n")
+            except OSError:
+                pass
+
+        return "".join(parts)
+
     def _build_correction_payload(
         self,
         goal: FounderGoal,
@@ -438,10 +503,11 @@ class CorrectionEngine:
     ) -> dict[str, str]:
         """Build the LLM payload for a correction cycle.
 
-        Reads the current file content from disk (already written by the failed
-        initial or previous correction attempt) and constructs a prompt that
-        presents the task, the failing implementation, and the error output.
-        The LLM is instructed to return a corrected complete file.
+        Prompt structure:
+          1. Task description (per-operation goal only; no repo context blob).
+          2. Current implementation (read from disk — the failed attempt).
+          3. Failing test files (parsed from pytest output; fallback to all tests).
+          4. Full failure output (pytest stdout+stderr, ≤2000 chars).
 
         This payload is passed as payload_override to _execute_step so the
         gateway dispatch infrastructure is unchanged.
@@ -449,26 +515,36 @@ class CorrectionEngine:
         # Read current file content directly — the file exists on disk from the
         # failed write step. This read does not go through the gateway because it
         # is internal CorrectionEngine state assembly, not an adapter action.
-        # The subsequent LLM call and file overwrite are both gateway-dispatched.
         try:
             current_code = _Path(goal.output_path).read_text(encoding="utf-8", errors="replace")
         except OSError:
             current_code = "(file unreadable)"
 
+        # Strip repository context blob if present (injected by implement.py for
+        # the initial planning call; noise during repair).
+        task = goal.description
+        if "\n\nRepository context:\n" in task:
+            task = task.split("\n\nRepository context:\n")[0].strip()
+
+        repo_root = _Path(goal.workspace_path) / goal.repository_path
+        test_context = self._build_test_context(error_excerpt, repo_root)
+
         return {
             "system_prompt": (
                 "You are an expert software developer. "
-                "A previous implementation you produced failed validation or tests. "
-                "Analyse the error, correct the implementation, and return the complete "
-                "corrected file. Respond with code only — no explanation, no markdown fences."
+                "A previous implementation failed validation or tests. "
+                "Study the failing tests to understand the exact contract, "
+                "then return a complete corrected implementation. "
+                "Respond with code only — no explanation, no markdown fences."
             ),
             "prompt": (
-                f"Task: {goal.description}\n\n"
-                f"Your previous implementation:\n"
+                f"Task: {task}\n\n"
+                f"Current implementation:\n"
                 f"--- {goal.output_path} ---\n"
                 f"{current_code}\n"
                 f"--- end ---\n\n"
-                f"Failure:\n{error_excerpt}\n\n"
+                f"{test_context}"
+                f"Failure output:\n{error_excerpt}\n\n"
                 f"Return the complete corrected file."
             ),
         }
