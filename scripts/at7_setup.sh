@@ -54,7 +54,15 @@ def test_single_oversized_word():
     assert truncate("averylongword", 5) == "av..."
 PYTHON
 
+# Install pytest into a local venv so RepositoryIntelligence detects
+# .venv/bin/pytest and sets the test_command (detection priority 6).
+echo "==> Installing pytest into .venv"
+python3 -m venv .venv
+.venv/bin/pip install -q "pytest>=8.0"
+
 git add .
 git commit -q -m "feat: AT-7 test scaffolding — text_utils tests"
 
-echo "==> Fixture ready. text_utils.py absent: $(test ! -f text_utils.py && echo YES || echo NO)"
+echo "==> Fixture ready."
+echo "    text_utils.py absent:     $(test ! -f text_utils.py && echo YES || echo NO)"
+echo "    .venv/bin/pytest present: $(test -f .venv/bin/pytest && echo YES || echo NO)"
