@@ -203,6 +203,7 @@ from hermes.models.workspace import Workspace
 from hermes.models.workspace_context import WorkspaceContext
 from hermes.models.workspace_file import WorkspaceFile
 from hermes.models.workspace_snapshot import WorkspaceSnapshot
+from hermes.models.engineering_job import EngineeringJob
 
 __all__ = [
     "AdapterConfiguration",
@@ -376,4 +377,5 @@ __all__ = [
     "WorkspaceFile",
     "WorkspaceSnapshot",
     "transition_operation",
+    "EngineeringJob",
 ]
