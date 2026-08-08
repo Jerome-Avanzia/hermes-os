@@ -1301,6 +1301,7 @@
       </div>
       <div id="view-jobs" class="view">
         <div id="jobs-list" class="list-view"></div>
+        <div id="job-run-panel" style="display:none;flex:1;flex-direction:column;overflow-y:auto;"></div>
         <div id="jobs-detail" class="detail-view" style="display:none"></div>
       </div>
       <div id="view-documents" class="view">
@@ -4808,8 +4809,9 @@
 
   // ── Jobs ──────────────────────────────────────────
 
-  var jobsListEl   = document.getElementById("jobs-list");
-  var jobsDetailEl = document.getElementById("jobs-detail");
+  var jobsListEl    = document.getElementById("jobs-list");
+  var jobsDetailEl  = document.getElementById("jobs-detail");
+  var jobRunPanelEl = document.getElementById("job-run-panel");
   var jobsCache = [];
   var jobsStatusFilter = "all";
   var jobsOpFilter = "all";
@@ -4838,7 +4840,10 @@
 
     var html = '<div class="list-header">';
     html += '<div class="list-title">Jobs</div>';
+    html += '<div style="display:flex;align-items:center;gap:10px;">';
     html += '<div class="list-count">' + jobs.length + ' jobs</div>';
+    html += '<button id="new-job-btn" style="padding:3px 10px;font-size:11px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:500;">+ New Job</button>';
+    html += '</div>';
     html += '</div>';
 
     // Status filter bar
@@ -4918,6 +4923,12 @@
         openJob(el.dataset.jobId);
       });
     });
+
+    // Bind New Job button
+    var newJobBtn = document.getElementById("new-job-btn");
+    if (newJobBtn) {
+      newJobBtn.addEventListener("click", openJobRunPanel);
+    }
   }
 
   function formatDuration(start, end) {
@@ -5076,6 +5087,163 @@
           jobsDetailEl.appendChild(notice);
         }
       });
+  }
+
+  // ── Job Run Panel ──────────────────────────────────
+
+  function openJobRunPanel() {
+    jobsListEl.style.display = "none";
+    jobsDetailEl.style.display = "none";
+    jobRunPanelEl.style.display = "flex";
+    jobRunPanelEl.style.flexDirection = "column";
+    jobRunPanelEl.style.padding = "24px";
+    jobRunPanelEl.style.gap = "14px";
+    jobRunPanelEl.style.flex = "1";
+    jobRunPanelEl.style.overflowY = "auto";
+
+    jobRunPanelEl.innerHTML = [
+      '<div style="display:flex;align-items:center;gap:12px;">',
+      '  <button id="jr-back" style="padding:4px 10px;font-size:11px;background:var(--surface);color:var(--text-muted);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-family:inherit;">← Back</button>',
+      '  <div style="font-size:15px;font-weight:600;color:var(--text);">New Job</div>',
+      '</div>',
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">',
+      '  <select id="jr-profile" style="padding:5px 8px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;font-family:inherit;cursor:pointer;"><option>Loading...</option></select>',
+      '  <select id="jr-cap" style="padding:5px 8px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;font-family:inherit;cursor:pointer;min-width:220px;"><option>Loading...</option></select>',
+      '  <button id="jr-run" style="padding:5px 14px;font-size:12px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:500;">Run Job</button>',
+      '</div>',
+      '<div id="jr-meta" style="font-size:11px;color:var(--text-muted);min-height:16px;"></div>',
+      '<div id="jr-output" style="display:none;flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:16px;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-y:auto;min-height:300px;color:var(--text);font-family:inherit;"></div>',
+    ].join("");
+
+    document.getElementById("jr-back").addEventListener("click", function () {
+      jobRunPanelEl.style.display = "none";
+      jobRunPanelEl.innerHTML = "";
+      loadJobs();
+    });
+
+    fetch(wsBase() + "/profiles")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (profiles) {
+        var sel = document.getElementById("jr-profile");
+        if (!sel) return;
+        sel.innerHTML = "";
+        profiles.forEach(function (p) {
+          var opt = document.createElement("option");
+          opt.value = p.id;
+          opt.textContent = p.name;
+          sel.appendChild(opt);
+        });
+      })
+      .catch(function () {
+        var sel = document.getElementById("jr-profile");
+        if (sel) sel.innerHTML = "<option value='default'>Default</option>";
+      });
+
+    fetch(wsBase() + "/capabilities")
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (caps) {
+        var sel = document.getElementById("jr-cap");
+        if (!sel) return;
+        sel.innerHTML = "";
+        if (!caps.length) {
+          sel.innerHTML = "<option value=''>No capabilities found</option>";
+          return;
+        }
+        caps.forEach(function (c) {
+          var opt = document.createElement("option");
+          opt.value = c.id;
+          opt.textContent = (c.name || c.id) + "  [" + c.id + "]";
+          sel.appendChild(opt);
+        });
+      })
+      .catch(function () {
+        var sel = document.getElementById("jr-cap");
+        if (sel) sel.innerHTML = "<option value=''>Error loading capabilities</option>";
+      });
+
+    document.getElementById("jr-run").addEventListener("click", function () {
+      var profile = document.getElementById("jr-profile").value;
+      var capability = document.getElementById("jr-cap").value;
+      if (!profile || !capability) return;
+      runJobFromPanel(profile, capability);
+    });
+  }
+
+  function runJobFromPanel(profile, capability) {
+    var runBtn  = document.getElementById("jr-run");
+    var metaEl  = document.getElementById("jr-meta");
+    var outputEl = document.getElementById("jr-output");
+    if (!runBtn || !metaEl || !outputEl) return;
+
+    runBtn.disabled = true;
+    runBtn.textContent = "Running…";
+    outputEl.style.display = "block";
+    outputEl.textContent = "";
+    metaEl.textContent = "Dispatching job…";
+
+    fetch(wsBase() + "/jobs/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile: profile, capability: capability }),
+    })
+    .then(function (resp) {
+      if (!resp.ok) {
+        return resp.json().catch(function () { return {}; }).then(function (body) {
+          throw new Error(body.error || "Server returned " + resp.status);
+        });
+      }
+      var reader  = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer  = "";
+      var jobId   = null;
+      var full    = "";
+
+      function pump() {
+        return reader.read().then(function (result) {
+          if (result.done) {
+            runBtn.disabled = false;
+            runBtn.textContent = "Run Job";
+            if (jobId) metaEl.textContent = "Job " + jobId + " completed.";
+            return;
+          }
+          buffer += decoder.decode(result.value, { stream: true });
+          var lines = buffer.split("\n");
+          buffer = lines.pop();
+          for (var i = 0; i < lines.length; i++) {
+            if (!lines[i].startsWith("data: ")) continue;
+            var payload = lines[i].slice(6);
+            if (payload === "[DONE]") continue;
+            try {
+              var chunk = JSON.parse(payload);
+              if (chunk.error) throw new Error(chunk.error);
+              if (chunk.job_id && !jobId) {
+                jobId = chunk.job_id;
+                metaEl.textContent = "Job " + jobId + " running…";
+              }
+              if (chunk.content) {
+                full += chunk.content;
+                outputEl.textContent = full;
+                outputEl.scrollTop = outputEl.scrollHeight;
+              }
+            } catch (e) {
+              if (e.message) {
+                metaEl.textContent = "Error: " + e.message;
+                runBtn.disabled = false;
+                runBtn.textContent = "Run Job";
+                return;
+              }
+            }
+          }
+          return pump();
+        });
+      }
+      return pump();
+    })
+    .catch(function (err) {
+      metaEl.textContent = "Error: " + err.message;
+      runBtn.disabled = false;
+      runBtn.textContent = "Run Job";
+    });
   }
 
   // ── Chat ──────────────────────────────────────────

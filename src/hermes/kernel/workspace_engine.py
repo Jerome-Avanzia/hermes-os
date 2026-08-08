@@ -204,6 +204,12 @@ class WorkspaceEngine:
             positioning=facets.get("positioning", ""),
             services=facets.get("services", ""),
             brand=facets.get("brand", ""),
+            values=facets.get("values", ""),
+            target_customers=facets.get("target_customers", ""),
+            tone_of_voice=facets.get("tone_of_voice", ""),
+            visual_identity=facets.get("visual_identity", ""),
+            site_map=facets.get("site_map", ""),
+            homepage_copy=facets.get("homepage_copy", ""),
         )
 
     @staticmethod

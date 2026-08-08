@@ -17,6 +17,7 @@ import json
 import logging
 import os
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -29,8 +30,12 @@ from hermes.conductor import Conductor
 from hermes.kernel.acknowledgement_store import AcknowledgementStore
 from hermes.kernel.heartbeat_runtime import InvalidHeartbeatStatusError
 from hermes.kernel.heartbeat_store import HeartbeatStore
+from hermes.kernel.capability_registry import CapabilityRegistry
+from hermes.kernel.job_id import generate_job_id
 from hermes.kernel.job_store import JobStore
 from hermes.kernel.operation_store import OperationNotFoundError, OperationStore
+from hermes.kernel.sop_registry import SOPRegistry
+from hermes.models.job import Job
 from hermes.kernel.profile_loader import ProfileLoader
 from hermes.kernel.workspace_engine import WorkspaceEngine, WorkspaceNotFoundError
 from hermes.kernel.operation_runtime import StepNotActionableError, StepNotFoundError
@@ -96,6 +101,11 @@ class CreateDecisionRequest(BaseModel):
 class DispatchEngineeringJobRequest(BaseModel):
     task: str
     repo: str
+
+
+class DispatchJobRequest(BaseModel):
+    profile: str
+    capability: str
 
 
 # -- Application singletons ------------------------------------------------
@@ -171,6 +181,52 @@ def _sse_stream(tokens: Iterator[str]) -> Iterator[str]:
     except OllamaConnectionError as exc:
         logger.error("Provider connection lost mid-stream: %s", exc)
         yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+    yield "data: [DONE]\n\n"
+
+
+def _sse_job_stream(
+    tokens: Iterator[str],
+    job_id: str,
+    workspace_id: str,
+    capability: str,
+    started_at: datetime,
+) -> Iterator[str]:
+    """Wrap token chunks as SSE frames and persist the Job record on completion."""
+    yield f"data: {json.dumps({'job_id': job_id, 'status': 'running'})}\n\n"
+    output: list[str] = []
+    try:
+        for token in tokens:
+            yield f"data: {json.dumps({'content': token})}\n\n"
+            output.append(token)
+        finished = datetime.now(timezone.utc)
+        _job_store.save(Job(
+            id=job_id,
+            workspace_id=workspace_id,
+            operation_id=f"founder-{job_id}",
+            status="completed",
+            started_at=started_at,
+            finished_at=finished,
+            completed_steps=[capability],
+            generated_output="".join(output),
+            created_at=started_at,
+            updated_at=finished,
+        ))
+    except Exception as exc:
+        logger.error("Job stream error for %s: %s", job_id, exc)
+        yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+        now = datetime.now(timezone.utc)
+        _job_store.save(Job(
+            id=job_id,
+            workspace_id=workspace_id,
+            operation_id=f"founder-{job_id}",
+            status="failed",
+            started_at=started_at,
+            finished_at=now,
+            completed_steps=[capability],
+            generated_output=None,
+            created_at=started_at,
+            updated_at=now,
+        ))
     yield "data: [DONE]\n\n"
 
 
@@ -776,6 +832,59 @@ async def get_job(workspace_id: str, job_id: str) -> JSONResponse:
             content={"error": f"Job not found: {job_id}"},
         )
     return JSONResponse(content=job)
+
+
+@app.post("/v1/workspaces/{workspace_id}/jobs/run")
+async def run_job(workspace_id: str, request: DispatchJobRequest) -> StreamingResponse:
+    """Dispatch a Founder Runtime job and stream the result via SSE."""
+    _hermes_service.validate_workspace(workspace_id)
+
+    cap = CapabilityRegistry().get(request.capability)
+    if cap is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"Capability not found: '{request.capability}'"},
+        )
+
+    sops = [sop for ref in cap.sop_refs if (sop := SOPRegistry().get(ref)) is not None]
+    if not sops:
+        return JSONResponse(
+            status_code=422,
+            content={"error": f"No SOPs registered for capability '{request.capability}'"},
+        )
+
+    # Create and persist the Job record immediately so it is visible in the list.
+    job_id = generate_job_id(_job_store.jobs_dir(workspace_id))
+    started_at = datetime.now(timezone.utc)
+    _job_store.save(Job(
+        id=job_id,
+        workspace_id=workspace_id,
+        operation_id=f"founder-{job_id}",
+        status="running",
+        started_at=started_at,
+        finished_at=started_at,
+        completed_steps=[request.capability],
+        generated_output=None,
+        created_at=started_at,
+        updated_at=started_at,
+    ))
+
+    sop_content = "\n\n---\n\n".join(sop.content for sop in sops)
+    messages = [ChatMessage(
+        role="user",
+        content=f"Execute the following procedure:\n\n{sop_content}",
+    )]
+
+    tokens = _hermes_service.stream_chat(
+        messages,
+        workspace_id=workspace_id,
+        profile_id=request.profile or None,
+    )
+    return StreamingResponse(
+        _sse_job_stream(tokens, job_id, workspace_id, request.capability, started_at),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/v1/workspaces/{workspace_id}/decisions")

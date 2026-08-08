@@ -132,6 +132,18 @@ class Conductor:
                 org_parts.append(f"Services:\n{org.services.strip()}")
             if org.brand:
                 org_parts.append(f"Brand:\n{org.brand.strip()}")
+            if org.values:
+                org_parts.append(f"Values:\n{org.values.strip()}")
+            if org.target_customers:
+                org_parts.append(f"Target Customers:\n{org.target_customers.strip()}")
+            if org.tone_of_voice:
+                org_parts.append(f"Tone of Voice:\n{org.tone_of_voice.strip()}")
+            if org.visual_identity:
+                org_parts.append(f"Visual Identity:\n{org.visual_identity.strip()}")
+            if org.site_map:
+                org_parts.append(f"Site Map:\n{org.site_map.strip()}")
+            if org.homepage_copy:
+                org_parts.append(f"Homepage Copy:\n{org.homepage_copy.strip()}")
             if org_parts:
                 parts.append("## Organization\n\n" + "\n\n".join(org_parts))
 

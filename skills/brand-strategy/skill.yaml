@@ -6,8 +6,8 @@ owner: Marketing
 department_id: marketing
 
 capabilities:
-  - brand-strategy
-  - identity-review
+  - brand.strategy
+  - brand.identity-review
 
 description: Provides brand positioning, brand personality guidance, and identity document review.
 
