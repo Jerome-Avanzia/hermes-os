@@ -182,6 +182,7 @@ class Conductor:
                 model=profile.model,
                 base_url=self._provider._base_url,
                 timeout=self._provider._timeout,
+                api_key=self._provider._api_key,
             )
         return self._provider
 

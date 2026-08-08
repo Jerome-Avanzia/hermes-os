@@ -42,10 +42,12 @@ class OllamaProvider(AIProvider):
         model: str = DEFAULT_MODEL,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
+        api_key: str = "",
     ) -> None:
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        self._api_key = api_key
 
     # -- AIProvider contract (kernel integration) ----------------------------
 
@@ -82,11 +84,17 @@ class OllamaProvider(AIProvider):
             payload["options"] = options
 
         url = f"{self._base_url}/api/chat"
-        logger.info("Streaming chat to %s model=%s messages=%d", url, self._model, len(messages))
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        logger.info(
+            "Streaming chat to %s model=%s messages=%d auth=%s",
+            url, self._model, len(messages), "yes" if self._api_key else "no",
+        )
 
         try:
             with httpx.Client(timeout=self._timeout) as client:
-                with client.stream("POST", url, json=payload) as response:
+                with client.stream("POST", url, json=payload, headers=headers) as response:
                     response.raise_for_status()
                     for line in response.iter_lines():
                         if not line:
@@ -146,7 +154,8 @@ class OllamaProvider(AIProvider):
         else:
             base_url = os.environ.get("OLLAMA_LOCAL_URL", DEFAULT_BASE_URL).rstrip("/")
         resolved_model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
-        return OllamaProvider(model=resolved_model, base_url=base_url)
+        api_key = os.environ.get("OLLAMA_API_KEY", "")
+        return OllamaProvider(model=resolved_model, base_url=base_url, api_key=api_key)
 
     @staticmethod
     def _build_kernel_prompt(
