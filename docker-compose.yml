@@ -32,3 +32,15 @@ services:
     command: ["--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8000:8000"
+    networks:
+      - avanzia-shared
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.hermes.rule=Host(`hermes.avanzia.tech`)"
+      - "traefik.http.routers.hermes.entrypoints=websecure"
+      - "traefik.http.routers.hermes.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.hermes.loadbalancer.server.port=8000"
+
+networks:
+  avanzia-shared:
+    external: true
