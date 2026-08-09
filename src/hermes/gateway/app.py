@@ -22,7 +22,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -1269,5 +1269,24 @@ async def llm_health() -> dict:
 # -- Static UI (must be mounted last so API routes take precedence) ---------
 
 _static_dir = Path(__file__).parent / "static"
+
 if _static_dir.is_dir():
+    _index_html = _static_dir / "index.html"
+
+    @app.get("/", include_in_schema=False)
+    async def serve_index() -> Response:
+        """Serve index.html with no-cache headers so browsers always load the
+        current version after a deployment.  Without this, Starlette StaticFiles
+        leaves caching to browser heuristics, which can serve stale HTML for
+        minutes or hours after a container rebuild."""
+        return Response(
+            content=_index_html.read_bytes(),
+            media_type="text/html",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
+
     app.mount("/", StaticFiles(directory=_static_dir, html=True), name="ui")
