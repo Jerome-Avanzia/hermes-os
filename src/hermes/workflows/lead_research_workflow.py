@@ -157,24 +157,71 @@ class LeadResearchWorkflow:
             source_log=source_log,
         )
 
+    # Alternative TLDs tried when the inferred .com domain yields zero successes.
+    _FALLBACK_TLDS = (".io", ".app", ".co", ".ai")
+
     def _fetch_company_profile(self, company_name: str) -> list[FetchResult]:
-        """Fetch the standard page set for a lead company."""
+        """Fetch evidence for a lead company with multi-source fallback.
+
+        Sources (in order):
+        1. Primary domain (inferred via _infer_domain — defaults to .com).
+        2. Alternative TLD fallback (.io / .app / .co / .ai) — tried only when
+           the primary domain returns zero successful pages.  The first
+           alternative that returns a successful homepage replaces the primary
+           domain for the remaining pages.
+        3. Wikipedia — always fetched as an additional source.  Provides a
+           reliable, bot-protection-free overview for well-known companies.
+        """
         domain = _infer_domain(company_name)
-        urls = [
-            f"https://{domain}/",
-            f"https://{domain}/about",
-            f"https://{domain}/pricing",
-            f"https://{domain}/team",
-            f"https://{domain}/blog",
-        ]
+        results = self._fetch_domain_pages(domain)
+
+        # Fallback: if primary domain returned nothing, try alternative TLDs.
+        if not any(r.success for r in results) and domain.endswith(".com"):
+            base = domain[:-4]
+            for tld in self._FALLBACK_TLDS:
+                alt_domain = base + tld
+                probe = self._researcher.fetch(f"https://{alt_domain}/")
+                logger.debug(
+                    "LeadResearchWorkflow: TLD fallback alt_domain=%r success=%s",
+                    alt_domain, probe.success,
+                )
+                if probe.success:
+                    logger.info(
+                        "LeadResearchWorkflow: primary domain %r failed; "
+                        "using alternative domain %r",
+                        domain, alt_domain,
+                    )
+                    results = [probe] + self._fetch_domain_pages(
+                        alt_domain, skip_home=True
+                    )
+                    break
+
+        # Wikipedia: always included as an additional public source.
+        wiki_slug = re.sub(r"[^\w]+", "_", company_name.strip()).strip("_")
+        wiki_url = f"https://en.wikipedia.org/wiki/{wiki_slug}"
+        wiki_result = self._researcher.fetch(wiki_url)
+        logger.debug(
+            "LeadResearchWorkflow: wikipedia url=%r success=%s",
+            wiki_url, wiki_result.success,
+        )
+        results.append(wiki_result)
+
+        return results
+
+    def _fetch_domain_pages(
+        self, domain: str, skip_home: bool = False
+    ) -> list[FetchResult]:
+        """Fetch the standard page set for a given domain."""
+        paths = ["about", "pricing", "team", "blog"]
+        if not skip_home:
+            paths = [""] + paths
         results = []
-        for url in urls:
+        for path in paths:
+            url = f"https://{domain}/{path}" if path else f"https://{domain}/"
             result = self._researcher.fetch(url)
             logger.debug(
                 "LeadResearchWorkflow: url=%r status=%s success=%s",
-                url,
-                result.http_status,
-                result.success,
+                url, result.http_status, result.success,
             )
             results.append(result)
         return results
