@@ -233,6 +233,10 @@ def test_load_executor_raises_on_non_callable():
         ("Research competitor Acme", "Acme"),
         ("Analyse competitor Notion Corp", "Notion Corp"),
         ("Profile competitor acme.com", "acme.com"),
+        # Natural phrasing "Research X as a competitor..." — must extract only "X"
+        ("Research Notion as a competitor. Compare their main products, target customers, positioning, and publicly visible pricing.", "Notion"),
+        ("Research HubSpot as a competitor", "HubSpot"),
+        ("Research Notion Labs as a competitor", "Notion Labs"),
         ("competitor analysis for Stripe", "Stripe"),
         ("competitive intelligence on HubSpot", "HubSpot"),
         ("competitor analysis of Salesforce", "Salesforce"),

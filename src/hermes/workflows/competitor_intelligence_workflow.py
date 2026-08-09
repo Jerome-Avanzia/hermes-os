@@ -386,18 +386,34 @@ def _extract_competitor_name(objective: str) -> str:
     Falls back to the full objective string so domain inference always has
     something to work with.
     """
-    patterns = [
-        # "research competitor Acme" / "analyse competitor Acme Corp"
-        r"(?:research|analyze|analyse|profile)\s+(?:competitor\s+)?([A-Za-z0-9][^\n,?!]{1,50})",
-        # "competitor analysis for Acme" / "competitive intelligence on Acme"
+    # Pattern 1: "research [competitor] Name" / "analyse [competitor] Name"
+    # Split verb match (case-insensitive) from name capture (case-sensitive) so that
+    # IGNORECASE doesn't cause lowercase words like "as" to be treated as Title-cased names.
+    verb_m = re.search(
+        r"(?:research|analyze|analyse|profile)\s+(?:competitor\s+)?",
+        objective,
+        re.IGNORECASE,
+    )
+    if verb_m:
+        rest = objective[verb_m.end():]
+        # Name: one or more Title-cased words, or a bare domain (acme.com).
+        name_m = re.match(
+            r"([A-Z][A-Za-z0-9]*(?:\s+[A-Z][A-Za-z0-9]*){0,3}|[a-z0-9][a-z0-9.-]+\.[a-z]{2,})",
+            rest,
+        )
+        if name_m:
+            return name_m.group(1).strip().rstrip(".,?! ")
+
+    # Pattern 2: "competitor analysis for Acme" / "competitive intelligence on Acme"
+    # Pattern 3: "tell me about Acme"
+    for pattern in [
         r"(?:competitor(?:\s+analysis)?|competitive\s+intelligence)\s+(?:for|on|of)\s+([A-Za-z0-9][^\n,?!]{1,50})",
-        # "what does Acme do" / "tell me about Acme"
         r"(?:what\s+does|about|profile\s+(?:of|for)?)\s+([A-Z][A-Za-z0-9\s\(\)\.]{1,40})",
-    ]
-    for pattern in patterns:
+    ]:
         m = re.search(pattern, objective, re.IGNORECASE)
         if m:
             return m.group(1).strip().rstrip(".,?! ")
+
     return objective  # fallback: pass the full string to domain inference
 
 
