@@ -274,7 +274,7 @@ async def chat(workspace_id: str, request: ChatRequest) -> StreamingResponse:
             tokens = service.stream_chat(
                 messages,
                 workspace_id=workspace_id,
-                profile_id=request.profile,
+                profile_id="ceo",
             )
             return StreamingResponse(
                 _sse_stream(tokens),
@@ -288,7 +288,7 @@ async def chat(workspace_id: str, request: ChatRequest) -> StreamingResponse:
         result = service.chat(
             messages,
             workspace_id=workspace_id,
-            profile_id=request.profile,
+            profile_id="ceo",
         )
         return StreamingResponse(
             iter([json.dumps({"content": result})]),

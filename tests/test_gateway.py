@@ -165,7 +165,8 @@ def test_chat_passes_workspace_id_to_service():
     assert service.stream_chat.call_args[1]["workspace_id"] == WS
 
 
-def test_chat_passes_profile_to_service():
+def test_chat_always_routes_to_ceo():
+    """Chat must always route to the CEO regardless of any profile supplied by the client."""
     service = _mock_hermes_service(["OK"])
 
     with patch("hermes.gateway.app._hermes_service", service):
@@ -178,10 +179,11 @@ def test_chat_passes_profile_to_service():
         )
 
     service.stream_chat.assert_called_once()
-    assert service.stream_chat.call_args[1]["profile_id"] == "developer"
+    assert service.stream_chat.call_args[1]["profile_id"] == "ceo"
 
 
-def test_chat_passes_none_profile_when_omitted():
+def test_chat_routes_to_ceo_when_no_profile_supplied():
+    """Chat routes to CEO even when client omits the profile field."""
     service = _mock_hermes_service(["OK"])
 
     with patch("hermes.gateway.app._hermes_service", service):
@@ -190,7 +192,7 @@ def test_chat_passes_none_profile_when_omitted():
             json={"messages": [{"role": "user", "content": "Hi"}]},
         )
 
-    assert service.stream_chat.call_args[1]["profile_id"] is None
+    assert service.stream_chat.call_args[1]["profile_id"] == "ceo"
 
 
 def test_chat_with_model_override_creates_new_service():
@@ -242,7 +244,8 @@ def test_chat_non_streaming_returns_json():
     service.chat.assert_called_once()
 
 
-def test_chat_non_streaming_passes_profile():
+def test_chat_non_streaming_routes_to_ceo():
+    """Non-streaming Chat must also route to CEO, ignoring any client-supplied profile."""
     service = _mock_hermes_service(["OK"])
 
     with patch("hermes.gateway.app._hermes_service", service):
@@ -255,7 +258,7 @@ def test_chat_non_streaming_passes_profile():
             },
         )
 
-    assert service.chat.call_args[1]["profile_id"] == "business"
+    assert service.chat.call_args[1]["profile_id"] == "ceo"
 
 
 # -- Profiles endpoint -----------------------------------------------------
