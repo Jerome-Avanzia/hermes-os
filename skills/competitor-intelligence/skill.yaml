@@ -1,0 +1,44 @@
+id: competitor-intelligence
+name: Competitor Intelligence
+version: 1.0.0
+status: active
+owner: Business Strategy
+department_id: business-strategy
+
+capabilities:
+  - competitor.intelligence
+  - business.competitive-research
+
+description: Researches and analyses a named competitor, synthesising publicly available
+  evidence into a structured internal intelligence report with explicit sourcing,
+  confidence labelling, and strategic implications.
+
+provides:
+  - competitor intelligence report
+  - competitive positioning analysis
+  - strategic implications assessment
+
+inputs:
+  - competitor name (required)
+  - business question or decision context (optional)
+
+outputs:
+  - structured competitor intelligence report with sourced facts, labelled inferences,
+    and explicit evidence gaps
+
+keywords:
+  - competitor
+  - competitive intelligence
+  - market research
+  - competitor analysis
+  - strategic research
+  - competitive landscape
+
+sop_refs:
+  - competitor-intelligence/competitor-intelligence
+
+# Dotted path to the factory function invoked by FounderJobRouter.
+# Signature: (objective: str, workspace_id: str, conductor: Conductor) -> str
+workflow_executor: hermes.workflows.competitor_intelligence_workflow.execute_from_objective
+
+depends_on: []

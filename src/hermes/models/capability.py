@@ -28,3 +28,4 @@ class Capability:
     workflow_refs: list[str] = field(default_factory=list)
     table_refs: list[str] = field(default_factory=list)
     model_refs: list[str] = field(default_factory=list)
+    workflow_executor: str | None = None  # dotted path to executable workflow factory

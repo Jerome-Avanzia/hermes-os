@@ -30,11 +30,9 @@ from hermes.conductor import Conductor
 from hermes.kernel.acknowledgement_store import AcknowledgementStore
 from hermes.kernel.heartbeat_runtime import InvalidHeartbeatStatusError
 from hermes.kernel.heartbeat_store import HeartbeatStore
-from hermes.kernel.capability_registry import CapabilityRegistry
 from hermes.kernel.job_id import generate_job_id
 from hermes.kernel.job_store import JobStore
 from hermes.kernel.operation_store import OperationNotFoundError, OperationStore
-from hermes.kernel.sop_registry import SOPRegistry
 from hermes.models.job import Job
 from hermes.kernel.profile_loader import ProfileLoader
 from hermes.kernel.workspace_engine import WorkspaceEngine, WorkspaceNotFoundError
@@ -43,6 +41,8 @@ from hermes.models.operation import InvalidTransitionError
 from hermes.providers.ollama_provider import ChatMessage, OllamaConnectionError, OllamaProvider
 from hermes.runtime.context_engine import ContextEngine
 from hermes.service import HermesService, RecommendationNotFoundError
+from hermes.kernel.capability_registry import CapabilityRegistry
+from hermes.kernel.founder_job_router import FounderJobRouter
 
 logger = logging.getLogger(__name__)
 
@@ -103,10 +103,6 @@ class DispatchEngineeringJobRequest(BaseModel):
     repo: str
 
 
-class DispatchJobRequest(BaseModel):
-    profile: str
-    capability: str
-
 
 class FounderJobRequest(BaseModel):
     """Founder-facing job request — no profile, capability, or SOP selection required.
@@ -166,6 +162,10 @@ from hermes.kernel.engineering_job_runner import EngineeringJobRunner, Engineeri
 _engineering_job_store = EngineeringJobStore()
 _engineering_job_runner = EngineeringJobRunner(job_store=_engineering_job_store)
 _hermes_service.engineering_job_runner = _engineering_job_runner
+
+_capability_registry = CapabilityRegistry()
+_founder_conductor = Conductor(provider=_build_provider(), profile_loader=_profile_loader)
+_founder_job_router = FounderJobRouter(conductor=_founder_conductor, capability_registry=_capability_registry)
 
 
 # -- Exception handlers ----------------------------------------------------
@@ -271,6 +271,25 @@ async def chat(workspace_id: str, request: ChatRequest) -> StreamingResponse:
 
     try:
         if request.stream:
+            # For CEO-profile requests, check CapabilityRegistry before calling the LLM.
+            # Routing is deterministic (keyword match) — no LLM involved in the decision.
+            # Only intercepts when profile is "ceo" (default); explicit non-CEO profiles bypass.
+            if not request.profile or request.profile == "ceo":
+                last_user = next(
+                    (m.content for m in reversed(messages) if m.role == "user"), None
+                )
+                if last_user:
+                    cap = _founder_job_router.find_executable_capability(last_user, workspace_id)
+                    if cap is not None:
+                        logger.info(
+                            "chat: routing to FounderJobRouter capability=%r", cap.id
+                        )
+                        return StreamingResponse(
+                            _sse_stream(_founder_job_router.route(last_user, workspace_id)),
+                            media_type="text/event-stream",
+                            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                        )
+
             tokens = service.stream_chat(
                 messages,
                 workspace_id=workspace_id,
@@ -852,60 +871,6 @@ async def get_job(workspace_id: str, job_id: str) -> JSONResponse:
         )
     return JSONResponse(content=job)
 
-
-@app.post("/v1/workspaces/{workspace_id}/jobs/run")
-async def run_job(workspace_id: str, request: DispatchJobRequest) -> StreamingResponse:
-    """Dispatch a Founder Runtime job and stream the result via SSE."""
-    _hermes_service.validate_workspace(workspace_id)
-
-    cap = CapabilityRegistry().get(request.capability)
-    if cap is None:
-        return JSONResponse(
-            status_code=404,
-            content={"error": f"Capability not found: '{request.capability}'"},
-        )
-
-    sops = [sop for ref in cap.sop_refs if (sop := SOPRegistry().get(ref)) is not None]
-    if not sops:
-        return JSONResponse(
-            status_code=422,
-            content={"error": f"No SOPs registered for capability '{request.capability}'"},
-        )
-
-    # Create and persist the Job record immediately so it is visible in the list.
-    job_id = generate_job_id(_job_store.jobs_dir(workspace_id))
-    started_at = datetime.now(timezone.utc)
-    _job_store.save(Job(
-        id=job_id,
-        workspace_id=workspace_id,
-        operation_id=f"founder-{job_id}",
-        status="running",
-        started_at=started_at,
-        finished_at=started_at,
-        completed_steps=[request.capability],
-        generated_output=None,
-        created_at=started_at,
-        updated_at=started_at,
-    ))
-
-    sop_content = "\n\n---\n\n".join(sop.content for sop in sops)
-    messages = [ChatMessage(
-        role="user",
-        content=f"Execute the following procedure:\n\n{sop_content}",
-    )]
-
-    tokens = _hermes_service.stream_chat(
-        messages,
-        workspace_id=workspace_id,
-        profile_id=request.profile or None,
-    )
-    return StreamingResponse(
-        _sse_job_stream(tokens, job_id, workspace_id, request.capability, started_at),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
 # Deliverable types Hermes cannot currently produce (text engine only).
 _UNAVAILABLE_DELIVERABLE_TYPES = frozenset({"image", "spreadsheet", "presentation", "video", "audio"})
 
@@ -917,8 +882,12 @@ async def run_founder_job(workspace_id: str, request: FounderJobRequest) -> Stre
     The Founder provides only the business objective. No profile, capability,
     skill, SOP, model, or provider selection is required or accepted.
 
-    The CEO profile evaluates the objective, determines the execution path,
-    and returns a structured Founder-ready result.
+    Routing (deterministic — no LLM involved):
+      1. CapabilityRegistry.match() checks skill keywords against the objective.
+      2. If an executable capability is matched, its workflow_executor is invoked.
+         The CEO then reviews and frames the result for the Founder.
+      3. If no executable capability matches, the objective passes straight to
+         the CEO profile (existing fallback — unchanged behaviour).
     """
     _hermes_service.validate_workspace(workspace_id)
 
@@ -937,7 +906,23 @@ async def run_founder_job(workspace_id: str, request: FounderJobRequest) -> Stre
             },
         )
 
+    # Build the enriched objective string that carries all Founder metadata.
+    prompt_parts = [f"Business Objective: {request.objective}"]
+    if request.title:
+        prompt_parts.append(f"Job Title: {request.title}")
+    if request.deliverable_type:
+        prompt_parts.append(f"Expected Deliverable: {request.deliverable_type}")
+    if request.priority and request.priority != "normal":
+        prompt_parts.append(f"Priority: {request.priority}")
+    objective = "\n".join(prompt_parts)
+
+    # Deterministic capability match — used for job metadata only (no LLM).
+    matched_cap = _founder_job_router.find_executable_capability(objective, workspace_id)
+    capability_label = matched_cap.id if matched_cap else "ceo"
+
     extra_fields: dict = {"profile_id": "ceo"}
+    if matched_cap:
+        extra_fields["capability"] = matched_cap.id
     if request.title:
         extra_fields["title"] = request.title
     if request.objective:
@@ -946,16 +931,6 @@ async def run_founder_job(workspace_id: str, request: FounderJobRequest) -> Stre
         extra_fields["deliverable_type"] = request.deliverable_type
     if request.priority:
         extra_fields["priority"] = request.priority
-
-    # Build the CEO prompt from the Founder's objective.
-    prompt_parts = [f"Business Objective: {request.objective}"]
-    if request.title:
-        prompt_parts.append(f"Job Title: {request.title}")
-    if request.deliverable_type:
-        prompt_parts.append(f"Expected Deliverable: {request.deliverable_type}")
-    if request.priority and request.priority != "normal":
-        prompt_parts.append(f"Priority: {request.priority}")
-    prompt = "\n".join(prompt_parts)
 
     job_id = generate_job_id(_job_store.jobs_dir(workspace_id))
     started_at = datetime.now(timezone.utc)
@@ -967,24 +942,20 @@ async def run_founder_job(workspace_id: str, request: FounderJobRequest) -> Stre
         status="running",
         started_at=started_at,
         finished_at=started_at,
-        completed_steps=["ceo"],
+        completed_steps=[capability_label],
         generated_output=None,
         created_at=started_at,
         updated_at=started_at,
         extra_fields=extra_fields,
     ))
 
-    messages = [ChatMessage(role="user", content=prompt)]
-    tokens = _hermes_service.stream_chat(
-        messages,
-        workspace_id=workspace_id,
-        profile_id="ceo",
-    )
+    tokens = _founder_job_router.route(objective, workspace_id)
     return StreamingResponse(
-        _sse_job_stream(tokens, job_id, workspace_id, "ceo", started_at, extra_fields),
+        _sse_job_stream(tokens, job_id, workspace_id, capability_label, started_at, extra_fields),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
 
 
 _VALID_JOB_DECISIONS = frozenset({"approved", "changes_requested", "rejected"})

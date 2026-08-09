@@ -223,6 +223,110 @@ def test_chat_defaults_to_streaming():
     service.stream_chat.assert_called_once()
 
 
+# -- Chat → FounderJobRouter intercept (capability routing from WebUI) ------
+
+
+def test_chat_routes_to_founder_job_router_when_capability_matches():
+    """The /chat endpoint must route through FounderJobRouter when a capability matches."""
+    from hermes.models.capability import Capability
+
+    service = _mock_hermes_service(["should not be called"])
+
+    fake_cap = Capability(
+        id="competitor.intelligence",
+        name="Competitor Intelligence",
+        version="1.0",
+        provides=[],
+        keywords=["competitor"],
+        workflow_executor="hermes.workflows.competitor_intelligence_workflow.execute_from_objective",
+    )
+    mock_router = MagicMock()
+    mock_router.find_executable_capability.return_value = fake_cap
+    mock_router.route.return_value = iter(["CI report"])
+
+    with patch("hermes.gateway.app._hermes_service", service), \
+         patch("hermes.gateway.app._founder_job_router", mock_router):
+        resp = client.post(
+            f"{WS_PREFIX}/chat",
+            json={"messages": [{"role": "user", "content": "Research Notion as a competitor"}]},
+        )
+
+    assert resp.status_code == 200
+    mock_router.route.assert_called_once()
+    service.stream_chat.assert_not_called()
+
+
+def test_chat_passes_last_user_message_to_router():
+    """The router receives only the last user message, not the full history."""
+    from hermes.models.capability import Capability
+
+    service = _mock_hermes_service(["noop"])
+
+    fake_cap = Capability(
+        id="competitor.intelligence",
+        name="Competitor Intelligence",
+        version="1.0",
+        provides=[],
+        keywords=["competitor"],
+        workflow_executor="hermes.workflows.competitor_intelligence_workflow.execute_from_objective",
+    )
+    mock_router = MagicMock()
+    mock_router.find_executable_capability.return_value = fake_cap
+    mock_router.route.return_value = iter(["Report"])
+
+    messages = [
+        {"role": "user", "content": "Hi"},
+        {"role": "assistant", "content": "Hello"},
+        {"role": "user", "content": "Research Notion as a competitor"},
+    ]
+
+    with patch("hermes.gateway.app._hermes_service", service), \
+         patch("hermes.gateway.app._founder_job_router", mock_router):
+        client.post(f"{WS_PREFIX}/chat", json={"messages": messages})
+
+    objective = mock_router.find_executable_capability.call_args[0][0]
+    assert objective == "Research Notion as a competitor"
+
+
+def test_chat_falls_back_to_ceo_when_no_capability_matches():
+    """When FounderJobRouter finds no executable capability, /chat falls through to CEO."""
+    service = _mock_hermes_service(["CEO response"])
+
+    mock_router = MagicMock()
+    mock_router.find_executable_capability.return_value = None
+
+    with patch("hermes.gateway.app._hermes_service", service), \
+         patch("hermes.gateway.app._founder_job_router", mock_router):
+        resp = client.post(
+            f"{WS_PREFIX}/chat",
+            json={"messages": [{"role": "user", "content": "Write a board update"}]},
+        )
+
+    assert resp.status_code == 200
+    service.stream_chat.assert_called_once()
+    assert service.stream_chat.call_args[1]["profile_id"] == "ceo"
+
+
+def test_chat_bypasses_router_for_non_ceo_profile():
+    """When an explicit non-CEO profile is requested, FounderJobRouter is not consulted."""
+    service = _mock_hermes_service(["developer response"])
+
+    mock_router = MagicMock()
+
+    with patch("hermes.gateway.app._hermes_service", service), \
+         patch("hermes.gateway.app._founder_job_router", mock_router):
+        client.post(
+            f"{WS_PREFIX}/chat",
+            json={
+                "messages": [{"role": "user", "content": "Research Notion as a competitor"}],
+                "profile": "developer",
+            },
+        )
+
+    mock_router.find_executable_capability.assert_not_called()
+    service.stream_chat.assert_called_once()
+
+
 # -- Non-streaming fallback ------------------------------------------------
 
 
@@ -2707,3 +2811,141 @@ def test_get_context_repository_type_returns_200():
     data = resp.json()
     assert data["object_type"] == "repository"
     assert len(data["capabilities"]) == 1
+
+
+# -- FounderJobRouter gateway integration ------------------------------------
+# The /competitor-intelligence endpoint is removed; capability routing now
+# flows through /jobs/run/founder → FounderJobRouter.
+
+
+def test_competitor_intelligence_endpoint_removed():
+    """The old /competitor-intelligence endpoint must no longer exist (404 or 405)."""
+    resp = client.post(
+        f"{WS_PREFIX}/competitor-intelligence",
+        json={"competitor_name": "Acme"},
+    )
+    # 404 when no static file mount; 405 when static handler catches the path —
+    # either confirms the POST endpoint is gone.
+    assert resp.status_code in (404, 405)
+
+
+def test_founder_job_routes_via_router_for_ci_objective():
+    """When the objective matches competitor.intelligence, FounderJobRouter.route() is used."""
+    service = MagicMock()
+    service.validate_workspace.return_value = None
+
+    mock_router = MagicMock()
+    mock_router.find_executable_capability.return_value = None
+    mock_router.route.return_value = iter(["Report text"])
+
+    with patch("hermes.gateway.app._hermes_service", service), \
+         patch("hermes.gateway.app._founder_job_router", mock_router), \
+         patch("hermes.gateway.app._job_store") as mock_store, \
+         patch("hermes.gateway.app.generate_job_id", return_value="job-r-001"):
+        mock_store.jobs_dir.return_value = "/tmp/jobs"
+        mock_store.save.return_value = None
+
+        resp = client.post(
+            f"{WS_PREFIX}/jobs/run/founder",
+            json={"objective": "Research competitor Acme"},
+        )
+
+    assert resp.status_code == 200
+    mock_router.route.assert_called_once()
+    objective_arg = mock_router.route.call_args[0][0]
+    assert "Acme" in objective_arg
+
+
+def test_founder_job_router_capability_in_extra_fields():
+    """When a capability is matched, its ID is recorded in job extra_fields."""
+    from hermes.models.capability import Capability
+
+    service = MagicMock()
+    service.validate_workspace.return_value = None
+
+    fake_cap = Capability(
+        id="competitor.intelligence",
+        name="Competitor Intelligence",
+        version="1.0",
+        provides=[],
+        keywords=["competitor"],
+        workflow_executor="hermes.workflows.competitor_intelligence_workflow.execute_from_objective",
+    )
+
+    mock_router = MagicMock()
+    mock_router.find_executable_capability.return_value = fake_cap
+    mock_router.route.return_value = iter(["Report"])
+
+    saved_jobs = []
+
+    with patch("hermes.gateway.app._hermes_service", service), \
+         patch("hermes.gateway.app._founder_job_router", mock_router), \
+         patch("hermes.gateway.app._job_store") as mock_store, \
+         patch("hermes.gateway.app.generate_job_id", return_value="job-r-002"):
+        mock_store.jobs_dir.return_value = "/tmp/jobs"
+        mock_store.save.side_effect = lambda j: saved_jobs.append(j)
+
+        client.post(
+            f"{WS_PREFIX}/jobs/run/founder",
+            json={"objective": "Research competitor Acme"},
+        )
+
+    assert len(saved_jobs) >= 1
+    running_job = saved_jobs[0]
+    assert running_job.extra_fields.get("capability") == "competitor.intelligence"
+
+
+def test_founder_job_ceo_only_when_no_capability_matched():
+    """When no executable capability matches, the job is labelled 'ceo' in extra_fields."""
+    service = MagicMock()
+    service.validate_workspace.return_value = None
+
+    mock_router = MagicMock()
+    mock_router.find_executable_capability.return_value = None  # no match
+    mock_router.route.return_value = iter(["CEO response"])
+
+    saved_jobs = []
+
+    with patch("hermes.gateway.app._hermes_service", service), \
+         patch("hermes.gateway.app._founder_job_router", mock_router), \
+         patch("hermes.gateway.app._job_store") as mock_store, \
+         patch("hermes.gateway.app.generate_job_id", return_value="job-r-003"):
+        mock_store.jobs_dir.return_value = "/tmp/jobs"
+        mock_store.save.side_effect = lambda j: saved_jobs.append(j)
+
+        client.post(
+            f"{WS_PREFIX}/jobs/run/founder",
+            json={"objective": "Write a board update"},
+        )
+
+    running_job = saved_jobs[0]
+    assert running_job.extra_fields.get("capability") is None
+    assert "competitor.intelligence" not in running_job.extra_fields.values()
+
+
+def test_founder_job_streams_sse_via_router():
+    """Tokens yielded by FounderJobRouter.route() are delivered as SSE frames."""
+    service = MagicMock()
+    service.validate_workspace.return_value = None
+
+    mock_router = MagicMock()
+    mock_router.find_executable_capability.return_value = None
+    mock_router.route.return_value = iter(["Hello ", "world"])
+
+    with patch("hermes.gateway.app._hermes_service", service), \
+         patch("hermes.gateway.app._founder_job_router", mock_router), \
+         patch("hermes.gateway.app._job_store") as mock_store, \
+         patch("hermes.gateway.app.generate_job_id", return_value="job-r-004"):
+        mock_store.jobs_dir.return_value = "/tmp/jobs"
+        mock_store.save.return_value = None
+
+        resp = client.post(
+            f"{WS_PREFIX}/jobs/run/founder",
+            json={"objective": "Summarise the week"},
+        )
+
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    data_lines = [l for l in resp.text.strip().split("\n") if l.startswith("data: ")]
+    assert data_lines[-1] == "data: [DONE]"
+    all_content = " ".join(data_lines)
+    assert "Hello" in all_content or "world" in all_content

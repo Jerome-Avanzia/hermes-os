@@ -153,6 +153,7 @@ class CapabilityRegistry:
             department_id=manifest.get("department_id", ""),
             depends_on=manifest.get("depends_on", []),
             repository_refs=manifest.get("repository_refs", []),
+            workflow_executor=manifest.get("workflow_executor") or None,
         )
 
     @staticmethod
