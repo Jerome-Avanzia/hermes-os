@@ -1377,19 +1377,18 @@ def test_ui_jobs_view_has_back_button():
 def test_ui_jobs_view_has_operation_link():
     resp = client.get("/")
     assert "navigateToOperation" in resp.text
-    assert "job-view-op" in resp.text
 
 
 def test_ui_jobs_view_has_output_section():
     resp = client.get("/")
-    assert "Generated Output" in resp.text
-    assert "completed without generated output" in resp.text
+    assert "Result" in resp.text
+    assert "No output was produced for this job." in resp.text
 
 
 def test_ui_jobs_view_has_diagnostics_section():
     resp = client.get("/")
-    assert "job-diag-toggle" in resp.text
-    assert "job-diag-content" in resp.text
+    assert "job-tech-toggle" in resp.text
+    assert "job-tech-content" in resp.text
 
 
 def test_ui_jobs_view_has_empty_state():
@@ -1409,9 +1408,9 @@ def test_ui_jobs_view_sorts_by_most_recent():
 
 
 def test_ui_jobs_view_has_no_diagnostics_fallback():
-    """When diagnostics data is absent, show 'No diagnostics recorded.'"""
+    """Technical Details section is present in job detail."""
     resp = client.get("/")
-    assert "No diagnostics recorded." in resp.text
+    assert "Technical Details" in resp.text
 
 
 def test_ui_jobs_view_handles_parent_op_not_found():

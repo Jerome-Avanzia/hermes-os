@@ -2128,8 +2128,18 @@ class HermesService:
             "created_at": j.created_at.isoformat(),
             "updated_at": j.updated_at.isoformat(),
         }
+        # Expose founder-facing fields stored in extra_fields.
+        _founder_fields = (
+            "title", "objective", "deliverable_type", "priority", "profile_id",
+            "founder_decision", "founder_notes", "founder_decided_at",
+        )
+        for key in _founder_fields:
+            if key in j.extra_fields:
+                data[key] = j.extra_fields[key]
         if include_output:
             data["generated_output"] = j.generated_output
+            if j.extra_fields.get("diagnostics"):
+                data["diagnostics"] = j.extra_fields["diagnostics"]
         return data
 
     # -- CEO Review & Dashboard ------------------------------------------------

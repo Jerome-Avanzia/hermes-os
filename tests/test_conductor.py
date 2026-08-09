@@ -45,7 +45,7 @@ def test_uses_default_profile_when_none_specified():
     call_messages = mock.call_args[0][0]
     # Default profile system prompt should be prepended
     assert call_messages[0].role == "system"
-    assert "Hermes" in call_messages[0].content
+    assert "professional assistant" in call_messages[0].content
 
 
 def test_uses_specified_profile():
@@ -332,4 +332,4 @@ def test_stream_chat_with_context_without_profile_uses_default():
 
     call_messages = mock.call_args[0][0]
     assert call_messages[0].role == "system"
-    assert "Hermes" in call_messages[0].content
+    assert "professional assistant" in call_messages[0].content

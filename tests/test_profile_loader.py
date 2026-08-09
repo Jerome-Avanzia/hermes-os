@@ -34,7 +34,7 @@ def test_get_by_id():
     loader = ProfileLoader(profiles_dir=PROFILES_DIR)
     profile = loader.get("developer")
     assert profile.id == "developer"
-    assert profile.name == "Hermes Developer"
+    assert profile.name == "Software Engineer"
     assert "technical" in profile.system_prompt.lower()
 
 

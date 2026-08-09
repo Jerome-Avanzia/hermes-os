@@ -4888,10 +4888,16 @@
     } else {
       for (var i = 0; i < filtered.length; i++) {
         var j = filtered[i];
+        var jTitle = j.title || ("Job " + j.id);
+        var jMeta = [];
+        if (j.profile_id) jMeta.push(esc(j.profile_id));
+        if (j.deliverable_type) jMeta.push(esc(j.deliverable_type));
+        jMeta.push(formatDuration(j.started_at, j.finished_at));
+        if (j.founder_decision) jMeta.push('<span style="color:' + (j.founder_decision === "approved" ? "#6ee7b7" : j.founder_decision === "rejected" ? "#fca5a5" : "#fcd34d") + '">' + esc(j.founder_decision.replace("_", " ")) + '</span>');
         html += '<div class="list-item" data-job-id="' + esc(j.id) + '">';
         html += '  <div class="list-item-main">';
-        html += '    <div class="list-item-title">' + esc(j.id) + '</div>';
-        html += '    <div class="list-item-meta">' + esc(j.operation_id) + ' &middot; ' + (j.completed_steps || []).join(", ") + ' &middot; ' + formatDuration(j.started_at, j.finished_at) + '</div>';
+        html += '    <div class="list-item-title">' + esc(jTitle) + '</div>';
+        html += '    <div class="list-item-meta">' + jMeta.join(" &middot; ") + '</div>';
         html += '  </div>';
         html += '  <span class="status-badge ' + esc(j.status) + '">' + formatStatus(j.status) + '</span>';
         html += '</div>';
@@ -4965,61 +4971,90 @@
   }
 
   function renderJobDetail(job) {
+    // ── Header: title or job ID, status badge ──────────
+    var displayTitle = job.title || ("Job " + job.id);
     var html = '<div class="detail-header">';
-    html += '  <div class="detail-title">' + esc(job.id) + '</div>';
-    html += '  <div class="detail-meta"><span class="job-parent-op" data-op="' + esc(job.operation_id) + '" style="cursor:pointer;color:var(--accent)">' + esc(job.operation_id) + '</span> &middot; <span class="status-badge ' + esc(job.status) + '">' + formatStatus(job.status) + '</span></div>';
+    html += '  <div class="detail-title">' + esc(displayTitle) + '</div>';
+    html += '  <div class="detail-meta"><span class="status-badge ' + esc(job.status) + '">' + formatStatus(job.status) + '</span>';
+    if (job.priority && job.priority !== "normal") html += ' &middot; <span style="color:var(--text-muted);font-size:11px">' + esc(job.priority) + ' priority</span>';
+    html += '</div>';
     html += '</div>';
 
     html += '<div class="detail-actions">';
     html += '  <button class="detail-btn" id="job-back">Back</button>';
-    html += '  <button class="detail-btn accent" id="job-view-op">View Operation</button>';
     html += '</div>';
 
-    // Timeline
-    html += '<div class="detail-section">';
-    html += '  <div class="detail-section-title">Timeline</div>';
-    html += '  <div class="list-item-meta">Started: ' + formatDate(job.started_at) + '</div>';
-    html += '  <div class="list-item-meta">Finished: ' + formatDate(job.finished_at) + '</div>';
-    html += '  <div class="list-item-meta">Duration: ' + formatDuration(job.started_at, job.finished_at) + '</div>';
-    html += '</div>';
+    // ── Objective ──────────────────────────────────────
+    if (job.objective || job.deliverable_type) {
+      html += '<div class="detail-section">';
+      html += '  <div class="detail-section-title">Objective</div>';
+      if (job.objective) {
+        html += '  <div class="detail-content" style="white-space:pre-wrap;font-size:13px;line-height:1.6;">' + esc(job.objective) + '</div>';
+      }
+      if (job.deliverable_type) {
+        html += '  <div class="list-item-meta" style="margin-top:6px">Expected deliverable: <strong style="color:var(--text)">' + esc(job.deliverable_type) + '</strong></div>';
+      }
+      html += '</div>';
+    }
 
-    // Generated Output
+    // ── CEO Result ─────────────────────────────────────
     html += '<div class="detail-section">';
-    html += '  <div class="detail-section-title">Generated Output</div>';
-    if (job.generated_output) {
-      html += '  <div class="detail-content">' + esc(job.generated_output) + '</div>';
+    html += '  <div class="detail-section-title">Result</div>';
+    if (job.status === "running") {
+      html += '  <div class="list-item-meta" style="color:var(--accent)">CEO is working on this job…</div>';
+    } else if (job.generated_output) {
+      html += '  <div style="white-space:pre-wrap;font-size:13px;line-height:1.75;color:var(--text);padding:14px 0;">' + esc(job.generated_output) + '</div>';
     } else {
-      html += '  <div class="list-empty">This Job completed without generated output.</div>';
+      html += '  <div class="list-empty">No output was produced for this job.</div>';
     }
     html += '</div>';
 
-    // Completed Steps
-    html += '<div class="detail-section">';
-    html += '  <div class="detail-section-title">Completed Steps</div>';
-    if (job.completed_steps && job.completed_steps.length > 0) {
-      html += '  <div class="list-item-meta">' + job.completed_steps.map(function (s) { return esc(s); }).join(" &rarr; ") + '</div>';
-    } else {
-      html += '  <div class="list-empty">No steps recorded.</div>';
-    }
-    html += '</div>';
-
-    // Diagnostics (only if data exists — Founder amendment 1)
-    html += '<div class="detail-section">';
-    html += '  <div class="detail-section-title" id="job-diag-toggle" style="cursor:pointer">Diagnostics <span id="job-diag-arrow" style="font-size:8px">&#9654;</span></div>';
-    if (job.diagnostics) {
-      html += '  <div id="job-diag-content" style="display:none">';
-      var d = job.diagnostics;
-      if (d.project_id) html += '    <div class="list-item-meta">Project: ' + esc(d.project_id) + '</div>';
-      if (d.knowledge_documents && d.knowledge_documents.length > 0) html += '    <div class="list-item-meta">Knowledge: ' + d.knowledge_documents.map(function (k) { return esc(k); }).join(", ") + '</div>';
-      if (d.files_scanned !== undefined) html += '    <div class="list-item-meta">Files scanned: ' + d.files_scanned + '</div>';
-      if (d.files_selected && d.files_selected.length > 0) html += '    <div class="list-item-meta">Files selected: ' + d.files_selected.length + '</div>';
-      if (d.files_read !== undefined) html += '    <div class="list-item-meta">Files read: ' + d.files_read + '</div>';
-      if (d.chars_read !== undefined) html += '    <div class="list-item-meta">Chars read: ' + d.chars_read + (d.chars_truncated ? ' (' + d.chars_truncated + ' truncated)' : '') + '</div>';
-      if (d.prompt_chars !== undefined) html += '    <div class="list-item-meta">Prompt size: ' + d.prompt_chars + ' chars</div>';
+    // ── Founder Decision ───────────────────────────────
+    html += '<div class="detail-section" id="job-decision-section">';
+    html += '  <div class="detail-section-title">Founder Decision</div>';
+    if (job.founder_decision) {
+      var decisionColors = { approved: "#6ee7b7", changes_requested: "#fcd34d", rejected: "#fca5a5" };
+      var decisionLabels = { approved: "Approved", changes_requested: "Changes Requested", rejected: "Rejected" };
+      var dc = decisionColors[job.founder_decision] || "var(--text-muted)";
+      var dl = decisionLabels[job.founder_decision] || job.founder_decision;
+      html += '  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">';
+      html += '    <span style="font-size:13px;font-weight:600;color:' + dc + '">' + esc(dl) + '</span>';
+      if (job.founder_decided_at) html += '    <span style="font-size:11px;color:var(--text-dim)">' + formatDate(job.founder_decided_at) + '</span>';
+      html += '  </div>';
+      if (job.founder_notes) html += '  <div style="font-size:12px;color:var(--text-muted);white-space:pre-wrap;margin-top:4px;">' + esc(job.founder_notes) + '</div>';
+    } else if (job.status === "completed") {
+      html += '  <div style="display:flex;flex-direction:column;gap:10px;">';
+      html += '    <div style="display:flex;gap:8px;flex-wrap:wrap;">';
+      html += '      <button id="jd-approve" style="padding:7px 18px;font-size:12px;font-weight:600;background:#6ee7b7;color:#0a0e14;border:none;border-radius:4px;cursor:pointer;font-family:inherit;">Approve</button>';
+      html += '      <button id="jd-changes" style="padding:7px 18px;font-size:12px;font-weight:600;background:#fcd34d;color:#0a0e14;border:none;border-radius:4px;cursor:pointer;font-family:inherit;">Request Changes</button>';
+      html += '      <button id="jd-reject" style="padding:7px 18px;font-size:12px;font-weight:600;background:var(--surface);color:var(--red);border:1px solid var(--red);border-radius:4px;cursor:pointer;font-family:inherit;">Reject</button>';
+      html += '    </div>';
+      html += '    <textarea id="jd-notes" rows="2" placeholder="Optional notes for the CEO…" style="width:100%;max-width:480px;padding:7px 10px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;font-family:inherit;resize:vertical;"></textarea>';
+      html += '    <div id="jd-status" style="font-size:11px;color:var(--text-muted);min-height:14px;"></div>';
       html += '  </div>';
     } else {
-      html += '  <div class="list-empty">No diagnostics recorded.</div>';
+      html += '  <div class="list-empty">Decision available once the job is complete.</div>';
     }
+    html += '</div>';
+
+    // ── Technical details (collapsible) ───────────────
+    html += '<div class="detail-section">';
+    html += '  <div class="detail-section-title" id="job-tech-toggle" style="cursor:pointer;user-select:none;">Technical Details <span id="job-tech-arrow" style="font-size:8px">&#9654;</span></div>';
+    html += '  <div id="job-tech-content" style="display:none;margin-top:8px;">';
+    html += '    <div class="list-item-meta">Job ID: ' + esc(job.id) + '</div>';
+    html += '    <div class="list-item-meta">Started: ' + formatDate(job.started_at) + '</div>';
+    html += '    <div class="list-item-meta">Finished: ' + formatDate(job.finished_at) + '</div>';
+    html += '    <div class="list-item-meta">Duration: ' + formatDuration(job.started_at, job.finished_at) + '</div>';
+    if (job.profile_id) html += '    <div class="list-item-meta">Executed by: ' + esc(job.profile_id) + '</div>';
+    if (job.completed_steps && job.completed_steps.length > 0) {
+      html += '    <div class="list-item-meta">Steps: ' + job.completed_steps.map(function (s) { return esc(s); }).join(" → ") + '</div>';
+    }
+    if (job.diagnostics) {
+      var d = job.diagnostics;
+      if (d.project_id) html += '    <div class="list-item-meta">Project: ' + esc(d.project_id) + '</div>';
+      if (d.prompt_chars !== undefined) html += '    <div class="list-item-meta">Prompt size: ' + d.prompt_chars + ' chars</div>';
+    }
+    html += '  </div>';
     html += '</div>';
 
     jobsDetailEl.innerHTML = html;
@@ -5028,31 +5063,52 @@
       loadJobs();
     });
 
-    document.getElementById("job-view-op").addEventListener("click", function () {
-      navigateToOperation(job.operation_id);
+    // Technical details toggle
+    document.getElementById("job-tech-toggle").addEventListener("click", function () {
+      var content = document.getElementById("job-tech-content");
+      var arrow = document.getElementById("job-tech-arrow");
+      if (content.style.display === "none") {
+        content.style.display = "block";
+        arrow.innerHTML = "&#9660;";
+      } else {
+        content.style.display = "none";
+        arrow.innerHTML = "&#9654;";
+      }
     });
 
-    // Parent Operation link in header
-    var parentLink = jobsDetailEl.querySelector(".job-parent-op");
-    if (parentLink) {
-      parentLink.addEventListener("click", function () {
-        navigateToOperation(parentLink.dataset.op);
-      });
-    }
+    // Decision buttons (only wired when no decision yet and job is complete)
+    if (!job.founder_decision && job.status === "completed") {
+      function submitDecision(action) {
+        var notes = (document.getElementById("jd-notes").value || "").trim();
+        var statusEl = document.getElementById("jd-status");
+        statusEl.textContent = "Saving…";
+        statusEl.style.color = "var(--text-muted)";
+        ["jd-approve", "jd-changes", "jd-reject"].forEach(function (id) {
+          var btn = document.getElementById(id);
+          if (btn) btn.disabled = true;
+        });
+        fetch(wsBase() + "/jobs/" + encodeURIComponent(job.id) + "/decision", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: action, notes: notes }),
+        })
+        .then(function (r) { return r.ok ? r.json() : r.json().then(function (b) { throw new Error(b.error || "Error"); }); })
+        .then(function () {
+          openJob(job.id); // reload detail with decision shown
+        })
+        .catch(function (err) {
+          statusEl.textContent = "Error: " + err.message;
+          statusEl.style.color = "var(--red)";
+          ["jd-approve", "jd-changes", "jd-reject"].forEach(function (id) {
+            var btn = document.getElementById(id);
+            if (btn) btn.disabled = false;
+          });
+        });
+      }
 
-    // Diagnostics toggle (only if diagnostics exist)
-    if (job.diagnostics) {
-      document.getElementById("job-diag-toggle").addEventListener("click", function () {
-        var content = document.getElementById("job-diag-content");
-        var arrow = document.getElementById("job-diag-arrow");
-        if (content.style.display === "none") {
-          content.style.display = "block";
-          arrow.innerHTML = "&#9660;";
-        } else {
-          content.style.display = "none";
-          arrow.innerHTML = "&#9654;";
-        }
-      });
+      document.getElementById("jd-approve").addEventListener("click", function () { submitDecision("approved"); });
+      document.getElementById("jd-changes").addEventListener("click", function () { submitDecision("changes_requested"); });
+      document.getElementById("jd-reject").addEventListener("click", function () { submitDecision("rejected"); });
     }
   }
 
@@ -5089,30 +5145,84 @@
       });
   }
 
-  // ── Job Run Panel ──────────────────────────────────
+  // ── Job Run Panel (Founder → CEO) ─────────────────
+
+  var INPUT_STYLE = "width:100%;padding:8px 10px;font-size:13px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:5px;font-family:inherit;outline:none;";
+  var LABEL_STYLE = "display:block;font-size:11px;color:var(--text-muted);margin-bottom:5px;font-weight:500;letter-spacing:0.02em;";
+  var FIELD_STYLE = "display:flex;flex-direction:column;";
 
   function openJobRunPanel() {
     jobsListEl.style.display = "none";
     jobsDetailEl.style.display = "none";
     jobRunPanelEl.style.display = "flex";
     jobRunPanelEl.style.flexDirection = "column";
-    jobRunPanelEl.style.padding = "24px";
-    jobRunPanelEl.style.gap = "14px";
+    jobRunPanelEl.style.padding = "24px 28px";
+    jobRunPanelEl.style.gap = "0";
     jobRunPanelEl.style.flex = "1";
     jobRunPanelEl.style.overflowY = "auto";
 
     jobRunPanelEl.innerHTML = [
-      '<div style="display:flex;align-items:center;gap:12px;">',
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">',
       '  <button id="jr-back" style="padding:4px 10px;font-size:11px;background:var(--surface);color:var(--text-muted);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-family:inherit;">← Back</button>',
-      '  <div style="font-size:15px;font-weight:600;color:var(--text);">New Job</div>',
+      '  <div style="font-size:16px;font-weight:600;color:var(--text);">New Job</div>',
       '</div>',
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">',
-      '  <select id="jr-profile" style="padding:5px 8px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;font-family:inherit;cursor:pointer;"><option>Loading...</option></select>',
-      '  <select id="jr-cap" style="padding:5px 8px;font-size:12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:4px;font-family:inherit;cursor:pointer;min-width:220px;"><option>Loading...</option></select>',
-      '  <button id="jr-run" style="padding:5px 14px;font-size:12px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-family:inherit;font-weight:500;">Run Job</button>',
+
+      '<div style="max-width:580px;display:flex;flex-direction:column;gap:16px;">',
+
+      '  <div style="' + FIELD_STYLE + '">',
+      '    <label style="' + LABEL_STYLE + '">Job Title <span style="color:var(--text-dim)">(optional)</span></label>',
+      '    <input id="jr-title" type="text" placeholder="e.g. AVANZIA Brand Identity" style="' + INPUT_STYLE + '" />',
+      '  </div>',
+
+      '  <div style="' + FIELD_STYLE + '">',
+      '    <label style="' + LABEL_STYLE + '">Objective <span style="color:var(--red)">*</span></label>',
+      '    <textarea id="jr-objective" rows="5" placeholder="Describe what you want to accomplish in plain language. The CEO will determine how to execute it." style="' + INPUT_STYLE + 'resize:vertical;line-height:1.6;"></textarea>',
+      '  </div>',
+
+      '  <div style="display:flex;gap:12px;flex-wrap:wrap;">',
+
+      '    <div style="' + FIELD_STYLE + 'flex:1;min-width:180px;">',
+      '      <label style="' + LABEL_STYLE + '">Expected Deliverable <span style="color:var(--text-dim)">(optional)</span></label>',
+      '      <select id="jr-deliverable" style="' + INPUT_STYLE + 'cursor:pointer;">',
+      '        <option value="">Not specified</option>',
+      '        <option value="document">Document</option>',
+      '        <option value="analysis">Analysis</option>',
+      '        <option value="plan">Plan</option>',
+      '        <option value="report">Report</option>',
+      '        <option value="strategy">Strategy</option>',
+      '        <option value="brief">Brief</option>',
+      '        <option value="code">Code</option>',
+      '        <option value="specification">Specification</option>',
+      '        <option value="outline">Outline</option>',
+      '        <option value="image">Image</option>',
+      '        <option value="spreadsheet">Spreadsheet</option>',
+      '        <option value="presentation">Presentation</option>',
+      '      </select>',
+      '    </div>',
+
+      '    <div style="' + FIELD_STYLE + 'flex:1;min-width:140px;">',
+      '      <label style="' + LABEL_STYLE + '">Priority</label>',
+      '      <select id="jr-priority" style="' + INPUT_STYLE + 'cursor:pointer;">',
+      '        <option value="normal">Normal</option>',
+      '        <option value="high">High</option>',
+      '        <option value="critical">Critical</option>',
+      '        <option value="low">Low</option>',
+      '      </select>',
+      '    </div>',
+
+      '  </div>',
+
+      '  <div style="padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:5px;font-size:11px;color:var(--text-muted);line-height:1.5;">',
+      '    The CEO will receive this objective and determine the appropriate execution path.',
+      '    You do not need to select an employee, capability, or tool.',
+      '  </div>',
+
+      '  <button id="jr-run" style="padding:9px 20px;font-size:13px;font-weight:600;background:var(--accent);color:#0a0e14;border:none;border-radius:5px;cursor:pointer;font-family:inherit;align-self:flex-start;">Submit to CEO</button>',
+
       '</div>',
-      '<div id="jr-meta" style="font-size:11px;color:var(--text-muted);min-height:16px;"></div>',
-      '<div id="jr-output" style="display:none;flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:16px;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-y:auto;min-height:300px;color:var(--text);font-family:inherit;"></div>',
+
+      '<div id="jr-meta" style="margin-top:14px;font-size:11px;color:var(--text-muted);min-height:16px;"></div>',
+      '<div id="jr-output" style="display:none;margin-top:12px;flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:16px 18px;font-size:13px;line-height:1.7;white-space:pre-wrap;overflow-y:auto;min-height:300px;color:var(--text);font-family:inherit;"></div>',
     ].join("");
 
     document.getElementById("jr-back").addEventListener("click", function () {
@@ -5121,75 +5231,47 @@
       loadJobs();
     });
 
-    fetch(wsBase() + "/profiles")
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .then(function (profiles) {
-        var sel = document.getElementById("jr-profile");
-        if (!sel) return;
-        sel.innerHTML = "";
-        profiles.forEach(function (p) {
-          var opt = document.createElement("option");
-          opt.value = p.id;
-          opt.textContent = p.name;
-          sel.appendChild(opt);
-        });
-      })
-      .catch(function () {
-        var sel = document.getElementById("jr-profile");
-        if (sel) sel.innerHTML = "<option value='default'>Default</option>";
-      });
-
-    fetch(wsBase() + "/capabilities")
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .then(function (caps) {
-        var sel = document.getElementById("jr-cap");
-        if (!sel) return;
-        sel.innerHTML = "";
-        if (!caps.length) {
-          sel.innerHTML = "<option value=''>No capabilities found</option>";
-          return;
-        }
-        caps.forEach(function (c) {
-          var opt = document.createElement("option");
-          opt.value = c.id;
-          opt.textContent = (c.name || c.id) + "  [" + c.id + "]";
-          sel.appendChild(opt);
-        });
-      })
-      .catch(function () {
-        var sel = document.getElementById("jr-cap");
-        if (sel) sel.innerHTML = "<option value=''>Error loading capabilities</option>";
-      });
-
     document.getElementById("jr-run").addEventListener("click", function () {
-      var profile = document.getElementById("jr-profile").value;
-      var capability = document.getElementById("jr-cap").value;
-      if (!profile || !capability) return;
-      runJobFromPanel(profile, capability);
+      var objective = (document.getElementById("jr-objective").value || "").trim();
+      if (!objective) {
+        document.getElementById("jr-meta").textContent = "Please enter an objective before submitting.";
+        document.getElementById("jr-meta").style.color = "var(--red)";
+        document.getElementById("jr-objective").focus();
+        return;
+      }
+      document.getElementById("jr-meta").style.color = "var(--text-muted)";
+      var title       = (document.getElementById("jr-title").value || "").trim() || null;
+      var deliverable = document.getElementById("jr-deliverable").value || null;
+      var priority    = document.getElementById("jr-priority").value || "normal";
+      runFounderJob(objective, title, deliverable, priority);
     });
   }
 
-  function runJobFromPanel(profile, capability) {
-    var runBtn  = document.getElementById("jr-run");
-    var metaEl  = document.getElementById("jr-meta");
+  function runFounderJob(objective, title, deliverableType, priority) {
+    var runBtn   = document.getElementById("jr-run");
+    var metaEl   = document.getElementById("jr-meta");
     var outputEl = document.getElementById("jr-output");
     if (!runBtn || !metaEl || !outputEl) return;
 
     runBtn.disabled = true;
-    runBtn.textContent = "Running…";
+    runBtn.textContent = "Submitting…";
     outputEl.style.display = "block";
     outputEl.textContent = "";
-    metaEl.textContent = "Dispatching job…";
+    metaEl.textContent = "Sending objective to CEO…";
 
-    fetch(wsBase() + "/jobs/run", {
+    var body = { objective: objective, priority: priority || "normal" };
+    if (title) body.title = title;
+    if (deliverableType) body.deliverable_type = deliverableType;
+
+    fetch(wsBase() + "/jobs/run/founder", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile: profile, capability: capability }),
+      body: JSON.stringify(body),
     })
     .then(function (resp) {
       if (!resp.ok) {
-        return resp.json().catch(function () { return {}; }).then(function (body) {
-          throw new Error(body.error || "Server returned " + resp.status);
+        return resp.json().catch(function () { return {}; }).then(function (b) {
+          throw new Error(b.error || "Server returned " + resp.status);
         });
       }
       var reader  = resp.body.getReader();
@@ -5202,8 +5284,11 @@
         return reader.read().then(function (result) {
           if (result.done) {
             runBtn.disabled = false;
-            runBtn.textContent = "Run Job";
-            if (jobId) metaEl.textContent = "Job " + jobId + " completed.";
+            runBtn.textContent = "Submit to CEO";
+            if (jobId) {
+              metaEl.textContent = "CEO response received. Click the job to review and decide.";
+              metaEl.style.color = "var(--accent)";
+            }
             return;
           }
           buffer += decoder.decode(result.value, { stream: true });
@@ -5218,7 +5303,7 @@
               if (chunk.error) throw new Error(chunk.error);
               if (chunk.job_id && !jobId) {
                 jobId = chunk.job_id;
-                metaEl.textContent = "Job " + jobId + " running…";
+                metaEl.textContent = "CEO is working…";
               }
               if (chunk.content) {
                 full += chunk.content;
@@ -5228,8 +5313,9 @@
             } catch (e) {
               if (e.message) {
                 metaEl.textContent = "Error: " + e.message;
+                metaEl.style.color = "var(--red)";
                 runBtn.disabled = false;
-                runBtn.textContent = "Run Job";
+                runBtn.textContent = "Submit to CEO";
                 return;
               }
             }
@@ -5241,8 +5327,9 @@
     })
     .catch(function (err) {
       metaEl.textContent = "Error: " + err.message;
+      metaEl.style.color = "var(--red)";
       runBtn.disabled = false;
-      runBtn.textContent = "Run Job";
+      runBtn.textContent = "Submit to CEO";
     });
   }
 

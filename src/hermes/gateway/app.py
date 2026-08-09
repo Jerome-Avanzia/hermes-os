@@ -108,6 +108,23 @@ class DispatchJobRequest(BaseModel):
     capability: str
 
 
+class FounderJobRequest(BaseModel):
+    """Founder-facing job request — no profile, capability, or SOP selection required.
+
+    The CEO profile receives the objective and determines execution internally.
+    """
+    objective: str
+    title: str | None = None
+    deliverable_type: str | None = None
+    priority: str = "normal"
+
+
+class JobDecisionRequest(BaseModel):
+    """Founder decision on a completed Job result."""
+    action: str  # "approved" | "changes_requested" | "rejected"
+    notes: str = ""
+
+
 # -- Application singletons ------------------------------------------------
 
 
@@ -188,9 +205,11 @@ def _sse_job_stream(
     workspace_id: str,
     capability: str,
     started_at: datetime,
+    extra_fields: dict | None = None,
 ) -> Iterator[str]:
     """Wrap token chunks as SSE frames and persist the Job record on completion."""
     yield f"data: {json.dumps({'job_id': job_id, 'status': 'running'})}\n\n"
+    ef = dict(extra_fields or {})
     output: list[str] = []
     try:
         for token in tokens:
@@ -208,6 +227,7 @@ def _sse_job_stream(
             generated_output="".join(output),
             created_at=started_at,
             updated_at=finished,
+            extra_fields=ef,
         ))
     except Exception as exc:
         logger.error("Job stream error for %s: %s", job_id, exc)
@@ -224,6 +244,7 @@ def _sse_job_stream(
             generated_output=None,
             created_at=started_at,
             updated_at=now,
+            extra_fields=ef,
         ))
     yield "data: [DONE]\n\n"
 
@@ -883,6 +904,130 @@ async def run_job(workspace_id: str, request: DispatchJobRequest) -> StreamingRe
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# Deliverable types Hermes cannot currently produce (text engine only).
+_UNAVAILABLE_DELIVERABLE_TYPES = frozenset({"image", "spreadsheet", "presentation", "video", "audio"})
+
+
+@app.post("/v1/workspaces/{workspace_id}/jobs/run/founder")
+async def run_founder_job(workspace_id: str, request: FounderJobRequest) -> StreamingResponse:
+    """Founder entry point — submit a business objective to the CEO.
+
+    The Founder provides only the business objective. No profile, capability,
+    skill, SOP, model, or provider selection is required or accepted.
+
+    The CEO profile evaluates the objective, determines the execution path,
+    and returns a structured Founder-ready result.
+    """
+    _hermes_service.validate_workspace(workspace_id)
+
+    if request.deliverable_type and request.deliverable_type in _UNAVAILABLE_DELIVERABLE_TYPES:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": (
+                    f"Tool unavailable — Hermes cannot currently produce a "
+                    f"'{request.deliverable_type}' deliverable. "
+                    f"Hermes is a text engine. Supported deliverable types: "
+                    f"document, analysis, plan, report, code, strategy, brief, "
+                    f"specification, review, recommendation, summary, policy, "
+                    f"script, copy, outline."
+                )
+            },
+        )
+
+    extra_fields: dict = {"profile_id": "ceo"}
+    if request.title:
+        extra_fields["title"] = request.title
+    if request.objective:
+        extra_fields["objective"] = request.objective
+    if request.deliverable_type:
+        extra_fields["deliverable_type"] = request.deliverable_type
+    if request.priority:
+        extra_fields["priority"] = request.priority
+
+    # Build the CEO prompt from the Founder's objective.
+    prompt_parts = [f"Business Objective: {request.objective}"]
+    if request.title:
+        prompt_parts.append(f"Job Title: {request.title}")
+    if request.deliverable_type:
+        prompt_parts.append(f"Expected Deliverable: {request.deliverable_type}")
+    if request.priority and request.priority != "normal":
+        prompt_parts.append(f"Priority: {request.priority}")
+    prompt = "\n".join(prompt_parts)
+
+    job_id = generate_job_id(_job_store.jobs_dir(workspace_id))
+    started_at = datetime.now(timezone.utc)
+
+    _job_store.save(Job(
+        id=job_id,
+        workspace_id=workspace_id,
+        operation_id=f"founder-{job_id}",
+        status="running",
+        started_at=started_at,
+        finished_at=started_at,
+        completed_steps=["ceo"],
+        generated_output=None,
+        created_at=started_at,
+        updated_at=started_at,
+        extra_fields=extra_fields,
+    ))
+
+    messages = [ChatMessage(role="user", content=prompt)]
+    tokens = _hermes_service.stream_chat(
+        messages,
+        workspace_id=workspace_id,
+        profile_id="ceo",
+    )
+    return StreamingResponse(
+        _sse_job_stream(tokens, job_id, workspace_id, "ceo", started_at, extra_fields),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+_VALID_JOB_DECISIONS = frozenset({"approved", "changes_requested", "rejected"})
+
+
+@app.post("/v1/workspaces/{workspace_id}/jobs/{job_id}/decision")
+async def job_decision(workspace_id: str, job_id: str, body: JobDecisionRequest) -> JSONResponse:
+    """Record a Founder decision on a completed Job.
+
+    action must be one of: approved, changes_requested, rejected.
+    notes is optional free-text from the Founder.
+    """
+    if body.action not in _VALID_JOB_DECISIONS:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": (
+                    f"Invalid action '{body.action}'. "
+                    f"Must be one of: {', '.join(sorted(_VALID_JOB_DECISIONS))}"
+                )
+            },
+        )
+
+    _hermes_service.validate_workspace(workspace_id)
+
+    try:
+        job = _job_store.load(workspace_id, job_id)
+    except Exception:
+        return JSONResponse(status_code=404, content={"error": f"Job not found: {job_id}"})
+
+    now = datetime.now(timezone.utc)
+    job.extra_fields["founder_decision"] = body.action
+    job.extra_fields["founder_notes"] = body.notes
+    job.extra_fields["founder_decided_at"] = now.isoformat()
+    job.updated_at = now
+    _job_store.save(job)
+
+    return JSONResponse(content={
+        "job_id": job_id,
+        "decision": body.action,
+        "notes": body.notes,
+        "decided_at": now.isoformat(),
+    })
 
 
 @app.get("/v1/workspaces/{workspace_id}/decisions")
