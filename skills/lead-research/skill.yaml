@@ -1,0 +1,55 @@
+id: lead-research
+name: Lead / Company Research
+version: 1.0.0
+status: active
+owner: Sales & Business Development
+department_id: sales
+
+capabilities:
+  - lead.research
+  - business.company-research
+
+description: Researches a named company as a potential AVANZIA client, synthesising
+  publicly available evidence into a structured lead intelligence report covering company
+  overview, products/services, target market, business model, leadership signals, and
+  likely AVANZIA-relevant opportunities. Every claim is sourced, labelled by confidence,
+  and gaps are explicitly stated.
+
+provides:
+  - lead intelligence report
+  - company profile
+  - commercial opportunity assessment
+
+inputs:
+  - company name (required)
+  - qualification context or question (optional)
+
+outputs:
+  - structured lead intelligence report with sourced facts, labelled inferences,
+    explicit evidence gaps, and AVANZIA opportunity signals
+
+keywords:
+  - lead
+  - leads
+  - prospect
+  - prospecting
+  - potential client
+  - potential customer
+  - potential
+  - client
+  - company research
+  - account research
+  - client research
+  - sales research
+  - business development
+  - qualify
+  - qualification
+
+sop_refs:
+  - lead-research/lead-research
+
+# Dotted path to the factory function invoked by FounderJobRouter.
+# Signature: (objective: str, workspace_id: str, conductor: Conductor) -> str
+workflow_executor: hermes.workflows.lead_research_workflow.execute_from_objective
+
+depends_on: []
