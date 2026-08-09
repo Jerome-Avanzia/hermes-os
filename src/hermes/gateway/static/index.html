@@ -1118,24 +1118,6 @@
     font-size: 13px;
   }
 
-  /* ── Profile selector ─────────────────────────────── */
-
-  #profile-select {
-    padding: 5px 8px;
-    background: var(--surface);
-    color: var(--text-muted);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    font-family: inherit;
-    font-size: 11px;
-    outline: none;
-    cursor: pointer;
-  }
-
-  #profile-select:focus {
-    border-color: var(--accent);
-  }
-
   /* ── Workspace selector ──────────────────────────── */
 
   #workspace-select {
@@ -1165,7 +1147,6 @@
     <div id="sidebar-header">Hermes Workspace</div>
 
     <div class="nav-item" data-view="search">Search</div>
-    <div class="nav-item" data-action="new-chat">New Session</div>
 
     <div class="nav-section">
       <div class="nav-section-title">Main</div>
@@ -1173,11 +1154,6 @@
       <div class="nav-item" data-view="notifications">Notifications</div>
       <div class="nav-item" data-view="brief">Brief</div>
       <div class="nav-item" data-view="chat">Chat</div>
-      <div class="nav-item" data-view="operations">Operations</div>
-      <div class="nav-item" data-view="infrastructure">Infrastructure</div>
-      <div class="nav-item" data-view="automation">Automation</div>
-      <div class="nav-item" data-view="data">Data</div>
-      <div class="nav-item" data-view="ai">AI</div>
       <div class="nav-item" data-view="impact">Impact</div>
       <div class="nav-item" data-view="readiness">Readiness</div>
       <div class="nav-item" data-view="journal">Journal</div>
@@ -1191,11 +1167,6 @@
       <div class="nav-item" data-view="goals">Goals</div>
       <div class="nav-item" data-view="people">People</div>
       <div class="nav-item" data-view="departments">Departments</div>
-      <div class="nav-item" data-view="capabilities">Capabilities</div>
-      <div class="nav-item" data-view="sops">SOPs</div>
-      <div class="nav-item" data-view="repositories">Repositories</div>
-      <div class="nav-item" data-view="mcp">MCP</div>
-      <div class="nav-item" data-view="profiles">Profiles</div>
     </div>
 
     <div class="nav-section">
@@ -1215,8 +1186,6 @@
       </div>
       <div id="topbar-right">
         <select id="workspace-select"><option value="">Select workspace</option></select>
-        <button class="topbar-btn primary" id="btn-new-chat">New Chat</button>
-        <select id="profile-select"><option value="">Loading...</option></select>
       </div>
     </div>
 
@@ -1349,7 +1318,7 @@
   var chatEmpty    = document.getElementById("chat-empty");
   var inputEl      = document.getElementById("input");
   var sendBtn      = document.getElementById("send");
-  var profileSel   = document.getElementById("profile-select");
+
   var workspaceSel = document.getElementById("workspace-select");
   var sessionsList = document.getElementById("sessions-list");
   var homeHeader      = document.getElementById("home-header");
@@ -1411,50 +1380,6 @@
       switchView(el.dataset.view);
     });
   });
-
-  // New Session / New Chat → switch to chat
-  document.querySelectorAll('[data-action="new-chat"]').forEach(function (el) {
-    el.addEventListener("click", function () {
-      history = [];
-      messagesEl.innerHTML = "";
-      chatEmpty = document.createElement("div");
-      chatEmpty.id = "chat-empty";
-      chatEmpty.textContent = "What would you like to accomplish today?";
-      messagesEl.appendChild(chatEmpty);
-      switchView("chat");
-    });
-  });
-
-  document.getElementById("btn-new-chat").addEventListener("click", function () {
-    history = [];
-    messagesEl.innerHTML = "";
-    var empty = document.createElement("div");
-    empty.id = "chat-empty";
-    empty.textContent = "What would you like to accomplish today?";
-    messagesEl.appendChild(empty);
-    switchView("chat");
-  });
-
-  // ── Load profiles ─────────────────────────────────
-
-  function loadProfiles() {
-    if (!activeWorkspaceId) return;
-    fetch(wsBase() + "/profiles")
-      .then(function (r) { return r.ok ? r.json() : []; })
-      .then(function (profiles) {
-        profileSel.innerHTML = "";
-        profiles.forEach(function (p) {
-          var opt = document.createElement("option");
-          opt.value = p.id;
-          opt.textContent = p.name;
-          if (p.id === "default") opt.selected = true;
-          profileSel.appendChild(opt);
-        });
-      })
-      .catch(function () {
-        profileSel.innerHTML = "<option value=''>Default</option>";
-      });
-  }
 
   // ── Load Workspace Home ────────────────────────────
 
@@ -5376,12 +5301,10 @@
 
     setStreaming(true);
     var assistantDiv = addMessage("assistant", "");
-    var profile = profileSel.value || undefined;
-
     fetch(wsBase() + "/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: history, profile: profile }),
+      body: JSON.stringify({ messages: history }),
     })
     .then(function (resp) {
       if (!resp.ok) {
@@ -5693,7 +5616,6 @@
     // Reload all data for new workspace
     cachedBrief = null;
     decisionActions = {};
-    loadProfiles();
     loadHome();
     loadBadges();
   }

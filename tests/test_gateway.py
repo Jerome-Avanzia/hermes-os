@@ -319,9 +319,10 @@ def test_root_serves_chat_ui():
     assert "Hermes" in resp.text
 
 
-def test_ui_contains_profile_selector():
+def test_ui_does_not_expose_profile_selector():
+    """Profile selector is an internal primitive and must not appear in the Founder UI."""
     resp = client.get("/")
-    assert "profile-select" in resp.text
+    assert "profile-select" not in resp.text
 
 
 def test_ui_contains_workspace_selector():
@@ -1254,10 +1255,10 @@ def test_jobs_detail_not_found_returns_404():
 # -- UI: Operations screen -------------------------------------------------
 
 
-def test_ui_contains_operations_nav_item():
+def test_ui_does_not_expose_operations_nav_item():
+    """Operations is an internal Hermes primitive and must not appear in the Founder sidebar."""
     resp = client.get("/")
-    assert 'data-view="operations"' in resp.text
-    assert "Operations" in resp.text
+    assert 'data-view="operations"' not in resp.text
 
 
 def test_ui_operations_view_references_operations_api():
@@ -1839,9 +1840,10 @@ def test_get_capability_not_found_returns_404():
 # -- UI: Capabilities view (Sprint 31) --------------------------------------
 
 
-def test_ui_capabilities_view_exists():
+def test_ui_capabilities_not_in_founder_nav():
+    """Capabilities nav link must not be exposed to the Founder; view panel may remain in DOM."""
     resp = client.get("/")
-    assert 'data-view="capabilities"' in resp.text
+    assert 'data-view="capabilities"' not in resp.text
     assert 'id="view-capabilities"' in resp.text
 
 
@@ -1957,9 +1959,10 @@ def test_get_sop_not_found_returns_404():
 # -- UI: SOPs view (Sprint 32) ------------------------------------------------
 
 
-def test_ui_sops_view_exists():
+def test_ui_sops_not_in_founder_nav():
+    """SOPs nav link must not be exposed to the Founder; view panel may remain in DOM."""
     resp = client.get("/")
-    assert 'data-view="sops"' in resp.text
+    assert 'data-view="sops"' not in resp.text
     assert 'id="view-sops"' in resp.text
 
 
@@ -2627,9 +2630,10 @@ def test_github_health_unconfigured():
 # -- Repository UI tests (Sprint 41) ------------------------------------------
 
 
-def test_ui_has_repositories_nav():
+def test_ui_repositories_not_in_founder_nav():
+    """Repositories nav link must not be exposed to the Founder."""
     resp = client.get("/")
-    assert 'data-view="repositories"' in resp.text
+    assert 'data-view="repositories"' not in resp.text
 
 
 def test_ui_has_repositories_view_div():
